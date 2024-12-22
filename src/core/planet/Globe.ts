@@ -43,12 +43,7 @@ export class Globe {
   private water!: Water;
   public terrainScale = 0.9;
   public noiseGenerators: { [key: string]: VoronoiNoise } = {
-    // [TerrainPresetEnum.DEEP_OCEAN]: new VoronoiNoise(TERRAIN_PRESETS[TerrainPresetEnum.DEEP_OCEAN]),
-    // [TerrainPresetEnum.OCEAN]: new VoronoiNoise(TERRAIN_PRESETS[TerrainPresetEnum.OCEAN]),
-    // [TerrainPresetEnum.SHORE]: new VoronoiNoise(TERRAIN_PRESETS[TerrainPresetEnum.SHORE]),
     [TerrainPresetEnum.PLAINS]: new VoronoiNoise(TERRAIN_PRESETS[TerrainPresetEnum.PLAINS]),
-    // [TerrainPresetEnum.HILLS]: new VoronoiNoise(TERRAIN_PRESETS[TerrainPresetEnum.HILLS]),
-    // [TerrainPresetEnum.MOUNTAINS]: new VoronoiNoise(TERRAIN_PRESETS[TerrainPresetEnum.MOUNTAINS]),
     [TerrainPresetEnum.SNOW_PEAKS]: new VoronoiNoise(TERRAIN_PRESETS[TerrainPresetEnum.SNOW_PEAKS]),
   };
 
@@ -58,7 +53,7 @@ export class Globe {
     window.addEventListener("click", (e) => {
       if (this.terrainClickAllowed) this.onClickTerrain(e);
     });
-    this.waterLevel = this.RADIUS * 1.1;
+    this.waterLevel = this.RADIUS * 1.09;
 
     this.createGlobe();
     this.generateWater();

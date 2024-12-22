@@ -99,11 +99,7 @@ export class VoronoiNoise {
   }
 
   private getBiomeValue(x: number, y: number, z: number): number {
-    const biomeNoise = this.simplexNoise.noise3d(
-      x * this.biomeScale,
-      y * this.biomeScale,
-      z * this.biomeScale
-    );
+    const biomeNoise = this.simplexNoise.noise3d(x * this.biomeScale, y * this.biomeScale, z * this.biomeScale);
     return (biomeNoise + 1) * 0.5; // Normalize to 0-1
   }
 
@@ -116,7 +112,7 @@ export class VoronoiNoise {
     const slope = this.getSlope(x, y, z);
     const rainfall = this.simplexNoise.noise3d(x * 2, y * 2, z * 2) * 0.5 + 0.5;
     const erosion = slope * rainfall * this.erosionStrength;
-    
+
     this.erosionCache.set(cacheKey, erosion);
     return erosion;
   }
@@ -127,10 +123,10 @@ export class VoronoiNoise {
     const h2 = this.getBaseHeight(x - delta, y, z);
     const h3 = this.getBaseHeight(x, y, z + delta);
     const h4 = this.getBaseHeight(x, y, z - delta);
-    
+
     const dx = (h1 - h2) / (2 * delta);
     const dz = (h3 - h4) / (2 * delta);
-    
+
     return Math.sqrt(dx * dx + dz * dz);
   }
 
@@ -143,13 +139,9 @@ export class VoronoiNoise {
   private getMountainRange(x: number, y: number, z: number): number {
     const angle = Math.atan2(z, x);
     const distance = Math.sqrt(x * x + z * z);
-    
-    const rangeNoise = this.simplexNoise.noise3d(
-      Math.cos(angle) * distance * 0.02,
-      y * 0.02,
-      Math.sin(angle) * distance * 0.02
-    );
-    
+
+    const rangeNoise = this.simplexNoise.noise3d(Math.cos(angle) * distance * 0.02, y * 0.02, Math.sin(angle) * distance * 0.02);
+
     return Math.pow(Math.max(0, rangeNoise), 2) * 2;
   }
 
@@ -176,12 +168,7 @@ export class VoronoiNoise {
     const fractalNoise = this.simplexNoise.noise3d(wx * 1.5, wy * 1.5, wz * 1.5) * 0.3;
 
     // Blend base terrain
-    let value = voronoiValue * this.blendFactor + 
-                ridgeNoise * (1 - this.blendFactor) + 
-                mountainRange * 0.5 +
-                turbulence + 
-                fractalNoise + 
-                rotation * 0.4;
+    let value = voronoiValue * this.blendFactor + ridgeNoise * (1 - this.blendFactor) + mountainRange * 0.5 + turbulence + fractalNoise + rotation * 0.4;
 
     // Apply erosion
     const erosion = this.getErosion(wx, wy, wz);
@@ -225,11 +212,7 @@ export class VoronoiNoise {
 
   private getRotationalVariance(x: number, y: number, z: number): number {
     const angle = Math.atan2(z, x);
-    const rotationalNoise = this.simplexNoise.noise3d(
-      Math.cos(angle) * 0.5,
-      y * 0.3,
-      Math.sin(angle) * 0.5
-    );
+    const rotationalNoise = this.simplexNoise.noise3d(Math.cos(angle) * 0.5, y * 0.3, Math.sin(angle) * 0.5);
 
     return rotationalNoise * this.turbulence;
   }
