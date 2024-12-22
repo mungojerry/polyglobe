@@ -1,0 +1,495 @@
+import RAPIER, { EventQueue, RigidBody, Vector3, World } from "@dimforge/rapier3d";
+import * as THREE from "three";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { controlManager } from "../managers/controlManager";
+import { debugManager } from "../managers/debugManager";
+import { modelGroups, ObjectManager } from "../managers/ObjectManager";
+import { Cloud } from "../objects/Cloud";
+import { FlyingObject } from "../objects/FlyingObject";
+import { Moon } from "../objects/Moon";
+import { Player } from "../objects/Player";
+import { Stars } from "../objects/Stars";
+import { Sun } from "../objects/Sun";
+import { Globe } from "../planet/Globe";
+import { MiniGlobe } from "../planet/MiniGlobe";
+import { TerrainPresetEnum } from "../planet/TerrainPresets";
+import { VoronoiNoise } from "../planet/VoroniNoise";
+import { pseudoRandom } from "../utils/PseudoRandom";
+import { BulletGenerator } from "../weapons/BulletGenerator";
+
+const config = {
+  numUFOs: 1,
+  dayNightCycle: {
+    rotationSpeed: 0.00005,
+    currentAngle: 0,
+    dayColor: new THREE.Color(0x448ee4),
+    nightColor: new THREE.Color(0x000000),
+    skyColor: new THREE.Color(0, 0, 0),
+  },
+};
+
+export class GameScene {
+  private world: World;
+  private cameraAttachedTo: THREE.Object3D;
+  private dynamicBodies: { mesh: THREE.Object3D; body: RAPIER.RigidBody }[] = [];
+  private eventQueue: EventQueue;
+  private scene: THREE.Scene;
+  private camera: THREE.PerspectiveCamera;
+  private renderer: THREE.WebGLRenderer;
+  private bodyMeshes: any[] = [];
+  private controls: OrbitControls;
+  private globe: Globe;
+  private player: Player;
+  private debugMesh: THREE.LineSegments;
+  private orbitCoontrols: boolean = true;
+  private clouds: Cloud[] = [];
+  private currentTerrainType: TerrainPresetEnum = TerrainPresetEnum.PLAINS;
+  private currentGenerator: VoronoiNoise;
+  private stars: Stars;
+  private objectManager: ObjectManager;
+  private sun!: Sun;
+  private moon!: Moon;
+  private flyingObjects: FlyingObject[] = [];
+  private miniGlobe: MiniGlobe;
+  private currentLookAt = new THREE.Vector3();
+  private currentPosition = new THREE.Vector3();
+  private offset = new THREE.Vector3(0, 2, -3);
+  private debugEnabled: boolean = false;
+  private readonly GRAVITY_FUDGE: number = 0.01;
+  private readonly G = 9.81 * this.GRAVITY_FUDGE;
+  private readonly tempVec = new THREE.Vector3();
+
+  constructor() {
+    this.world = new World(new Vector3(0, 0, 0));
+    this.eventQueue = new EventQueue(false);
+    this.scene = new THREE.Scene();
+    this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
+    this.renderer = new THREE.WebGLRenderer();
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.renderer.toneMapping = THREE.CineonToneMapping;
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+    document.body.appendChild(this.renderer.domElement);
+
+    this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+    this.controls.enableDamping = true;
+    this.controls.dampingFactor = 0.05;
+    this.controls.enableZoom = true;
+
+    const ambientLight = new THREE.AmbientLight(0xffffd0, 0.2);
+    this.scene.add(ambientLight);
+
+    this.globe = this.createGlobe();
+    this.scene.add(this.globe.getObject());
+
+    this.miniGlobe = new MiniGlobe(this.globe.getLandGeometry(), this.camera, 200, 200);
+
+    this.currentGenerator = this.globe.noiseGenerators[this.currentTerrainType];
+    this.dynamicBodies = [];
+    this.player = new Player(this.scene, this.world, this.generateRandomPosition(this.globe.getRadius() * 1.3));
+    this.cameraAttachedTo = this.player.getObject();
+    this.bodyMeshes.push(this.player.getObject());
+    this.dynamicBodies.push({ body: this.player.getBody(), mesh: this.player.getObject() });
+    this.camera.position.set(0, 400, 0);
+    this.sun = new Sun(this.globe, this.scene, this.globe.getRadius() * 2.4);
+    this.moon = new Moon(this.scene, this.globe.getRadius() * 2.4);
+
+    this.debugMesh = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xffffff, vertexColors: true }));
+    this.debugMesh.frustumCulled = false;
+    this.scene.add(this.debugMesh);
+    this.debugMesh.visible = this.debugEnabled;
+
+    this.stars = new Stars(this.globe.getRadius() * 5);
+    this.scene.add(this.stars.getObject());
+
+    this.objectManager = new ObjectManager(this.globe, this.scene);
+    this.objectManager.placeObjects(modelGroups);
+    // this.initializeWorldObjects();
+
+    this.initializeFlyingObjects();
+
+    this.miniGlobe.addMarkers([this.player], 0x00ff00);
+    this.miniGlobe.addMarkers([...this.flyingObjects], 0xff0000);
+
+    this.animate();
+    this.setupControls();
+
+    this.renderer.toneMapping = THREE.CineonToneMapping;
+
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "p") {
+        this.toggleDebugView();
+      }
+    });
+  }
+
+  // private async initializeWorldObjects(): Promise<void> {
+  //   try {
+  //     await this.objectManager.placeModels(STRUCTURES.find((s) => s.type === StructureType.Forest)!);
+  //     await this.objectManager.placeModels(STRUCTURES.find((s) => s.type === StructureType.PineForest)!);
+  //     await this.objectManager.placeModels(STRUCTURES.find((s) => s.type === StructureType.Village)!);
+  //     await this.objectManager.placeModels(STRUCTURES.find((s) => s.type === StructureType.Cemetery)!);
+  //   } catch (error) {
+  //     console.error("Error initializing world objects:", error);
+  //   }
+  // }
+
+  private createGlobe(): Globe {
+    const globe = new Globe(this.camera, this.scene, this.world);
+
+    for (let i = 0; i < 40; i++) {
+      this.clouds.push(new Cloud(globe.getRadius() * 1.25, this.scene));
+    }
+    const globeObject = globe.getObject();
+    globeObject.traverse((object) => {
+      if (object instanceof THREE.Mesh) {
+        object.castShadow = true;
+        object.receiveShadow = true;
+      }
+    });
+    return globe;
+  }
+
+  private updateDayNightCycle(): void {
+    config.dayNightCycle.currentAngle += config.dayNightCycle.rotationSpeed;
+
+    const cameraPos = this.camera.position.clone();
+    const cameraUp = cameraPos.clone().normalize();
+    const sunPos = this.sun.getObject().position;
+    const cameraToSun = sunPos.clone().sub(cameraPos).normalize();
+    const angle = cameraUp.angleTo(cameraToSun);
+    const normalizedAngle = Math.min(Math.max(angle / Math.PI, 0), 1);
+    const normalizedHeight = 1 - normalizedAngle;
+
+    const dayNightMix = Math.pow(normalizedHeight, 1.5);
+    config.dayNightCycle.skyColor.lerpColors(config.dayNightCycle.nightColor, config.dayNightCycle.dayColor, dayNightMix);
+    this.scene.fog?.color.copy(config.dayNightCycle.skyColor);
+    this.renderer.setClearColor(config.dayNightCycle.skyColor);
+    const stars = this.stars.getObject();
+    if (stars && stars.material) {
+      if (Array.isArray(stars.material)) {
+        stars.material.forEach((material) => {
+          if ("transparent" in material) {
+            material.transparent = true;
+            material.opacity = THREE.MathUtils.lerp(0.5, 0, dayNightMix);
+            material.needsUpdate = true;
+          }
+        });
+      } else {
+        const material = stars.material as THREE.Material;
+        if ("transparent" in material) {
+          (material as any).transparent = true;
+          (material as any).opacity = THREE.MathUtils.lerp(0.5, 0, dayNightMix);
+          material.needsUpdate = true;
+        }
+      }
+    }
+  }
+
+  private updateDebugVisualization(): void {
+    const { vertices, colors } = this.world.debugRender();
+    this.debugMesh.geometry.setAttribute("position", new THREE.BufferAttribute(vertices, 3));
+    this.debugMesh.geometry.setAttribute("color", new THREE.BufferAttribute(colors, 4));
+  }
+
+  private toggleDebugView(): void {
+    this.debugEnabled = !this.debugEnabled;
+    if (this.debugEnabled) {
+      this.updateDebugVisualization();
+      this.debugMesh.visible = true;
+    } else {
+      this.debugMesh.visible = false;
+    }
+  }
+
+  private applyGravity(body: RigidBody): void {
+    if (!body || !body.isDynamic()) return;
+
+    const position = body.translation();
+    this.tempVec.set(position.x, position.y, position.z);
+    this.tempVec.normalize();
+
+    const forceMagnitude = this.G * body.mass();
+    const force = new RAPIER.Vector3(-this.tempVec.x * forceMagnitude, -this.tempVec.y * forceMagnitude, -this.tempVec.z * forceMagnitude);
+
+    body.applyImpulse(force, true);
+    if (body === this.player.getBody()) {
+      this.player.updateGravityArrow(force);
+    }
+  }
+
+  private generateRandomPosition(minDistance: number): THREE.Vector3 {
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+
+    const x = minDistance * Math.sin(phi) * Math.cos(theta);
+    const y = minDistance * Math.sin(phi) * Math.sin(theta);
+    const z = minDistance * Math.cos(phi);
+
+    return new THREE.Vector3(x, y, z);
+  }
+
+  private initializeFlyingObjects(): void {
+    const globeRadius = this.globe.getRadius();
+    const minDistance = globeRadius * 1.3;
+    for (let i = 0; i < config.numUFOs; i++) {
+      const position = this.generateRandomPosition(minDistance);
+      const flyingObject = new FlyingObject(this.scene, this.world, position, this.globe, this.player);
+      this.flyingObjects.push(flyingObject);
+    }
+  }
+
+  private animate(): void {
+    const step = () => {
+      if (this.player.getObject()) {
+        this.world.step(this.eventQueue);
+        this.applyGravityToObjects();
+        this.clouds.forEach((cloud) => cloud.animateCloud());
+        this.globe.update(this.camera, 1);
+        this.player.update(this.camera);
+        this.updateDayNightCycle();
+        // this.objectManager.update(this.camera);
+        if (this.orbitCoontrols) this.controls.update();
+        else this.updateCamera(this.cameraAttachedTo.position.clone(), this.cameraAttachedTo.quaternion.clone());
+        BulletGenerator.getInstance(this.world).update(1);
+        const camPos = this.camera.position;
+
+        this.dynamicBodies.forEach(({ mesh, body }) => {
+          const position = body.translation();
+          mesh.position.set(position.x, position.y, position.z);
+          const rotation = body.rotation();
+          mesh.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
+        });
+
+        debugManager.set("camera", "Cam: " + camPos.x.toFixed(2) + "," + camPos.y.toFixed(2) + "," + camPos.z.toFixed(2));
+        if (this.debugMesh?.visible) {
+          this.updateDebugVisualization();
+        }
+        this.flyingObjects.forEach((flyingObject) => flyingObject.update(this.camera));
+      }
+      this.miniGlobe.update();
+      this.renderer.render(this.scene, this.camera);
+      debugManager.set("polys", "Polys: " + this.renderer.info.render.triangles);
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
+
+  private applyGravityToObjects(): void {
+    this.dynamicBodies.forEach(({ body }) => {
+      this.applyGravity(body);
+    });
+    this.flyingObjects.forEach((flyingObject) => {
+      this.applyGravity(flyingObject.getBody());
+    });
+  }
+
+  private updateCamera(position: THREE.Vector3, playerRotation: THREE.Quaternion): void {
+    const up = position.clone().normalize();
+    const forward = new THREE.Vector3(0, 0, 1);
+    forward.applyQuaternion(playerRotation);
+    const right = new THREE.Vector3().crossVectors(up, forward).normalize();
+    forward.crossVectors(right, up).normalize();
+
+    const targetPosition = position.clone();
+    targetPosition.add(up.multiplyScalar(this.offset.y));
+    targetPosition.add(forward.multiplyScalar(this.offset.z));
+    const cameraLerp = 0.72;
+
+    this.currentPosition.lerp(targetPosition, cameraLerp);
+    this.camera.position.copy(this.currentPosition);
+    this.currentLookAt.lerp(position, cameraLerp);
+    this.camera.lookAt(this.currentLookAt);
+    this.camera.up.copy(up);
+  }
+
+  private setupControls(): void {
+    controlManager.addButton("rebuild", "Rebuild globe", () => {
+      this.globe.createGlobe();
+    });
+    controlManager.addButton("random", "Randomise globe", () => {
+      pseudoRandom.setSeed(performance.now());
+      this.globe.createGlobe();
+    });
+    controlManager.addSlider(
+      "terrainscale",
+      "Terrain scale: ",
+      () => this.globe.terrainScale,
+      (value) => {
+        this.globe.terrainScale = value as number;
+      },
+      0,
+      2,
+      0.01
+    );
+
+    controlManager.addCheckbox(
+      "orbit",
+      "Orbit camera: ",
+      () => this.orbitCoontrols,
+      (value) => {
+        this.orbitCoontrols = value as boolean;
+      }
+    );
+    controlManager.addCheckbox(
+      "infextion",
+      "Run infection: ",
+      () => this.globe.runInfection,
+      (value) => {
+        this.globe.runInfection = value as boolean;
+      }
+    );
+    controlManager.addCheckbox(
+      "deform",
+      "Click deform: ",
+      () => this.globe.terrainClickAllowed,
+      (value) => {
+        this.globe.terrainClickAllowed = value as boolean;
+      }
+    );
+    controlManager.addDropdown(
+      "cmaera",
+      "Camera: ",
+      () => "Player",
+      (value) => {
+        this.cameraAttachedTo = value === "Player" ? this.player.getObject() : this.flyingObjects[parseInt(value.replace("UFO #", ""))].getObject();
+      },
+      ["Player", ...this.flyingObjects.map((_, index) => "UFO #" + index)]
+    );
+
+    controlManager.addDropdown(
+      "terrain",
+      "Terrain: ",
+      () => Object.keys(this.globe.noiseGenerators)[0],
+      (value) => {
+        this.currentTerrainType = value as TerrainPresetEnum;
+        this.currentGenerator = this.globe.noiseGenerators[this.currentTerrainType];
+        controlManager.updateDisplay(Object.keys(this.currentGenerator));
+      },
+      Object.keys(this.globe.noiseGenerators)
+    );
+
+    controlManager.addSlider(
+      "cellSize",
+      "Cell Size",
+      () => this.currentGenerator.cellSize,
+      (value) => {
+        this.currentGenerator.cellSize = value as number;
+      },
+      0,
+      20,
+      1
+    );
+
+    controlManager.addSlider(
+      "jitter",
+      "Jitter",
+      () => this.currentGenerator.jitter,
+      (value) => {
+        this.currentGenerator.jitter = value as number;
+      },
+      0,
+      1,
+      0.05
+    );
+
+    controlManager.addSlider(
+      "amplitude",
+      "Amplitude",
+      () => this.currentGenerator.amplitude,
+      (value) => {
+        this.currentGenerator.amplitude = value as number;
+      },
+      0,
+      3,
+      0.1
+    );
+
+    controlManager.addSlider(
+      "blendFactor",
+      "Blend Factor",
+      () => this.currentGenerator.blendFactor,
+      (value) => {
+        this.currentGenerator.blendFactor = value as number;
+      },
+      0,
+      1,
+      0.05
+    );
+
+    controlManager.addSlider(
+      "octaves",
+      "Octaves",
+      () => this.currentGenerator.octaves,
+      (value) => {
+        Object.values(this.globe.noiseGenerators).forEach((noise) => {
+          noise.octaves = value as number;
+        });
+      },
+      1,
+      8,
+      1
+    );
+
+    controlManager.addSlider(
+      "persistence",
+      "Persistence",
+      () => this.currentGenerator.persistence,
+      (value) => {
+        this.currentGenerator.persistence = value as number;
+      },
+      0,
+      1,
+      0.05
+    );
+
+    controlManager.addSlider(
+      "lacunarity",
+      "Lacunarity",
+      () => this.currentGenerator.lacunarity,
+      (value) => {
+        this.currentGenerator.lacunarity = value as number;
+      },
+      1,
+      3,
+      0.1
+    );
+
+    controlManager.addSlider(
+      "warpStrength",
+      "Warp Strength",
+      () => this.currentGenerator.warpStrength,
+      (value) => {
+        this.currentGenerator.warpStrength = value as number;
+      },
+      0,
+      1,
+      0.05
+    );
+
+    controlManager.addSlider(
+      "ridgeOffset",
+      "Ridge Offset",
+      () => this.currentGenerator.ridgeOffset,
+      (value) => {
+        this.currentGenerator.ridgeOffset = value as number;
+      },
+      0,
+      2,
+      0.05
+    );
+
+    controlManager.addSlider(
+      "turbulence",
+      "Turbulence",
+      () => this.currentGenerator.turbulence,
+      (value) => {
+        this.currentGenerator.turbulence = value as number;
+      },
+      0,
+      1,
+      0.05
+    );
+  }
+}

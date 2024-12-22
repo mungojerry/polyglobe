@@ -1,0 +1,91 @@
+* {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  overflow: hidden;
+  font-size: 12px;
+}
+
+canvas {
+  display: block;
+}
+#holder {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+}
+
+#instructions {
+  background: rgba(0, 0, 0, 0.7);
+  color: white;
+  padding: 15px;
+  border-radius: 5px;
+  font-family: Arial, sans-serif;
+}
+
+#instructions h2 {
+  margin-bottom: 10px;
+}
+
+#instructions p {
+  margin: 5px 0;
+}
+
+#debugText {
+  padding: 15px;
+  color: white;
+  background-color: rgba(0, 0, 0, 0.7);
+  border-radius: 5px;
+  font-family: Arial, sans-serif;
+  margin: 5px 0;
+}
+#controlPanel {
+  padding: 15px;
+  color: white;
+  background-color: rgba(0, 0, 0, 0.7);
+  border-radius: 5px;
+  font-family: Arial, sans-serif;
+  margin: 5px 0;
+}
+
+#controlPanel label {
+  padding-right: 6px;
+}
+
+.control-wrapper {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 15px;
+}
+.dropdown-container {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.slider-container {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.slider-input {
+  flex: 1;
+}
+.slider-value {
+  min-width: 40px;
+  text-align: right;
+}
+.slider-min,
+.slider-max {
+  color: #666;
+  font-size: 0.8em;
+}
+.button-container {
+  padding: 6px;
+  border: 1;
+  border-radius: 8px;
+}
