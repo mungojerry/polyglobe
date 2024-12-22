@@ -110,7 +110,7 @@ export const modelGroups: ModelGroup[] = [
     spacing: 50,
     maxSlope: 1.2,
     biomes: [BiomeName.Land],
-    numInCluster: 40,
+    numInCluster: 30,
   },
   {
     type: StructureType.PineForest,
@@ -146,8 +146,7 @@ export class ObjectManager {
   private landVertices: CachedLandVertex[] = [];
   private spatialGrid: SpatialHashGrid;
   private tempVector: THREE.Vector3;
-  private tempMatrix: THREE.Matrix4;
-  private tempQuaternion: THREE.Quaternion;
+
   private upVector: THREE.Vector3;
   private matrixPool: THREE.Matrix4[];
   private quaternionPool: THREE.Quaternion[];
@@ -162,8 +161,6 @@ export class ObjectManager {
     this.instanceCounts = new Map();
 
     this.tempVector = new THREE.Vector3();
-    this.tempMatrix = new THREE.Matrix4();
-    this.tempQuaternion = new THREE.Quaternion();
     this.upVector = new THREE.Vector3(0, 1, 0);
 
     this.matrixPool = Array(10000)
