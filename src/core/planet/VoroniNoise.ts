@@ -15,9 +15,14 @@ export class VoronoiNoise {
   public warpStrength: number;
   public ridgeOffset: number;
   public turbulence: number;
+  public erosionStrength: number;
+  public plateauThreshold: number;
+  public biomeScale: number;
   private simplexNoise: SimplexNoise;
   private spatialGrid: Map<string, THREE.Vector3[]>;
   private cachedResults: Map<string, THREE.Vector3[]>;
+  private voronoiCache: Map<string, number>;
+  private erosionCache: Map<string, number>;
 
   constructor({
     name = "voroni",
@@ -31,6 +36,9 @@ export class VoronoiNoise {
     warpStrength = 0.4,
     ridgeOffset = 1.0,
     turbulence = 0.3,
+    erosionStrength = 0.3,
+    plateauThreshold = 0.7,
+    biomeScale = 0.5,
   } = {}) {
     this.name = name;
     this.points = [];
@@ -44,9 +52,14 @@ export class VoronoiNoise {
     this.warpStrength = warpStrength;
     this.ridgeOffset = ridgeOffset;
     this.turbulence = turbulence;
+    this.erosionStrength = erosionStrength;
+    this.plateauThreshold = plateauThreshold;
+    this.biomeScale = biomeScale;
     this.simplexNoise = new SimplexNoise();
     this.spatialGrid = new Map();
     this.cachedResults = new Map();
+    this.voronoiCache = new Map();
+    this.erosionCache = new Map();
     this.generatePoints();
     this.initSpatialGrid();
   }
@@ -68,7 +81,7 @@ export class VoronoiNoise {
   }
 
   private initSpatialGrid() {
-    // Index all points into grid cells
+    this.spatialGrid.clear();
     this.points.forEach((point) => {
       const cell = this.getCellKey(new THREE.Vector3(point[0], point[1], point[2]));
       if (!this.spatialGrid.has(cell)) {
@@ -85,8 +98,143 @@ export class VoronoiNoise {
     return `${x},${y},${z}`;
   }
 
+  private getBiomeValue(x: number, y: number, z: number): number {
+    const biomeNoise = this.simplexNoise.noise3d(
+      x * this.biomeScale,
+      y * this.biomeScale,
+      z * this.biomeScale
+    );
+    return (biomeNoise + 1) * 0.5; // Normalize to 0-1
+  }
+
+  private getErosion(x: number, y: number, z: number): number {
+    const cacheKey = `${(x / 0.1).toFixed(1)},${(y / 0.1).toFixed(1)},${(z / 0.1).toFixed(1)}`;
+    if (this.erosionCache.has(cacheKey)) {
+      return this.erosionCache.get(cacheKey)!;
+    }
+
+    const slope = this.getSlope(x, y, z);
+    const rainfall = this.simplexNoise.noise3d(x * 2, y * 2, z * 2) * 0.5 + 0.5;
+    const erosion = slope * rainfall * this.erosionStrength;
+    
+    this.erosionCache.set(cacheKey, erosion);
+    return erosion;
+  }
+
+  private getSlope(x: number, y: number, z: number): number {
+    const delta = 0.1;
+    const h1 = this.getBaseHeight(x + delta, y, z);
+    const h2 = this.getBaseHeight(x - delta, y, z);
+    const h3 = this.getBaseHeight(x, y, z + delta);
+    const h4 = this.getBaseHeight(x, y, z - delta);
+    
+    const dx = (h1 - h2) / (2 * delta);
+    const dz = (h3 - h4) / (2 * delta);
+    
+    return Math.sqrt(dx * dx + dz * dz);
+  }
+
+  private getBaseHeight(x: number, y: number, z: number): number {
+    const voronoiValue = this.getVoronoiValue(x, y, z);
+    const ridgeNoise = this.getRidgeNoise(x * 1.1, y * 0.9, z * 1.2);
+    return voronoiValue * this.blendFactor + ridgeNoise * (1 - this.blendFactor);
+  }
+
+  private getMountainRange(x: number, y: number, z: number): number {
+    const angle = Math.atan2(z, x);
+    const distance = Math.sqrt(x * x + z * z);
+    
+    const rangeNoise = this.simplexNoise.noise3d(
+      Math.cos(angle) * distance * 0.02,
+      y * 0.02,
+      Math.sin(angle) * distance * 0.02
+    );
+    
+    return Math.pow(Math.max(0, rangeNoise), 2) * 2;
+  }
+
+  private getPlateau(height: number): number {
+    if (height > this.plateauThreshold) {
+      const t = (height - this.plateauThreshold) / (1 - this.plateauThreshold);
+      return this.plateauThreshold + (1 - Math.pow(1 - t, 3)) * (1 - this.plateauThreshold);
+    }
+    return height;
+  }
+
+  public getValue(x: number, y: number, z: number): number {
+    // Add rotation-based warping
+    const rotation = this.getRotationalVariance(x, y, z);
+    const wx = x + this.warpStrength * (this.simplexNoise.noise3d(x, y, z) + rotation);
+    const wy = y + this.warpStrength * (this.simplexNoise.noise3d(y, z, x) + rotation * 0.5);
+    const wz = z + this.warpStrength * (this.simplexNoise.noise3d(z, x, y) + rotation);
+
+    // Get base terrain components
+    const voronoiValue = this.getVoronoiValue(wx, wy, wz);
+    const ridgeNoise = this.getRidgeNoise(wx * 1.1, wy * 0.9, wz * 1.2);
+    const mountainRange = this.getMountainRange(wx, wy, wz);
+    const turbulence = this.getTurbulence(wx, wy, wz);
+    const fractalNoise = this.simplexNoise.noise3d(wx * 1.5, wy * 1.5, wz * 1.5) * 0.3;
+
+    // Blend base terrain
+    let value = voronoiValue * this.blendFactor + 
+                ridgeNoise * (1 - this.blendFactor) + 
+                mountainRange * 0.5 +
+                turbulence + 
+                fractalNoise + 
+                rotation * 0.4;
+
+    // Apply erosion
+    const erosion = this.getErosion(wx, wy, wz);
+    value -= erosion;
+
+    // Apply plateau formation
+    value = this.getPlateau(value);
+
+    // Apply biome variation
+    const biomeValue = this.getBiomeValue(wx, wy, wz);
+    value *= 0.8 + biomeValue * 0.4;
+
+    return value;
+  }
+
+  // ... (keeping the rest of the existing methods unchanged: getNearbyPoints, getNeighborCells, getTurbulence, getRidgeNoise, getRotationalVariance, getVoronoiValue)
+  private getTurbulence(x: number, y: number, z: number): number {
+    return this.simplexNoise.noise3d(x * 2.0, y * 2.0, z * 2.0) * this.turbulence;
+  }
+
+  private getRidgeNoise(x: number, y: number, z: number): number {
+    let value = 0;
+    let frequency = 1;
+    let amplitude = 1;
+    let weight = 1;
+    const gain = 2.0;
+
+    for (let i = 0; i < this.octaves; i++) {
+      let n = Math.abs(this.simplexNoise.noise3d(x * frequency, y * frequency, z * frequency));
+      n = this.ridgeOffset - n;
+      n = n * n;
+
+      value += n * amplitude * weight;
+      frequency *= this.lacunarity;
+      amplitude *= this.persistence;
+      weight = n * gain;
+    }
+
+    return value * this.amplitude;
+  }
+
+  private getRotationalVariance(x: number, y: number, z: number): number {
+    const angle = Math.atan2(z, x);
+    const rotationalNoise = this.simplexNoise.noise3d(
+      Math.cos(angle) * 0.5,
+      y * 0.3,
+      Math.sin(angle) * 0.5
+    );
+
+    return rotationalNoise * this.turbulence;
+  }
+
   getNearbyPoints(position: THREE.Vector3, maxCount: number = 4): THREE.Vector3[] {
-    // Check cache first with lower precision key
     const key = `${Math.floor(position.x * 10)},${Math.floor(position.y * 10)},${Math.floor(position.z * 10)}_${maxCount}`;
     if (this.cachedResults.has(key)) {
       return this.cachedResults.get(key)!;
@@ -94,8 +242,6 @@ export class VoronoiNoise {
 
     const cell = this.getCellKey(position);
     const neighborCells = this.getNeighborCells(cell);
-
-    // Pre-allocate array
     const candidates: Array<{ point: THREE.Vector3; distSq: number }> = [];
     const tempVec = vectorPool.getVector();
 
@@ -116,7 +262,6 @@ export class VoronoiNoise {
 
     const result = candidates.map((c) => c.point);
     this.cachedResults.set(key, result);
-
     vectorPool.releaseVector(tempVec);
     return result;
   }
@@ -125,7 +270,6 @@ export class VoronoiNoise {
     const [x, y, z] = cell.split(",").map(Number);
     const neighbors: string[] = [];
 
-    // Check immediate neighbors only
     for (let dx = -1; dx <= 1; dx++) {
       for (let dy = -1; dy <= 1; dy++) {
         for (let dz = -1; dz <= 1; dz++) {
@@ -136,72 +280,6 @@ export class VoronoiNoise {
     return neighbors;
   }
 
-  private getTurbulence(x: number, y: number, z: number): number {
-    return this.simplexNoise.noise3d(x * 2.0, y * 2.0, z * 2.0) * this.turbulence;
-  }
-
-  private getRidgeNoise(x: number, y: number, z: number): number {
-    let value = 0;
-    let frequency = 1;
-    let amplitude = 1;
-    let weight = 1;
-    const gain = 2.0; // Controls ridge sharpness
-
-    for (let i = 0; i < this.octaves; i++) {
-      // Get absolute noise value
-      let n = Math.abs(this.simplexNoise.noise3d(x * frequency, y * frequency, z * frequency));
-
-      // Invert and shape the noise into ridges
-      n = this.ridgeOffset - n;
-      n = n * n; // Square for sharper ridges
-
-      // Apply gain and weight
-      value += n * amplitude * weight;
-
-      // Update frequency and amplitude for next octave
-      frequency *= this.lacunarity;
-      amplitude *= this.persistence;
-
-      // Adjust weight based on previous noise value
-      weight = n * gain;
-    }
-
-    // Normalize the output
-    return value * this.amplitude;
-  }
-
-  private getRotationalVariance(x: number, y: number, z: number): number {
-    // Create rotational variation based on position
-    const angle = Math.atan2(z, x);
-    const rotationalNoise = this.simplexNoise.noise3d(Math.cos(angle) * 0.5, y * 0.3, Math.sin(angle) * 0.5);
-
-    return rotationalNoise * this.turbulence;
-  }
-
-  // Modify getValue method to include rotational variance
-  public getValue(x: number, y: number, z: number): number {
-    // Add rotation-based warping
-    const rotation = this.getRotationalVariance(x, y, z);
-    const wx = x + this.warpStrength * (this.simplexNoise.noise3d(x, y, z) + rotation);
-    const wy = y + this.warpStrength * (this.simplexNoise.noise3d(y, z, x) + rotation * 0.5);
-    const wz = z + this.warpStrength * (this.simplexNoise.noise3d(z, x, y) + rotation);
-
-    // Get base noise with added complexity
-    const voronoiValue = this.getVoronoiValue(wx, wy, wz);
-    const ridgeNoise = this.getRidgeNoise(wx * 1.1, wy * 0.9, wz * 1.2);
-    const turbulence = this.getTurbulence(wx, wy, wz);
-
-    // Add fractal variation
-    const fractalNoise = this.simplexNoise.noise3d(wx * 1.5, wy * 1.5, wz * 1.5) * 0.3;
-
-    // Blend all components with rotation influence
-    const value = voronoiValue * this.blendFactor + ridgeNoise * (1 - this.blendFactor) + turbulence + fractalNoise + rotation * 0.4;
-
-    return value;
-  }
-
-  private voronoiCache: Map<string, number> = new Map();
-
   private getVoronoiValue(x: number, y: number, z: number): number {
     const cacheKey = `${(x / 0.1).toFixed(1)},${(y / 0.1).toFixed(1)},${(z / 0.1).toFixed(1)}`;
     if (this.voronoiCache.has(cacheKey)) {
@@ -211,7 +289,6 @@ export class VoronoiNoise {
     let minDistSq = Infinity;
     let secondMinDistSq = Infinity;
     const v = vectorPool.getVector(x, y, z);
-    // Get only nearby points
     const nearbyPoints = this.getNearbyPoints(v);
     vectorPool.releaseVector(v);
 
