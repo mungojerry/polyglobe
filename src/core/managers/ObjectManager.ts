@@ -28,17 +28,6 @@ export enum PlacementBehavior {
   InGroup,
 }
 
-export interface ModelGroup {
-  primary: ModelType[];
-  secondary?: ModelType[];
-  placement: PlacementBehavior;
-  type: StructureType;
-  spacing: number;
-  maxSlope?: number;
-  biomes?: BiomeName[];
-  numInCluster: number;
-}
-
 export interface ModelType {
   name: string;
   filename: string;
@@ -47,6 +36,69 @@ export interface ModelType {
   maxSlope?: number;
   useCollision?: boolean;
   nearTypes?: string[];
+}
+
+export interface ModelGroup {
+  primary: ModelType[];
+  secondary?: ModelType[];
+  placement: PlacementBehavior;
+  type: StructureType;
+  spacing?: number;
+  maxSlope?: number;
+  biomes?: BiomeName[];
+  numInCluster?: number;
+}
+
+interface CachedLandVertex {
+  position: THREE.Vector3;
+  normal: THREE.Vector3;
+  cellKey: string;
+}
+
+class SpatialHashGrid {
+  private cells: Map<string, CachedLandVertex[]>;
+  private cellSize: number;
+
+  constructor(cellSize: number) {
+    this.cells = new Map();
+    this.cellSize = cellSize;
+  }
+
+  private getCellKey(position: THREE.Vector3): string {
+    const x = Math.floor(position.x / this.cellSize);
+    const y = Math.floor(position.y / this.cellSize);
+    const z = Math.floor(position.z / this.cellSize);
+    return `${x},${y},${z}`;
+  }
+
+  add(vertex: CachedLandVertex): void {
+    const key = this.getCellKey(vertex.position);
+    vertex.cellKey = key;
+    if (!this.cells.has(key)) {
+      this.cells.set(key, []);
+    }
+    this.cells.get(key)!.push(vertex);
+  }
+
+  getNearby(position: THREE.Vector3, radius: number): CachedLandVertex[] {
+    const cellRadius = Math.ceil(radius / this.cellSize);
+    const centerKey = this.getCellKey(position);
+    const [cx, cy, cz] = centerKey.split(",").map(Number);
+    const nearby: CachedLandVertex[] = [];
+
+    for (let x = -cellRadius; x <= cellRadius; x++) {
+      for (let y = -cellRadius; y <= cellRadius; y++) {
+        for (let z = -cellRadius; z <= cellRadius; z++) {
+          const key = `${cx + x},${cy + y},${cz + z}`;
+          const cell = this.cells.get(key);
+          if (cell) {
+            nearby.push(...cell.filter((v) => v.position.distanceTo(position) <= radius));
+          }
+        }
+      }
+    }
+    return nearby;
+  }
 }
 
 export const modelGroups: ModelGroup[] = [
@@ -70,6 +122,17 @@ export const modelGroups: ModelGroup[] = [
     biomes: [BiomeName.Land],
     numInCluster: 40,
   },
+
+  {
+    type: StructureType.Wilderness,
+    primary: [{ name: "Grass", filename: "Grass", files: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], numInstances: 20000 }],
+    placement: PlacementBehavior.Random,
+  },
+  {
+    type: StructureType.Wilderness,
+    primary: [{ name: "Rock", filename: "Rock", files: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19], numInstances: 5000 }],
+    placement: PlacementBehavior.Random,
+  },
 ];
 
 export class ObjectManager {
@@ -79,7 +142,16 @@ export class ObjectManager {
   private scene: THREE.Scene;
   private instancedMeshes: Map<string, THREE.InstancedMesh>;
   private instanceCounts: Map<string, number>;
-  private maxInstancesPerType: number = 1000;
+  private maxInstancesPerType: number = 5000;
+  private landVertices: CachedLandVertex[] = [];
+  private spatialGrid: SpatialHashGrid;
+  private tempVector: THREE.Vector3;
+  private tempMatrix: THREE.Matrix4;
+  private tempQuaternion: THREE.Quaternion;
+  private upVector: THREE.Vector3;
+  private matrixPool: THREE.Matrix4[];
+  private quaternionPool: THREE.Quaternion[];
+  private poolIndex: number = 0;
 
   constructor(globe: Globe, scene: THREE.Scene) {
     this.modelLoader = new ModelLoader();
@@ -88,133 +160,193 @@ export class ObjectManager {
     this.scene = scene;
     this.instancedMeshes = new Map();
     this.instanceCounts = new Map();
+
+    this.tempVector = new THREE.Vector3();
+    this.tempMatrix = new THREE.Matrix4();
+    this.tempQuaternion = new THREE.Quaternion();
+    this.upVector = new THREE.Vector3(0, 1, 0);
+
+    this.matrixPool = Array(10000)
+      .fill(null)
+      .map(() => new THREE.Matrix4());
+    this.quaternionPool = Array(10000)
+      .fill(null)
+      .map(() => new THREE.Quaternion());
+
+    this.spatialGrid = new SpatialHashGrid(25);
+
+    this.cacheLandVertices();
+  }
+
+  private cacheLandVertices(): void {
+    const positions = this.globeGeometry.attributes.position;
+    for (let i = 0; i < positions.count; i++) {
+      this.tempVector.fromBufferAttribute(positions, i);
+      if (this.globe.isLand(this.tempVector)) {
+        const vertex = {
+          position: this.tempVector.clone(),
+          normal: this.tempVector.clone().normalize(),
+          cellKey: "",
+        };
+        this.landVertices.push(vertex);
+        this.spatialGrid.add(vertex);
+      }
+    }
   }
 
   private getModelKey(filename: string, fileIndex: number): string {
     return `${filename}_${fileIndex}`;
   }
 
-  private async createInstancedMesh(modelType: ModelType, fileIndex: number): Promise<THREE.InstancedMesh> {
-    const modelPath = "assets/models/fbx/" + modelType.filename;
-    const modelKey = this.getModelKey(modelPath, fileIndex);
+  private getNextMatrix(): THREE.Matrix4 {
+    const matrix = this.matrixPool[this.poolIndex];
+    this.poolIndex = (this.poolIndex + 1) % this.matrixPool.length;
+    return matrix.identity();
+  }
 
-    if (this.instancedMeshes.has(modelKey)) {
-      return this.instancedMeshes.get(modelKey)!;
-    }
+  private getNextQuaternion(): THREE.Quaternion {
+    const quaternion = this.quaternionPool[this.poolIndex];
+    this.poolIndex = (this.poolIndex + 1) % this.quaternionPool.length;
+    return quaternion.identity();
+  }
 
-    const modelData = await this.modelLoader.loadModelForInstancing(modelPath, fileIndex);
-    const instancedMesh = new THREE.InstancedMesh(
-      modelData.geometry,
-      modelData.material,
-      this.maxInstancesPerType
-    );
-    
-    instancedMesh.castShadow = true;
-    instancedMesh.receiveShadow = true;
-    instancedMesh.count = 0;
-    
-    this.instancedMeshes.set(modelKey, instancedMesh);
-    this.instanceCounts.set(modelKey, 0);
-    this.scene.add(instancedMesh);
-    
-    return instancedMesh;
+  private async preloadModelVariants(modelType: ModelType): Promise<void> {
+    const basePath = "assets/models/fbx/" + modelType.filename;
+    const promises = modelType.files.map(async (fileIndex) => {
+      const modelKey = this.getModelKey(basePath, fileIndex);
+      if (!this.instancedMeshes.has(modelKey)) {
+        const modelData = await this.modelLoader.loadModelForInstancing(basePath, fileIndex);
+        const instancedMesh = new THREE.InstancedMesh(modelData.geometry, modelData.material, this.maxInstancesPerType);
+        instancedMesh.castShadow = true;
+        instancedMesh.receiveShadow = true;
+        instancedMesh.count = 0;
+        this.instancedMeshes.set(modelKey, instancedMesh);
+        this.instanceCounts.set(modelKey, 0);
+        this.scene.add(instancedMesh);
+      }
+    });
+    await Promise.all(promises);
   }
 
   public async placeObjects(modelGroups: ModelGroup[]): Promise<void> {
+    this.poolIndex = 0;
+
+    const preloadPromises = modelGroups.flatMap((group) => [
+      ...group.primary.map((model) => this.preloadModelVariants(model)),
+      ...(group.secondary?.map((model) => this.preloadModelVariants(model)) || []),
+    ]);
+    await Promise.all(preloadPromises);
+
     for (const group of modelGroups) {
-      await this.placeModelTypes(group.primary, group);
+      const allModelTypes = [...group.primary];
       if (group.secondary) {
-        await this.placeModelTypes(group.secondary, group);
+        allModelTypes.push(...group.secondary);
       }
-    }
-  }
 
-  private async placeModelTypes(modelTypes: ModelType[], group: ModelGroup): Promise<void> {
-    for (const modelType of modelTypes) {
-      if (group.placement === PlacementBehavior.Clustered) {
-        const numClusters = Math.ceil(modelType.numInstances / group.numInCluster);
-        for (let c = 0; c < numClusters; c++) {
-          const centerIndex = Math.floor(Math.random() * this.globeGeometry.attributes.position.count);
-          const centerPos = new THREE.Vector3().fromBufferAttribute(this.globeGeometry.attributes.position, centerIndex);
+      const matrices: Map<string, THREE.Matrix4[]> = new Map();
+      const totalInstances = allModelTypes.reduce((sum, type) => sum + type.numInstances, 0);
+      const batchSize = 100;
 
-          const numInThisCluster = Math.min(group.numInCluster, modelType.numInstances - c * group.numInCluster);
-          for (let i = 0; i < numInThisCluster; i++) {
-            await this.placeObject(modelType, centerPos, group.spacing || 5);
+      if (group.placement === PlacementBehavior.Clustered && group.numInCluster) {
+        const numClusters = Math.ceil(totalInstances / group.numInCluster);
+        const clusterCenters = Array(numClusters)
+          .fill(null)
+          .map(() => this.landVertices[Math.floor(Math.random() * this.landVertices.length)]);
+
+        for (const center of clusterCenters) {
+          const nearbyVertices = this.spatialGrid.getNearby(center.position, group.spacing || 5);
+          const numInThisCluster = Math.min(group.numInCluster, totalInstances);
+
+          for (let i = 0; i < numInThisCluster; i += batchSize) {
+            const batchCount = Math.min(batchSize, numInThisCluster - i);
+            const selectedTypes = this.selectModelTypesForBatch(allModelTypes, batchCount);
+
+            for (const [modelType, count] of selectedTypes) {
+              await this.placeBatch(modelType, nearbyVertices, count, matrices);
+            }
           }
         }
       } else {
-        for (let i = 0; i < modelType.numInstances; i++) {
-          await this.placeObject(modelType, null, 0);
+        for (const modelType of allModelTypes) {
+          for (let i = 0; i < modelType.numInstances; i += batchSize) {
+            const batchCount = Math.min(batchSize, modelType.numInstances - i);
+            await this.placeBatch(modelType, this.landVertices, batchCount, matrices);
+          }
         }
       }
+
+      matrices.forEach((matrixArray, modelKey) => {
+        const instancedMesh = this.instancedMeshes.get(modelKey)!;
+        for (let i = 0; i < matrixArray.length; i += batchSize) {
+          const end = Math.min(i + batchSize, matrixArray.length);
+          for (let j = i; j < end; j++) {
+            instancedMesh.setMatrixAt(j, matrixArray[j]);
+          }
+        }
+        instancedMesh.count = matrixArray.length;
+        instancedMesh.instanceMatrix.needsUpdate = true;
+      });
     }
   }
 
-  private async placeObject(modelType: ModelType, clusterCenter: THREE.Vector3 | null, radius: number): Promise<void> {
+  private selectModelTypesForBatch(modelTypes: ModelType[], batchCount: number): Map<ModelType, number> {
+    const result = new Map<ModelType, number>();
+    const totalWeight = modelTypes.reduce((sum, type) => sum + type.numInstances, 0);
+    let remainingCount = batchCount;
+
+    for (const modelType of modelTypes) {
+      if (remainingCount <= 0) break;
+
+      const baseCount = Math.floor((modelType.numInstances / totalWeight) * batchCount);
+      const variance = Math.floor(baseCount * 0.3);
+      const actualCount = Math.min(remainingCount, baseCount + Math.floor(Math.random() * variance * 2 - variance));
+
+      if (actualCount > 0) {
+        result.set(modelType, actualCount);
+        remainingCount -= actualCount;
+      }
+    }
+
+    while (remainingCount > 0) {
+      const randomType = modelTypes[Math.floor(Math.random() * modelTypes.length)];
+      const current = result.get(randomType) || 0;
+      result.set(randomType, current + 1);
+      remainingCount--;
+    }
+
+    return result;
+  }
+
+  private async placeBatch(modelType: ModelType, vertices: CachedLandVertex[], count: number, matrices: Map<string, THREE.Matrix4[]>): Promise<void> {
     const randomFileIndex = modelType.files[Math.floor(Math.random() * modelType.files.length)];
     const modelKey = this.getModelKey("assets/models/fbx/" + modelType.filename, randomFileIndex);
-    
-    const instancedMesh = await this.createInstancedMesh(modelType, randomFileIndex);
-    const currentCount = this.instanceCounts.get(modelKey) || 0;
-    
-    if (currentCount >= this.maxInstancesPerType) {
+
+    if (!matrices.has(modelKey)) {
+      matrices.set(modelKey, []);
+    }
+
+    const currentMatrices = matrices.get(modelKey)!;
+    const startIndex = currentMatrices.length;
+
+    if (startIndex + count > this.maxInstancesPerType) {
       console.warn(`Maximum instances reached for model ${modelKey}`);
       return;
     }
 
-    let position: THREE.Vector3;
-    let vertexPos: THREE.Vector3 = new THREE.Vector3();
-    
-    if (clusterCenter) {
-      const positions = this.globeGeometry.attributes.position;
-      const candidateIndices: number[] = [];
+    for (let i = 0; i < count; i++) {
+      const vertex = vertices[Math.floor(Math.random() * vertices.length)];
+      const matrix = this.getNextMatrix();
 
-      for (let i = 0; i < positions.count; i++) {
-        vertexPos = vertexPos.fromBufferAttribute(positions, i);
-        if (vertexPos.distanceTo(clusterCenter) < radius && this.globe.isLand(vertexPos)) {
-          candidateIndices.push(i);
-        }
-      }
+      matrix.setPosition(vertex.position);
 
-      if (candidateIndices.length === 0) {
-        return;
-      }
+      const quaternion = this.getNextQuaternion()
+        .setFromUnitVectors(this.upVector, vertex.normal)
+        .multiply(this.getNextQuaternion().setFromAxisAngle(this.upVector, Math.random() * Math.PI * 2));
 
-      const randomIndex = candidateIndices[Math.floor(Math.random() * candidateIndices.length)];
-      position = new THREE.Vector3().fromBufferAttribute(positions, randomIndex);
-    } else {
-      const positions = this.globeGeometry.attributes.position;
-      const landIndices: number[] = [];
+      const rotationMatrix = this.getNextMatrix().makeRotationFromQuaternion(quaternion);
+      matrix.multiply(rotationMatrix);
 
-      for (let i = 0; i < positions.count; i++) {
-        if (this.globe.isLand(new THREE.Vector3(positions.getX(i), positions.getY(i), positions.getZ(i)))) {
-          landIndices.push(i);
-        }
-      }
-
-      if (landIndices.length === 0) {
-        return;
-      }
-
-      const randomIndex = landIndices[Math.floor(Math.random() * landIndices.length)];
-      position = new THREE.Vector3().fromBufferAttribute(positions, randomIndex);
+      currentMatrices.push(matrix.clone());
     }
-
-    const matrix = new THREE.Matrix4();
-    matrix.setPosition(position);
-
-    const normal = position.clone().normalize();
-    const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
-    const localRotation = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.random() * Math.PI * 2);
-    quaternion.multiply(localRotation);
-
-    const rotationMatrix = new THREE.Matrix4().makeRotationFromQuaternion(quaternion);
-    matrix.multiply(rotationMatrix);
-
-    instancedMesh.setMatrixAt(currentCount, matrix);
-    instancedMesh.count = currentCount + 1;
-    instancedMesh.instanceMatrix.needsUpdate = true;
-
-    this.instanceCounts.set(modelKey, currentCount + 1);
   }
 }
