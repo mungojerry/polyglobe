@@ -14,6 +14,7 @@ import { Infection } from "./Infection";
 import { TERRAIN_PRESETS, TerrainPresetEnum } from "./TerrainPresets";
 import { VoronoiNoise } from "./VoroniNoise";
 
+import ChunkWorker from "./chunkWorker?worker";
 const globeConfig = {
   showWall: false,
   showPoles: false,
@@ -32,6 +33,8 @@ export class Globe {
   private landGeometry!: THREE.BufferGeometry;
   public waterLevel: number = 0;
   public terrainClickAllowed: boolean = false;
+
+  private tempLandMesh!: THREE.Mesh;
   private landMaterial: THREE.MeshPhongMaterial = new THREE.MeshPhongMaterial({
     vertexColors: true,
     flatShading: true,
@@ -40,6 +43,8 @@ export class Globe {
     clipShadows: false,
   });
 
+  private infection: Infection;
+  private rigidBody!: RAPIER.RigidBody;
   private water!: Water;
   private atmosphere!: Atmosphere;
   private dayNightCycleSpeed = 0.05;
@@ -83,71 +88,8 @@ export class Globe {
   public infect(p: THREE.Vector3) {
     const chunk = this.getChunkByPosition(p);
     if (chunk) {
-      console.log("infect");
       this.infection.infect(p, chunk);
     }
-  }
-
-  updateNoiseVisualization(generator: VoronoiNoise, canvas: HTMLCanvasElement) {
-    const context = canvas.getContext("2d");
-    if (!context) return;
-    const imageData = context.createImageData(canvas.width, canvas.height);
-    const data = imageData.data;
-
-    for (let y = 0; y < canvas.height; y++) {
-      for (let x = 0; x < canvas.width; x++) {
-        const phi = (x / canvas.width) * Math.PI * 2;
-        const theta = (y / canvas.height) * Math.PI;
-
-        const nx = Math.sin(theta) * Math.cos(phi);
-        const ny = Math.cos(theta);
-        const nz = Math.sin(theta) * Math.sin(phi);
-
-        const height = generator.getValue(nx, ny, nz);
-        const latitude = Math.asin(ny);
-        const idx = (y * canvas.width + x) * 4;
-        const color = getTerrainColor(height, latitude);
-        data[idx] = color.r * 255;
-        data[idx + 1] = color.g * 255;
-        data[idx + 2] = color.b * 255;
-        data[idx + 3] = 255;
-      }
-    }
-
-    context.putImageData(imageData, 0, 0);
-  }
-
-  updateAllNoiseVisualizations() {
-    const container = document.createElement("div");
-    container.style.position = "absolute";
-    container.style.position = "absolute";
-    container.style.top = "20px";
-    container.style.right = "20px";
-    container.style.display = "flex";
-    container.style.flexWrap = "wrap";
-
-    document.body.appendChild(container);
-
-    Object.values(this.noiseGenerators).forEach((generator) => {
-      const noiseContainer = document.createElement("div");
-      noiseContainer.style.display = "flex-col";
-
-      const text = document.createElement("div");
-      text.innerHTML = generator.name;
-      text.style.color = "#ff5555";
-      text.style.fontWeight = "bold";
-
-      noiseContainer.appendChild(text);
-
-      const canvas = document.createElement("canvas");
-      canvas.width = 80;
-      canvas.height = 80;
-      canvas.style.margin = "5px";
-      canvas.style.border = "2px solid black";
-      this.updateNoiseVisualization(generator, canvas);
-      noiseContainer.appendChild(canvas);
-      container.appendChild(noiseContainer);
-    });
   }
 
   public createGlobe(seed: number = new Date().getTime()) {
@@ -164,13 +106,10 @@ export class Globe {
 
     this.generateLand();
     this.createPhysicsObject();
-    this.initChunks(this.landGeometry);
+    this.initChunks();
     const end = performance.now();
     debugManager.set("perf", "Generation time: " + (end - start).toFixed(4) + "ms");
   }
-
-  private infection: Infection;
-  private rigidBody!: RAPIER.RigidBody;
 
   private createPhysicsObject() {
     const fullGeometry = this.landGeometry;
@@ -185,113 +124,158 @@ export class Globe {
     this.world.createCollider(colliderDesc, this.rigidBody);
   }
 
-  private initChunks(sourceGeometry: THREE.BufferGeometry) {
-    this.chunks.forEach((row) => {
-      row.forEach((chunk) => {
-        chunk.dispose();
-        this.object.remove(chunk.mesh);
-      });
-    });
-    this.chunks = [];
+  private initChunks() {
+    const start = performance.now();
+    const workerPromises = [];
 
     for (let lat = -90; lat < 90; lat += this.CHUNK_SIZE) {
       const row: GlobeChunk[] = [];
       for (let lon = -180; lon < 180; lon += this.CHUNK_SIZE) {
-        const chunkGeo = this.extractChunkGeometry(sourceGeometry, lat, lon, this.CHUNK_SIZE);
-        const chunk = new GlobeChunk(chunkGeo, this.landMaterial.clone());
+        const worker = new ChunkWorker();
+        worker.postMessage({ source: this.getLandGeometry(), lat, lon, size: this.CHUNK_SIZE });
 
-        chunk.latStart = lat;
-        chunk.latEnd = lat + this.CHUNK_SIZE;
-        chunk.lonStart = lon;
-        chunk.lonEnd = lon + this.CHUNK_SIZE;
+        const promise = new Promise<void>((resolve) => {
+          worker.onmessage = (event) => {
+            const serializedGeometry = event.data.geometry;
 
-        chunk.mesh.receiveShadow = true;
-        row.push(chunk);
-        this.object.add(chunk.mesh);
+            // Reconstruct the geometry from the serialized data
+            const loader = new THREE.BufferGeometryLoader();
+            const geometry = loader.parse(serializedGeometry);
+
+            const chunk = new GlobeChunk(geometry, this.landMaterial.clone());
+            chunk.latStart = lat;
+            chunk.latEnd = lat + this.CHUNK_SIZE;
+            chunk.lonStart = lon;
+            chunk.lonEnd = lon + this.CHUNK_SIZE;
+
+            row.push(chunk);
+            this.object.add(chunk.mesh);
+            worker.terminate();
+            resolve();
+          };
+        });
+
+        workerPromises.push(promise);
       }
       this.chunks.push(row);
     }
+
+    Promise.all(workerPromises).then(() => {
+      debugManager.set("initChunks", "initChunks: " + (performance.now() - start).toFixed(4));
+      this.object.remove(this.tempLandMesh);
+      this.tempLandMesh.geometry.dispose();
+    });
   }
 
-  private extractChunkGeometry(source: THREE.BufferGeometry, lat: number, lon: number, size: number): THREE.BufferGeometry {
-    const geometry = new THREE.BufferGeometry();
-    const positionAttr = source.attributes.position;
-    const colorAttr = source.attributes.color;
-    const indexAttr = source.index;
+  // private extractChunkGeometry(source: THREE.BufferGeometry, lat: number, lon: number, size: number): THREE.BufferGeometry {
+  //   // Pre-calculate constants
+  //   const EPS = THREE.MathUtils.degToRad(1.0);
+  //   const LAT_MIN = THREE.MathUtils.degToRad(lat) - EPS;
+  //   const LAT_MAX = THREE.MathUtils.degToRad(lat + size) + EPS;
+  //   const LON_MIN = THREE.MathUtils.degToRad(lon) - EPS;
+  //   const LON_MAX = THREE.MathUtils.degToRad(lon + size) + EPS;
 
-    const vertexMap = new Int32Array(positionAttr.count).fill(-1);
-    const interleavedData = new Float32Array(positionAttr.count * 6);
-    let vertexCount = 0;
+  //   // Reuse objects from the [`vectorPool`](src/core/utils/vectorPool.ts)
+  //   const tempVec = vectorPool.getVector();
+  //   const spherical = new THREE.Spherical();
 
-    const EPS = THREE.MathUtils.degToRad(1.0);
-    const LAT_MIN = THREE.MathUtils.degToRad(lat) - EPS;
-    const LAT_MAX = THREE.MathUtils.degToRad(lat + size) + EPS;
-    const LON_MIN = THREE.MathUtils.degToRad(lon) - EPS;
-    const LON_MAX = THREE.MathUtils.degToRad(lon + size) + EPS;
+  //   // Get attributes once
+  //   const positionAttr = source.attributes.position;
+  //   const colorAttr = source.attributes.color;
+  //   const indexAttr = source.index;
+  //   const posArray = positionAttr.array;
+  //   const colArray = colorAttr.array;
 
-    const spherical = new THREE.Spherical();
-    const tempVec = new THREE.Vector3();
-    const posArray = positionAttr.array;
-    const colArray = colorAttr.array;
+  //   // Pre-allocate arrays with exact size needed
+  //   const maxVertices = Math.ceil(positionAttr.count * (size / 360));
+  //   const interleavedData = new Float32Array(maxVertices * 6);
+  //   const vertexMap = new Int32Array(positionAttr.count).fill(-1);
+  //   let vertexCount = 0;
 
-    for (let i = 0; i < positionAttr.count; i++) {
-      tempVec.set(posArray[i * 3], posArray[i * 3 + 1], posArray[i * 3 + 2]);
-      spherical.setFromVector3(tempVec);
-      const vertexLat = Math.PI / 2 - spherical.phi;
-      const vertexLon = THREE.MathUtils.euclideanModulo(spherical.theta + Math.PI, Math.PI * 2) - Math.PI;
+  //   // Faster vertex processing
+  //   const processVertex = (i: number): boolean => {
+  //     const ix = i * 3;
+  //     tempVec.set(posArray[ix], posArray[ix + 1], posArray[ix + 2]);
+  //     spherical.setFromVector3(tempVec);
+  //     const vertexLat = Math.PI / 2 - spherical.phi;
+  //     const vertexLon = THREE.MathUtils.euclideanModulo(spherical.theta + Math.PI, Math.PI * 2) - Math.PI;
 
-      if (vertexLat >= LAT_MIN && vertexLat <= LAT_MAX && vertexLon >= LON_MIN && vertexLon <= LON_MAX) {
-        vertexMap[i] = vertexCount;
-        const outIndex = vertexCount * 6;
-        for (let j = 0; j < 3; j++) {
-          interleavedData[outIndex + j] = posArray[i * 3 + j];
-          interleavedData[outIndex + 3 + j] = colArray[i * 3 + j];
-        }
-        vertexCount++;
-      }
-    }
+  //     return vertexLat >= LAT_MIN && vertexLat <= LAT_MAX && vertexLon >= LON_MIN && vertexLon <= LON_MAX;
+  //   };
 
-    if (indexAttr) {
-      const indexArray = indexAttr.array;
-      const filteredIndices = new Uint32Array(indexArray.length);
-      let indexCount = 0;
+  //   // Fast vertex copying
+  //   const copyVertex = (srcIdx: number, destIdx: number): void => {
+  //     const src = srcIdx * 3;
+  //     const dest = destIdx * 6;
+  //     // Copy position
+  //     interleavedData[dest] = posArray[src];
+  //     interleavedData[dest + 1] = posArray[src + 1];
+  //     interleavedData[dest + 2] = posArray[src + 2];
+  //     // Copy color
+  //     interleavedData[dest + 3] = colArray[src];
+  //     interleavedData[dest + 4] = colArray[src + 1];
+  //     interleavedData[dest + 5] = colArray[src + 2];
+  //   };
 
-      function addVertex(index: number): number {
-        const outIndex = vertexCount * 6;
-        for (let j = 0; j < 3; j++) {
-          interleavedData[outIndex + j] = posArray[index * 3 + j];
-          interleavedData[outIndex + 3 + j] = colArray[index * 3 + j];
-        }
-        return vertexCount++;
-      }
+  //   // Process vertices and build geometry
+  //   const geometry = new THREE.BufferGeometry();
 
-      for (let i = 0; i < indexArray.length; i += 3) {
-        const a = indexArray[i];
-        const b = indexArray[i + 1];
-        const c = indexArray[i + 2];
+  //   if (indexAttr) {
+  //     const indexArray = indexAttr.array;
+  //     const filteredIndices = new Uint32Array(indexArray.length);
+  //     let indexCount = 0;
 
-        if (vertexMap[a] !== -1 || vertexMap[b] !== -1 || vertexMap[c] !== -1) {
-          if (vertexMap[a] === -1) vertexMap[a] = addVertex(a);
-          if (vertexMap[b] === -1) vertexMap[b] = addVertex(b);
-          if (vertexMap[c] === -1) vertexMap[c] = addVertex(c);
+  //     // Process indexed geometry
+  //     for (let i = 0; i < indexArray.length; i += 3) {
+  //       const a = indexArray[i];
+  //       const b = indexArray[i + 1];
+  //       const c = indexArray[i + 2];
 
-          filteredIndices[indexCount++] = vertexMap[a];
-          filteredIndices[indexCount++] = vertexMap[b];
-          filteredIndices[indexCount++] = vertexMap[c];
-        }
-      }
+  //       if (processVertex(a) || processVertex(b) || processVertex(c)) {
+  //         // Add vertices if not already added
+  //         if (vertexMap[a] === -1) {
+  //           vertexMap[a] = vertexCount;
+  //           copyVertex(a, vertexCount++);
+  //         }
+  //         if (vertexMap[b] === -1) {
+  //           vertexMap[b] = vertexCount;
+  //           copyVertex(b, vertexCount++);
+  //         }
+  //         if (vertexMap[c] === -1) {
+  //           vertexMap[c] = vertexCount;
+  //           copyVertex(c, vertexCount++);
+  //         }
 
-      geometry.setIndex(new THREE.BufferAttribute(filteredIndices.slice(0, indexCount), 1));
-    }
+  //         // Add triangle indices
+  //         filteredIndices[indexCount++] = vertexMap[a];
+  //         filteredIndices[indexCount++] = vertexMap[b];
+  //         filteredIndices[indexCount++] = vertexMap[c];
+  //       }
+  //     }
 
-    const finalData = new Float32Array(interleavedData.buffer, 0, vertexCount * 6);
-    const interleavedBuffer = new THREE.InterleavedBuffer(finalData, 6);
-    geometry.setAttribute("position", new THREE.InterleavedBufferAttribute(interleavedBuffer, 3, 0));
-    geometry.setAttribute("color", new THREE.InterleavedBufferAttribute(interleavedBuffer, 3, 3));
-    geometry.computeVertexNormals();
+  //     geometry.setIndex(new THREE.BufferAttribute(filteredIndices.slice(0, indexCount), 1));
+  //   } else {
+  //     // Process non-indexed geometry
+  //     for (let i = 0; i < positionAttr.count; i++) {
+  //       if (processVertex(i)) {
+  //         vertexMap[i] = vertexCount;
+  //         copyVertex(i, vertexCount++);
+  //       }
+  //     }
+  //   }
 
-    return geometry;
-  }
+  //   // Create final buffer
+  //   const finalData = new Float32Array(interleavedData.buffer, 0, vertexCount * 6);
+  //   const interleavedBuffer = new THREE.InterleavedBuffer(finalData, 6);
+  //   geometry.setAttribute("position", new THREE.InterleavedBufferAttribute(interleavedBuffer, 3, 0));
+  //   geometry.setAttribute("color", new THREE.InterleavedBufferAttribute(interleavedBuffer, 3, 3));
+  //   geometry.computeVertexNormals();
+
+  //   // Clean up
+  //   vectorPool.releaseVector(tempVec);
+
+  //   return geometry;
+  // }
 
   private generateLand() {
     const landGeometry = new THREE.IcosahedronGeometry(this.RADIUS + 0.1, this.DETAIL);
@@ -343,8 +327,9 @@ export class Globe {
     }
 
     this.landGeometry = mergeVertices(optimizeGeometry(newGeometry));
+    this.tempLandMesh = new THREE.Mesh(this.landGeometry, this.landMaterial);
+    this.object.add(this.tempLandMesh);
   }
-
   public getSurfaceNormal(position: THREE.Vector3): THREE.Vector3 {
     const normalAttr = this.landGeometry.attributes.normal;
     const closestIndex = this.findClosestVertexIndex(position);
@@ -513,7 +498,7 @@ export class Globe {
     const localPosition = position.clone().applyMatrix4(new THREE.Matrix4().copy(this.object.matrixWorld).invert());
     const surfacePos = localPosition.clone().setLength(this.RADIUS);
     const { lat, lon } = this.xyzToLatLon(surfacePos);
-    
+
     for (const row of this.chunks) {
       for (const chunk of row) {
         if (lat >= chunk.latStart && lat < chunk.latEnd && lon >= chunk.lonStart && lon < chunk.lonEnd) {
@@ -580,7 +565,7 @@ export class Globe {
 
     // Update atmosphere
     this.atmosphere.update(sunPosition, moonPosition);
-    
+
     // Calculate day/night cycle
     const dayNightCycle = (Math.sin(time * this.dayNightCycleSpeed) + 1) * 0.5;
     this.atmosphere.setSunIntensity(Math.pow(dayNightCycle, 0.5));
