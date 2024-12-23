@@ -13,3 +13,14 @@ export function smoothstep(edge0: number, edge1: number, x: number): number {
   const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
   return t * t * (3 - 2 * t);
 }
+
+export function generateRandomPosition(minDistance: number): THREE.Vector3 {
+  const theta = Math.random() * Math.PI * 2;
+  const phi = Math.acos(2 * Math.random() - 1);
+
+  const x = minDistance * Math.sin(phi) * Math.cos(theta);
+  const y = minDistance * Math.sin(phi) * Math.sin(theta);
+  const z = minDistance * Math.cos(phi);
+
+  return new THREE.Vector3(x, y, z);
+}

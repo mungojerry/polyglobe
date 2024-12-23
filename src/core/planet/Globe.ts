@@ -6,7 +6,7 @@ import { Water } from "../effects/Water";
 import { debugManager } from "../managers/debugManager";
 import { getTerrainColor, isLand, landBoundary } from "../utils/biomes";
 import { pseudoRandom } from "../utils/PseudoRandom";
-import { optimizeGeometry, smoothstep } from "../utils/utils";
+import { optimizeGeometry } from "../utils/utils";
 import { vectorPool } from "../utils/vectorPool";
 import { Atmosphere } from "./Atmosphere";
 import { GlobeChunk } from "./GlobeChunk";
@@ -15,46 +15,47 @@ import { TERRAIN_PRESETS, TerrainPresetEnum } from "./TerrainPresets";
 import { VoronoiNoise } from "./VoroniNoise";
 
 import ChunkWorker from "./chunkWorker?worker";
+
 const globeConfig = {
   showWall: false,
   showPoles: false,
 };
 
 export class Globe {
-  private object: THREE.Object3D;
-  public RADIUS = 200;
-  public DETAIL = 100;
+  private readonly object: THREE.Object3D;
+  public readonly RADIUS = 200;
+  public readonly DETAIL = 100;
   public runInfection: boolean = false;
   public onTerrainDeformed: ((position: THREE.Vector3, radius: number) => void) | null = null;
-  private chunks: GlobeChunk[][] = [];
+  private readonly chunks: GlobeChunk[][] = [];
   private readonly CHUNK_SIZE = 20;
-  private frustum = new THREE.Frustum();
-  private cameraViewProjectionMatrix = new THREE.Matrix4();
-  private landGeometry!: THREE.BufferGeometry;
-  public waterLevel: number = 0;
-  public terrainClickAllowed: boolean = false;
-
-  private tempLandMesh!: THREE.Mesh;
-  private landMaterial: THREE.MeshPhongMaterial = new THREE.MeshPhongMaterial({
+  private readonly frustum = new THREE.Frustum();
+  private readonly cameraViewProjectionMatrix = new THREE.Matrix4();
+  private readonly landMaterial: THREE.MeshPhongMaterial = new THREE.MeshPhongMaterial({
     vertexColors: true,
     flatShading: true,
     shininess: 0.6,
     shadowSide: THREE.DoubleSide,
     clipShadows: false,
   });
+  private readonly infection: Infection;
+  private readonly dayNightCycleSpeed = 0.05;
 
-  private infection: Infection;
+  public waterLevel: number = 0;
+  public terrainClickAllowed: boolean = false;
+  public terrainScale = 0.9;
+  public noiseGenerators: VoronoiNoise[] = [
+    new VoronoiNoise(TERRAIN_PRESETS[TerrainPresetEnum.PLAINS]),
+    new VoronoiNoise(TERRAIN_PRESETS[TerrainPresetEnum.SNOW_PEAKS]),
+  ];
+
+  private landGeometry!: THREE.BufferGeometry;
+  private tempLandMesh!: THREE.Mesh;
   private rigidBody!: RAPIER.RigidBody;
   private water!: Water;
   private atmosphere!: Atmosphere;
-  private dayNightCycleSpeed = 0.05;
-  public terrainScale = 0.9;
-  public noiseGenerators: { [key: string]: VoronoiNoise } = {
-    [TerrainPresetEnum.PLAINS]: new VoronoiNoise(TERRAIN_PRESETS[TerrainPresetEnum.PLAINS]),
-    [TerrainPresetEnum.SNOW_PEAKS]: new VoronoiNoise(TERRAIN_PRESETS[TerrainPresetEnum.SNOW_PEAKS]),
-  };
 
-  constructor(private camera: THREE.Camera, private scene: THREE.Scene, private world: RAPIER.World) {
+  constructor(private camera: THREE.Camera, private world: RAPIER.World) {
     this.object = new THREE.Object3D();
 
     window.addEventListener("click", (e) => {
@@ -107,8 +108,14 @@ export class Globe {
     this.generateLand();
     this.createPhysicsObject();
     this.initChunks();
+
     const end = performance.now();
     debugManager.set("perf", "Generation time: " + (end - start).toFixed(4) + "ms");
+  }
+
+  private removeTemporaryGeometry() {
+    this.object.remove(this.tempLandMesh);
+    this.tempLandMesh.geometry.dispose();
   }
 
   private createPhysicsObject() {
@@ -132,7 +139,7 @@ export class Globe {
       const row: GlobeChunk[] = [];
       for (let lon = -180; lon < 180; lon += this.CHUNK_SIZE) {
         const worker = new ChunkWorker();
-        worker.postMessage({ source: this.getLandGeometry(), lat, lon, size: this.CHUNK_SIZE });
+        worker.postMessage({ source: this.landGeometry, lat, lon, size: this.CHUNK_SIZE });
 
         const promise = new Promise<void>((resolve) => {
           worker.onmessage = (event) => {
@@ -142,6 +149,7 @@ export class Globe {
             const loader = new THREE.BufferGeometryLoader();
             const geometry = loader.parse(serializedGeometry);
             geometry.computeBoundsTree();
+
             const chunk = new GlobeChunk(geometry, this.landMaterial.clone());
             chunk.latStart = lat;
             chunk.latEnd = lat + this.CHUNK_SIZE;
@@ -161,124 +169,17 @@ export class Globe {
     }
 
     Promise.all(workerPromises).then(() => {
+      this.removeTemporaryGeometry();
       debugManager.set("initChunks", "initChunks: " + (performance.now() - start).toFixed(4));
-      this.object.remove(this.tempLandMesh);
-      this.tempLandMesh.geometry.dispose();
     });
   }
 
-  // private extractChunkGeometry(source: THREE.BufferGeometry, lat: number, lon: number, size: number): THREE.BufferGeometry {
-  //   // Pre-calculate constants
-  //   const EPS = THREE.MathUtils.degToRad(1.0);
-  //   const LAT_MIN = THREE.MathUtils.degToRad(lat) - EPS;
-  //   const LAT_MAX = THREE.MathUtils.degToRad(lat + size) + EPS;
-  //   const LON_MIN = THREE.MathUtils.degToRad(lon) - EPS;
-  //   const LON_MAX = THREE.MathUtils.degToRad(lon + size) + EPS;
-
-  //   // Reuse objects from the [`vectorPool`](src/core/utils/vectorPool.ts)
-  //   const tempVec = vectorPool.getVector();
-  //   const spherical = new THREE.Spherical();
-
-  //   // Get attributes once
-  //   const positionAttr = source.attributes.position;
-  //   const colorAttr = source.attributes.color;
-  //   const indexAttr = source.index;
-  //   const posArray = positionAttr.array;
-  //   const colArray = colorAttr.array;
-
-  //   // Pre-allocate arrays with exact size needed
-  //   const maxVertices = Math.ceil(positionAttr.count * (size / 360));
-  //   const interleavedData = new Float32Array(maxVertices * 6);
-  //   const vertexMap = new Int32Array(positionAttr.count).fill(-1);
-  //   let vertexCount = 0;
-
-  //   // Faster vertex processing
-  //   const processVertex = (i: number): boolean => {
-  //     const ix = i * 3;
-  //     tempVec.set(posArray[ix], posArray[ix + 1], posArray[ix + 2]);
-  //     spherical.setFromVector3(tempVec);
-  //     const vertexLat = Math.PI / 2 - spherical.phi;
-  //     const vertexLon = THREE.MathUtils.euclideanModulo(spherical.theta + Math.PI, Math.PI * 2) - Math.PI;
-
-  //     return vertexLat >= LAT_MIN && vertexLat <= LAT_MAX && vertexLon >= LON_MIN && vertexLon <= LON_MAX;
-  //   };
-
-  //   // Fast vertex copying
-  //   const copyVertex = (srcIdx: number, destIdx: number): void => {
-  //     const src = srcIdx * 3;
-  //     const dest = destIdx * 6;
-  //     // Copy position
-  //     interleavedData[dest] = posArray[src];
-  //     interleavedData[dest + 1] = posArray[src + 1];
-  //     interleavedData[dest + 2] = posArray[src + 2];
-  //     // Copy color
-  //     interleavedData[dest + 3] = colArray[src];
-  //     interleavedData[dest + 4] = colArray[src + 1];
-  //     interleavedData[dest + 5] = colArray[src + 2];
-  //   };
-
-  //   // Process vertices and build geometry
-  //   const geometry = new THREE.BufferGeometry();
-
-  //   if (indexAttr) {
-  //     const indexArray = indexAttr.array;
-  //     const filteredIndices = new Uint32Array(indexArray.length);
-  //     let indexCount = 0;
-
-  //     // Process indexed geometry
-  //     for (let i = 0; i < indexArray.length; i += 3) {
-  //       const a = indexArray[i];
-  //       const b = indexArray[i + 1];
-  //       const c = indexArray[i + 2];
-
-  //       if (processVertex(a) || processVertex(b) || processVertex(c)) {
-  //         // Add vertices if not already added
-  //         if (vertexMap[a] === -1) {
-  //           vertexMap[a] = vertexCount;
-  //           copyVertex(a, vertexCount++);
-  //         }
-  //         if (vertexMap[b] === -1) {
-  //           vertexMap[b] = vertexCount;
-  //           copyVertex(b, vertexCount++);
-  //         }
-  //         if (vertexMap[c] === -1) {
-  //           vertexMap[c] = vertexCount;
-  //           copyVertex(c, vertexCount++);
-  //         }
-
-  //         // Add triangle indices
-  //         filteredIndices[indexCount++] = vertexMap[a];
-  //         filteredIndices[indexCount++] = vertexMap[b];
-  //         filteredIndices[indexCount++] = vertexMap[c];
-  //       }
-  //     }
-
-  //     geometry.setIndex(new THREE.BufferAttribute(filteredIndices.slice(0, indexCount), 1));
-  //   } else {
-  //     // Process non-indexed geometry
-  //     for (let i = 0; i < positionAttr.count; i++) {
-  //       if (processVertex(i)) {
-  //         vertexMap[i] = vertexCount;
-  //         copyVertex(i, vertexCount++);
-  //       }
-  //     }
-  //   }
-
-  //   // Create final buffer
-  //   const finalData = new Float32Array(interleavedData.buffer, 0, vertexCount * 6);
-  //   const interleavedBuffer = new THREE.InterleavedBuffer(finalData, 6);
-  //   geometry.setAttribute("position", new THREE.InterleavedBufferAttribute(interleavedBuffer, 3, 0));
-  //   geometry.setAttribute("color", new THREE.InterleavedBufferAttribute(interleavedBuffer, 3, 3));
-  //   geometry.computeVertexNormals();
-
-  //   // Clean up
-  //   vectorPool.releaseVector(tempVec);
-
-  //   return geometry;
-  // }
+  public getChunkById(id: string): GlobeChunk | undefined {
+    return this.chunks.flat().find((chunk) => chunk.mesh.uuid === id);
+  }
 
   private generateLand() {
-    const landGeometry = new THREE.IcosahedronGeometry(this.RADIUS + 0.1, this.DETAIL);
+    const landGeometry = new THREE.IcosahedronGeometry(this.RADIUS + 0.2, this.DETAIL);
     const positionAttribute = landGeometry.attributes.position;
     const vertexCount = positionAttribute.count;
 
@@ -286,7 +187,8 @@ export class Globe {
     const colors = new Float32Array(vertexCount * 3 * 4);
     const indices = new Uint32Array(vertexCount * 4);
     const positionArray = positionAttribute.array;
-
+    const getHeight = this.getHeight.bind(this);
+    const elevationMultiplier = this.elevationMultiplier.bind(this);
     for (let i = 0; i < vertexCount; i++) {
       const idx = i * 3;
 
@@ -301,8 +203,8 @@ export class Globe {
 
       const latitude = Math.asin(ny);
 
-      const height = this.getHeight(nx, ny, nz);
-      const elevation = this.elevationMultiplier(height);
+      const height = getHeight(nx, ny, nz);
+      const elevation = elevationMultiplier(height);
 
       vertices[idx] = x * elevation;
       vertices[idx + 1] = y * elevation;
@@ -330,6 +232,7 @@ export class Globe {
     this.tempLandMesh = new THREE.Mesh(this.landGeometry, this.landMaterial);
     this.object.add(this.tempLandMesh);
   }
+
   public getSurfaceNormal(position: THREE.Vector3): THREE.Vector3 {
     const normalAttr = this.landGeometry.attributes.normal;
     const closestIndex = this.findClosestVertexIndex(position);
@@ -366,60 +269,25 @@ export class Globe {
     this.object.add(this.water.getObject());
   }
 
-  public getHeight(x: number, y: number, z: number): number {
-    const BASE_HEIGHT = 0.2;
+  private readonly BASE_HEIGHT = 0.2;
 
-    let height = BASE_HEIGHT;
+  public getHeight(x: number, y: number, z: number): number {
+    let height = this.BASE_HEIGHT;
     let totalWeight = 0;
 
-    for (const [terrainType, generator] of Object.entries(this.noiseGenerators)) {
-      const preset = TERRAIN_PRESETS[terrainType as TerrainPresetEnum];
-      const noiseValue = generator.getValue(x * preset.cellSize, y * preset.cellSize, z * preset.cellSize);
-      const weight = preset.amplitude;
-      height += noiseValue * weight;
-      totalWeight += weight;
-    }
+    this.noiseGenerators.forEach((generator) => {
+      const { cellSize, amplitude } = generator.config;
+
+      const noiseValue = generator.getValue(x * cellSize, y * cellSize, z * cellSize);
+      height += noiseValue * amplitude;
+      totalWeight += amplitude;
+    });
 
     if (totalWeight > 0) {
-      height = (BASE_HEIGHT + (height - BASE_HEIGHT) / totalWeight) * this.terrainScale;
+      height = (this.BASE_HEIGHT + (height - this.BASE_HEIGHT) / totalWeight) * this.terrainScale;
     }
 
     return height;
-  }
-
-  public getHeightPrecise(x: number, y: number, z: number, latitude: number): number {
-    const BASE_HEIGHT = 0.2;
-    const MOUNTAIN_SCALE = 1.2;
-    const HILLS_SCALE = 0.8;
-
-    const biomeNoise = this.noiseGenerators.PLAINS.getValue(x * 0.3, y * 0.3, z * 0.3);
-    const snowNoise = this.noiseGenerators.SNOW_PEAKS.getValue(x, y, z) * MOUNTAIN_SCALE;
-    const mountainNoise = this.noiseGenerators.MOUNTAINS.getValue(x, y, z) * MOUNTAIN_SCALE;
-    const hillsNoise = this.noiseGenerators.HILLS.getValue(x, y, z) * HILLS_SCALE;
-
-    const mountainWeight = smoothstep(0.4, 0.6, (biomeNoise + 1) * 0.5);
-    const hillWeight = smoothstep(0.2, 0.4, (biomeNoise + 1) * 0.5);
-
-    let height = BASE_HEIGHT;
-
-    if (mountainWeight > 0) {
-      height += snowNoise * mountainWeight;
-    }
-    if (hillWeight > 0) {
-      height += this.blendTerrains(hillsNoise, mountainNoise, hillWeight);
-    }
-    if (mountainWeight === 0 && hillWeight === 0) {
-      height += Math.max(0, hillsNoise * 0.6);
-    }
-
-    const latitudeInfluence = Math.cos(latitude * 2) * 0.2;
-    height *= 1 + latitudeInfluence;
-
-    return Math.max(BASE_HEIGHT, height * this.terrainScale);
-  }
-
-  private blendTerrains(a: number, b: number, t: number): number {
-    return a * t + b * (1 - t);
   }
 
   public isLand(position: THREE.Vector3): boolean {

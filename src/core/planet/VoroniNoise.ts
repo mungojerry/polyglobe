@@ -1,6 +1,29 @@
 import * as THREE from "three";
 import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise.js";
 import { vectorPool } from "../utils/vectorPool";
+export type VoronoiNoiseConfig = {
+  name: string;
+  cellSize: number;
+  jitter: number;
+  amplitude: number;
+  blendFactor: number;
+  octaves: number;
+  persistence: number;
+  lacunarity: number;
+  warpStrength: number;
+  ridgeOffset: number;
+  turbulence: number;
+  erosionStrength: number;
+  plateauThreshold: number;
+  biomeScale: number;
+};
+
+// Add this interface at the top
+interface GridCell {
+  x: number;
+  y: number;
+  z: number;
+}
 
 export class VoronoiNoise {
   // Use typed arrays for better performance with points
@@ -11,56 +34,32 @@ export class VoronoiNoise {
   private readonly RANGE_MULT = 2;
   private readonly JITTER_HALF = 0.5;
 
-  public name: string;
-  public cellSize: number;
-  public jitter: number;
-  public amplitude: number;
-  public blendFactor: number;
-  public octaves: number;
-  public persistence: number;
-  public lacunarity: number;
-  public warpStrength: number;
-  public ridgeOffset: number;
-  public turbulence: number;
-  public erosionStrength: number;
-  public plateauThreshold: number;
-  public biomeScale: number;
   private simplexNoise: SimplexNoise;
-  private spatialGrid: Map<string, THREE.Vector3[]>;
+  private spatialGrid: Map<number, THREE.Vector3[]>;
   private cachedResults: Map<string, THREE.Vector3[]>;
   private voronoiCache: Map<string, number>;
   private erosionCache: Map<string, number>;
 
-  constructor({
-    name = "voroni",
-    cellSize = 50,
-    jitter = 0.8,
-    amplitude = 1.0,
-    blendFactor = 0.5,
-    octaves = 4,
-    persistence = 0.5,
-    lacunarity = 2.0,
-    warpStrength = 0.4,
-    ridgeOffset = 1.0,
-    turbulence = 0.3,
-    erosionStrength = 0.3,
-    plateauThreshold = 0.7,
-    biomeScale = 0.5,
-  } = {}) {
-    this.name = name;
-    this.cellSize = cellSize;
-    this.jitter = jitter;
-    this.amplitude = amplitude;
-    this.blendFactor = blendFactor;
-    this.octaves = octaves;
-    this.persistence = persistence;
-    this.lacunarity = lacunarity;
-    this.warpStrength = warpStrength;
-    this.ridgeOffset = ridgeOffset;
-    this.turbulence = turbulence;
-    this.erosionStrength = erosionStrength;
-    this.plateauThreshold = plateauThreshold;
-    this.biomeScale = biomeScale;
+  public readonly config: VoronoiNoiseConfig;
+
+  constructor(config = {}) {
+    this.config = {
+      name: "voroni",
+      cellSize: 50,
+      jitter: 0.8,
+      amplitude: 1.0,
+      blendFactor: 0.5,
+      octaves: 4,
+      persistence: 0.5,
+      lacunarity: 2.0,
+      warpStrength: 0.2, // Reduced warp strength
+      ridgeOffset: 1.0,
+      turbulence: 0.15, // Reduced turbulence
+      erosionStrength: 0.2, // Reduced erosion
+      plateauThreshold: 0.7,
+      biomeScale: 0.3, // Reduced biome scale
+      ...config,
+    };
     this.simplexNoise = new SimplexNoise();
     this.spatialGrid = new Map();
     this.cachedResults = new Map();
@@ -68,8 +67,8 @@ export class VoronoiNoise {
     this.erosionCache = new Map();
 
     // Pre-allocate max points array based on range
-    const range = Math.ceil(this.RANGE_MULT * cellSize);
-    const maxPoints = Math.pow(Math.ceil((2 * range) / cellSize) + 1, 3);
+    const range = Math.ceil(this.RANGE_MULT * this.config.cellSize);
+    const maxPoints = Math.pow(Math.ceil((2 * range) / this.config.cellSize) + 1, 3);
     this.points = new Float32Array(maxPoints * 3);
 
     this.generatePoints();
@@ -77,21 +76,21 @@ export class VoronoiNoise {
   }
 
   private generatePoints(): void {
-    const range = Math.ceil(this.RANGE_MULT * this.cellSize);
+    const range = Math.ceil(this.RANGE_MULT * this.config.cellSize);
     let idx = 0;
 
     // Avoid repeated calculations
-    const jitterAmount = this.jitter * this.cellSize;
+    const jitterAmount = this.config.jitter * this.config.cellSize;
 
     // Use single loop with pre-calculated bounds
-    const steps = Math.ceil((2 * range) / this.cellSize) + 1;
+    const steps = Math.ceil((2 * range) / this.config.cellSize) + 1;
     const total = steps * steps * steps;
 
     for (let i = 0; i < total; i++) {
       // Convert single index to x,y,z coordinates
-      const x = (i % steps) * this.cellSize - range;
-      const y = (Math.floor(i / steps) % steps) * this.cellSize - range;
-      const z = Math.floor(i / (steps * steps)) * this.cellSize - range;
+      const x = (i % steps) * this.config.cellSize - range;
+      const y = (Math.floor(i / steps) % steps) * this.config.cellSize - range;
+      const z = Math.floor(i / (steps * steps)) * this.config.cellSize - range;
 
       // Direct array access is faster than push()
       this.points[idx] = x + (Math.random() - this.JITTER_HALF) * jitterAmount;
@@ -128,15 +127,35 @@ export class VoronoiNoise {
     }
   }
 
-  private getCellKey(point: THREE.Vector3): string {
-    const x = Math.floor(point.x / this.cellSize);
-    const y = Math.floor(point.y / this.cellSize);
-    const z = Math.floor(point.z / this.cellSize);
-    return `${x},${y},${z}`;
+  // Add helper method to convert 3D coordinates to single number
+  private getCellIndex(x: number, y: number, z: number): number {
+    // Use bit shifting for faster hashing
+    // Assuming reasonable coordinate ranges of ±2048
+    const px = x + 2048;
+    const py = y + 2048;
+    const pz = z + 2048;
+    return (px & 0xfff) | ((py & 0xfff) << 12) | ((pz & 0xfff) << 24);
+  }
+
+  // Convert back to 3D coordinates when needed
+  private getCellCoords(index: number): GridCell {
+    return {
+      x: (index & 0xfff) - 2048,
+      y: ((index >> 12) & 0xfff) - 2048,
+      z: ((index >> 24) & 0xfff) - 2048,
+    };
+  }
+
+  // Update getCellKey to use numeric index
+  private getCellKey(point: THREE.Vector3): number {
+    const x = Math.floor(point.x / this.config.cellSize);
+    const y = Math.floor(point.y / this.config.cellSize);
+    const z = Math.floor(point.z / this.config.cellSize);
+    return this.getCellIndex(x, y, z);
   }
 
   private getBiomeValue(x: number, y: number, z: number): number {
-    const biomeNoise = this.simplexNoise.noise3d(x * this.biomeScale, y * this.biomeScale, z * this.biomeScale);
+    const biomeNoise = this.simplexNoise.noise3d(x * this.config.biomeScale, y * this.config.biomeScale, z * this.config.biomeScale);
     return (biomeNoise + 1) * 0.5; // Normalize to 0-1
   }
 
@@ -148,7 +167,7 @@ export class VoronoiNoise {
 
     const slope = this.getSlope(x, y, z);
     const rainfall = this.simplexNoise.noise3d(x * 2, y * 2, z * 2) * 0.5 + 0.5;
-    const erosion = slope * rainfall * this.erosionStrength;
+    const erosion = slope * rainfall * this.config.erosionStrength;
 
     this.erosionCache.set(cacheKey, erosion);
     return erosion;
@@ -176,7 +195,7 @@ export class VoronoiNoise {
     }
     const voronoiValue = this.getVoronoiValue(x, y, z);
     const ridgeNoise = this.getRidgeNoise(x * 1.1, y * 0.9, z * 1.2);
-    const height = voronoiValue * this.blendFactor + ridgeNoise * (1 - this.blendFactor);
+    const height = voronoiValue * this.config.blendFactor + ridgeNoise * (1 - this.config.blendFactor);
     this.baseHeightCache.set(key, height);
     return height;
   }
@@ -191,9 +210,9 @@ export class VoronoiNoise {
   }
 
   private getPlateau(height: number): number {
-    if (height > this.plateauThreshold) {
-      const t = (height - this.plateauThreshold) / (1 - this.plateauThreshold);
-      return this.plateauThreshold + (1 - Math.pow(1 - t, 3)) * (1 - this.plateauThreshold);
+    if (height > this.config.plateauThreshold) {
+      const t = (height - this.config.plateauThreshold) / (1 - this.config.plateauThreshold);
+      return this.config.plateauThreshold + (1 - Math.pow(1 - t, 3)) * (1 - this.config.plateauThreshold);
     }
     return height;
   }
@@ -202,9 +221,9 @@ export class VoronoiNoise {
     // Add rotation-based warping
     const rotation = this.getRotationalVariance(x, y, z);
     const noise = this.simplexNoise.noise3d(x, y, z);
-    const wx = x + this.warpStrength * (noise + rotation);
-    const wy = y + this.warpStrength * (noise + rotation * 0.5);
-    const wz = z + this.warpStrength * (noise + rotation);
+    const wx = x + this.config.warpStrength * (noise + rotation);
+    const wy = y + this.config.warpStrength * (noise + rotation * 0.5);
+    const wz = z + this.config.warpStrength * (noise + rotation);
 
     // Get base terrain components
     const voronoiValue = this.getVoronoiValue(wx, wy, wz);
@@ -214,7 +233,8 @@ export class VoronoiNoise {
     const fractalNoise = this.simplexNoise.noise3d(wx * 1.5, wy * 1.5, wz * 1.5) * 0.3;
 
     // Blend base terrain
-    let value = voronoiValue * this.blendFactor + ridgeNoise * (1 - this.blendFactor) + mountainRange * 0.5 + turbulence + fractalNoise + rotation * 0.4;
+    let value =
+      voronoiValue * this.config.blendFactor + ridgeNoise * (1 - this.config.blendFactor) + mountainRange * 0.5 + turbulence + fractalNoise + rotation * 0.4;
 
     // Apply erosion
     const erosion = this.getErosion(wx, wy, wz);
@@ -231,7 +251,7 @@ export class VoronoiNoise {
   }
 
   private getTurbulence(x: number, y: number, z: number): number {
-    return this.simplexNoise.noise3d(x * 2.0, y * 2.0, z * 2.0) * this.turbulence;
+    return this.simplexNoise.noise3d(x * 2.0, y * 2.0, z * 2.0) * this.config.turbulence;
   }
 
   private getRidgeNoise(x: number, y: number, z: number): number {
@@ -241,25 +261,25 @@ export class VoronoiNoise {
     let weight = 1;
     const gain = 2.0;
 
-    for (let i = 0; i < this.octaves; i++) {
+    for (let i = 0; i < this.config.octaves; i++) {
       let n = Math.abs(this.simplexNoise.noise3d(x * frequency, y * frequency, z * frequency));
-      n = this.ridgeOffset - n;
+      n = this.config.ridgeOffset - n;
       n = n * n;
 
       value += n * amplitude * weight;
-      frequency *= this.lacunarity;
-      amplitude *= this.persistence;
+      frequency *= this.config.lacunarity;
+      amplitude *= this.config.persistence;
       weight = n * gain;
     }
 
-    return value * this.amplitude;
+    return value * this.config.amplitude;
   }
 
   private getRotationalVariance(x: number, y: number, z: number): number {
     const angle = Math.atan2(z, x);
     const rotationalNoise = this.simplexNoise.noise3d(Math.cos(angle) * 0.5, y * 0.3, Math.sin(angle) * 0.5);
 
-    return rotationalNoise * this.turbulence;
+    return rotationalNoise * this.config.turbulence;
   }
 
   getNearbyPoints(position: THREE.Vector3, maxCount: number = 4): THREE.Vector3[] {
@@ -303,14 +323,15 @@ export class VoronoiNoise {
     return result;
   }
 
-  private getNeighborCells(cell: string): string[] {
-    const [x, y, z] = cell.split(",").map(Number);
-    const neighbors: string[] = [];
+  // Update neighbor cell calculation
+  private getNeighborCells(cellIndex: number): number[] {
+    const cell = this.getCellCoords(cellIndex);
+    const neighbors: number[] = [];
 
     for (let dx = -1; dx <= 1; dx++) {
       for (let dy = -1; dy <= 1; dy++) {
         for (let dz = -1; dz <= 1; dz++) {
-          neighbors.push(`${x + dx},${y + dy},${z + dz}`);
+          neighbors.push(this.getCellIndex(cell.x + dx, cell.y + dy, cell.z + dz));
         }
       }
     }
@@ -343,7 +364,7 @@ export class VoronoiNoise {
       }
     }
 
-    const value = ((Math.sqrt(secondMinDistSq) - Math.sqrt(minDistSq)) / this.cellSize) * this.amplitude;
+    const value = ((Math.sqrt(secondMinDistSq) - Math.sqrt(minDistSq)) / this.config.cellSize) * this.config.amplitude;
     this.voronoiCache.set(cacheKey, value);
     return value;
   }

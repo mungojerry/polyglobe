@@ -16,12 +16,13 @@ import { Stars } from "../objects/Stars";
 import { Sun } from "../objects/Sun";
 import { Globe } from "../planet/Globe";
 import { MiniGlobe } from "../planet/MiniGlobe";
-import { TerrainPresetEnum } from "../planet/TerrainPresets";
 import { VoronoiNoise } from "../planet/VoroniNoise";
 import { pseudoRandom } from "../utils/PseudoRandom";
+import { generateRandomPosition } from "../utils/utils";
+import { vectorPool } from "../utils/vectorPool";
 import { BulletGenerator } from "../weapons/BulletGenerator";
 
-// Add the extension functions
+// Add the extension functions for BVH
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
@@ -45,26 +46,25 @@ const config = {
 };
 
 export class GameScene {
-  private world: World;
+  private readonly world: World;
+  private readonly dynamicBodies: { mesh: THREE.Object3D; body: RAPIER.RigidBody }[] = [];
+  private readonly eventQueue: EventQueue;
+  private readonly scene: THREE.Scene;
+  private readonly camera: THREE.PerspectiveCamera;
+  private readonly renderer: THREE.WebGLRenderer;
+  private readonly composer: EffectComposer;
+  private readonly controls: OrbitControls;
+  private readonly globe: Globe;
+  private readonly player: Player;
+  private readonly clouds: Cloud[] = [];
+  private readonly stars: Stars;
+  private readonly objectManager: ObjectManager;
+
   private cameraAttachedTo: THREE.Object3D;
-  private dynamicBodies: { mesh: THREE.Object3D; body: RAPIER.RigidBody }[] = [];
-  private eventQueue: EventQueue;
-  private scene: THREE.Scene;
-  private camera: THREE.PerspectiveCamera;
-  private renderer: THREE.WebGLRenderer;
-  private composer: EffectComposer;
-  // private tiltShiftPass: ShaderPass;
-  private bodyMeshes: any[] = [];
-  private controls: OrbitControls;
-  private globe: Globe;
-  private player: Player;
   private debugMesh: THREE.LineSegments;
   private orbitCoontrols: boolean = true;
-  private clouds: Cloud[] = [];
-  private currentTerrainType: TerrainPresetEnum = TerrainPresetEnum.PLAINS;
+  private currentTerrainType: number = 0;
   private currentGenerator: VoronoiNoise;
-  private stars: Stars;
-  private objectManager: ObjectManager;
   private sun!: Sun;
   private moon!: Moon;
   private flyingObjects: FlyingObject[] = [];
@@ -75,7 +75,6 @@ export class GameScene {
   private debugEnabled: boolean = false;
   private readonly GRAVITY_FUDGE: number = 0.01;
   private readonly G = 9.81 * this.GRAVITY_FUDGE;
-  private readonly tempVec = new THREE.Vector3();
 
   constructor() {
     this.world = new World(new Vector3(0, 0, 0));
@@ -112,9 +111,9 @@ export class GameScene {
 
     this.currentGenerator = this.globe.noiseGenerators[this.currentTerrainType];
     this.dynamicBodies = [];
-    this.player = new Player(this.scene, this.world, this.generateRandomPosition(this.globe.getRadius() * 1.3));
+    this.player = new Player(this.scene, this.world, generateRandomPosition(this.globe.getRadius() * 1.3));
     this.cameraAttachedTo = this.player.getObject();
-    this.bodyMeshes.push(this.player.getObject());
+
     this.dynamicBodies.push({ body: this.player.getBody(), mesh: this.player.getObject() });
     this.camera.position.set(0, 400, 0);
     this.sun = new Sun(this.globe, this.scene, this.globe.getRadius() * 2.4);
@@ -157,7 +156,7 @@ export class GameScene {
   }
 
   private createGlobe(): Globe {
-    const globe = new Globe(this.camera, this.scene, this.world);
+    const globe = new Globe(this.camera, this.world);
 
     for (let i = 0; i < 40; i++) {
       this.clouds.push(new Cloud(globe.getRadius() * 1.25, this.scene));
@@ -228,34 +227,24 @@ export class GameScene {
     if (!body || !body.isDynamic()) return;
 
     const position = body.translation();
-    this.tempVec.set(position.x, position.y, position.z);
-    this.tempVec.normalize();
+    const pos = vectorPool.getVector(position.x, position.y, position.z);
+    pos.normalize();
 
     const forceMagnitude = this.G * body.mass();
-    const force = new RAPIER.Vector3(-this.tempVec.x * forceMagnitude, -this.tempVec.y * forceMagnitude, -this.tempVec.z * forceMagnitude);
+    const force = new RAPIER.Vector3(-pos.x * forceMagnitude, -pos.y * forceMagnitude, -pos.z * forceMagnitude);
 
     body.applyImpulse(force, true);
     if (body === this.player.getBody()) {
       this.player.updateGravityArrow(force);
     }
-  }
-
-  private generateRandomPosition(minDistance: number): THREE.Vector3 {
-    const theta = Math.random() * Math.PI * 2;
-    const phi = Math.acos(2 * Math.random() - 1);
-
-    const x = minDistance * Math.sin(phi) * Math.cos(theta);
-    const y = minDistance * Math.sin(phi) * Math.sin(theta);
-    const z = minDistance * Math.cos(phi);
-
-    return new THREE.Vector3(x, y, z);
+    vectorPool.releaseVector(pos);
   }
 
   private initializeFlyingObjects(): void {
     const globeRadius = this.globe.getRadius();
     const minDistance = globeRadius * 1.3;
     for (let i = 0; i < config.numUFOs; i++) {
-      const position = this.generateRandomPosition(minDistance);
+      const position = generateRandomPosition(minDistance);
       const flyingObject = new FlyingObject(this.scene, this.world, position, this.globe, this.player);
       this.flyingObjects.push(flyingObject);
     }
@@ -308,9 +297,9 @@ export class GameScene {
 
   private updateCamera(position: THREE.Vector3, playerRotation: THREE.Quaternion): void {
     const up = position.clone().normalize();
-    const forward = new THREE.Vector3(0, 0, 1);
+    const forward = vectorPool.getVector(0, 0, 1);
     forward.applyQuaternion(playerRotation);
-    const right = new THREE.Vector3().crossVectors(up, forward).normalize();
+    const right = vectorPool.getVector().crossVectors(up, forward).normalize();
     forward.crossVectors(right, up).normalize();
 
     const targetPosition = position.clone();
@@ -323,6 +312,9 @@ export class GameScene {
     this.currentLookAt.lerp(position, cameraLerp);
     this.camera.lookAt(this.currentLookAt);
     this.camera.up.copy(up);
+
+    vectorPool.releaseVector(forward);
+    vectorPool.releaseVector(right);
   }
 
   private setupControls(): void {
@@ -395,21 +387,21 @@ export class GameScene {
     controlManager.addDropdown(
       "terrain",
       "Terrain: ",
-      () => Object.keys(this.globe.noiseGenerators)[0],
+      () => this.globe.noiseGenerators[this.currentTerrainType].config.name,
       (value) => {
-        this.currentTerrainType = value as TerrainPresetEnum;
+        this.currentTerrainType = this.globe.noiseGenerators.findIndex((generator) => generator.config.name === value);
         this.currentGenerator = this.globe.noiseGenerators[this.currentTerrainType];
         controlManager.updateDisplay(Object.keys(this.currentGenerator));
       },
-      Object.keys(this.globe.noiseGenerators)
+      this.globe.noiseGenerators.map((generator) => generator.config.name)
     );
 
     controlManager.addSlider(
       "cellSize",
       "Cell Size",
-      () => this.currentGenerator.cellSize,
+      () => this.currentGenerator.config.cellSize,
       (value) => {
-        this.currentGenerator.cellSize = value as number;
+        this.currentGenerator.config.cellSize = value as number;
       },
       0,
       20,
@@ -419,9 +411,9 @@ export class GameScene {
     controlManager.addSlider(
       "jitter",
       "Jitter",
-      () => this.currentGenerator.jitter,
+      () => this.currentGenerator.config.jitter,
       (value) => {
-        this.currentGenerator.jitter = value as number;
+        this.currentGenerator.config.jitter = value as number;
       },
       0,
       1,
@@ -431,9 +423,9 @@ export class GameScene {
     controlManager.addSlider(
       "amplitude",
       "Amplitude",
-      () => this.currentGenerator.amplitude,
+      () => this.currentGenerator.config.amplitude,
       (value) => {
-        this.currentGenerator.amplitude = value as number;
+        this.currentGenerator.config.amplitude = value as number;
       },
       0,
       3,
@@ -443,9 +435,9 @@ export class GameScene {
     controlManager.addSlider(
       "blendFactor",
       "Blend Factor",
-      () => this.currentGenerator.blendFactor,
+      () => this.currentGenerator.config.blendFactor,
       (value) => {
-        this.currentGenerator.blendFactor = value as number;
+        this.currentGenerator.config.blendFactor = value as number;
       },
       0,
       1,
@@ -455,10 +447,10 @@ export class GameScene {
     controlManager.addSlider(
       "octaves",
       "Octaves",
-      () => this.currentGenerator.octaves,
+      () => this.currentGenerator.config.octaves,
       (value) => {
         Object.values(this.globe.noiseGenerators).forEach((noise) => {
-          noise.octaves = value as number;
+          noise.config.octaves = value as number;
         });
       },
       1,
@@ -469,9 +461,9 @@ export class GameScene {
     controlManager.addSlider(
       "persistence",
       "Persistence",
-      () => this.currentGenerator.persistence,
+      () => this.currentGenerator.config.persistence,
       (value) => {
-        this.currentGenerator.persistence = value as number;
+        this.currentGenerator.config.persistence = value as number;
       },
       0,
       1,
@@ -481,9 +473,9 @@ export class GameScene {
     controlManager.addSlider(
       "lacunarity",
       "Lacunarity",
-      () => this.currentGenerator.lacunarity,
+      () => this.currentGenerator.config.lacunarity,
       (value) => {
-        this.currentGenerator.lacunarity = value as number;
+        this.currentGenerator.config.lacunarity = value as number;
       },
       1,
       3,
@@ -493,9 +485,9 @@ export class GameScene {
     controlManager.addSlider(
       "warpStrength",
       "Warp Strength",
-      () => this.currentGenerator.warpStrength,
+      () => this.currentGenerator.config.warpStrength,
       (value) => {
-        this.currentGenerator.warpStrength = value as number;
+        this.currentGenerator.config.warpStrength = value as number;
       },
       0,
       1,
@@ -505,9 +497,9 @@ export class GameScene {
     controlManager.addSlider(
       "ridgeOffset",
       "Ridge Offset",
-      () => this.currentGenerator.ridgeOffset,
+      () => this.currentGenerator.config.ridgeOffset,
       (value) => {
-        this.currentGenerator.ridgeOffset = value as number;
+        this.currentGenerator.config.ridgeOffset = value as number;
       },
       0,
       2,
@@ -517,9 +509,9 @@ export class GameScene {
     controlManager.addSlider(
       "turbulence",
       "Turbulence",
-      () => this.currentGenerator.turbulence,
+      () => this.currentGenerator.config.turbulence,
       (value) => {
-        this.currentGenerator.turbulence = value as number;
+        this.currentGenerator.config.turbulence = value as number;
       },
       0,
       1,
