@@ -117,7 +117,8 @@ export const modelGroups: ModelGroup[] = [
   {
     type: StructureType.PineForest,
     models: [
-      { name: "Pine", filename: "Tree", files: [18, 19, 20, 21, 22, 23, 24, 27, 28, 6, 7], numInstances: 400, weight: 0.8 },
+      { name: "Pine", filename: "Tree", files: [23, 24, 27, 28, 6, 7], numInstances: 300, weight: 0.4 },
+      { name: "Pine", filename: "Tree", files: [18, 19, 20, 21, 22], numInstances: 300, weight: 0.4 },
       { name: "DeadPine", filename: "Tree", files: [25, 26], numInstances: 100, nearTypes: ["Pine"], weight: 0.2 },
     ],
     placement: PlacementBehavior.Clustered,
