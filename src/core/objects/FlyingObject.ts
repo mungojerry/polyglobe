@@ -47,7 +47,7 @@ export class FlyingObject extends BaseGameObject implements IGameObject {
 
   constructor(scene: THREE.Scene, world: RAPIER.World, position: THREE.Vector3, globe: Globe, player: Player) {
     super(scene, position, world, "flying_object");
-
+    this.tilt = false;
     this.shootCooldown = 1000;
     this.globe = globe;
     this.globeRadius = globe.getRadius();

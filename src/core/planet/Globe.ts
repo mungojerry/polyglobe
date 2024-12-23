@@ -8,6 +8,7 @@ import { getTerrainColor, isLand, landBoundary } from "../utils/biomes";
 import { pseudoRandom } from "../utils/PseudoRandom";
 import { optimizeGeometry, smoothstep } from "../utils/utils";
 import { vectorPool } from "../utils/vectorPool";
+import { Atmosphere } from "./Atmosphere";
 import { GlobeChunk } from "./GlobeChunk";
 import { Infection } from "./Infection";
 import { TERRAIN_PRESETS, TerrainPresetEnum } from "./TerrainPresets";
@@ -26,7 +27,6 @@ export class Globe {
   public onTerrainDeformed: ((position: THREE.Vector3, radius: number) => void) | null = null;
   private chunks: GlobeChunk[][] = [];
   private readonly CHUNK_SIZE = 40;
-  // private terrainDeformer: TerrainDeformer;
   private frustum = new THREE.Frustum();
   private cameraViewProjectionMatrix = new THREE.Matrix4();
   private landGeometry!: THREE.BufferGeometry;
@@ -41,6 +41,8 @@ export class Globe {
   });
 
   private water!: Water;
+  private atmosphere!: Atmosphere;
+  private dayNightCycleSpeed = 0.05;
   public terrainScale = 0.9;
   public noiseGenerators: { [key: string]: VoronoiNoise } = {
     [TerrainPresetEnum.PLAINS]: new VoronoiNoise(TERRAIN_PRESETS[TerrainPresetEnum.PLAINS]),
@@ -57,7 +59,7 @@ export class Globe {
 
     this.createGlobe();
     this.generateWater();
-    // this.terrainDeformer = new TerrainDeformer(this.land, this.noise);
+    this.generateAtmosphere();
 
     if (globeConfig.showWall) this.addEquatorWall();
     this.object.castShadow = true;
@@ -73,6 +75,11 @@ export class Globe {
     });
   }
 
+  private generateAtmosphere() {
+    this.atmosphere = new Atmosphere(this.RADIUS);
+    this.object.add(this.atmosphere.getObject());
+  }
+
   public infect(p: THREE.Vector3) {
     const chunk = this.getChunkByPosition(p);
     if (chunk) {
@@ -80,7 +87,7 @@ export class Globe {
       this.infection.infect(p, chunk);
     }
   }
-  // Existing updateNoiseVisualization function
+
   updateNoiseVisualization(generator: VoronoiNoise, canvas: HTMLCanvasElement) {
     const context = canvas.getContext("2d");
     if (!context) return;
@@ -110,7 +117,6 @@ export class Globe {
     context.putImageData(imageData, 0, 0);
   }
 
-  // New function to update all noise visualizations
   updateAllNoiseVisualizations() {
     const container = document.createElement("div");
     container.style.position = "absolute";
@@ -134,8 +140,8 @@ export class Globe {
       noiseContainer.appendChild(text);
 
       const canvas = document.createElement("canvas");
-      canvas.width = 80; // Small image width
-      canvas.height = 80; // Small image height
+      canvas.width = 80;
+      canvas.height = 80;
       canvas.style.margin = "5px";
       canvas.style.border = "2px solid black";
       this.updateNoiseVisualization(generator, canvas);
@@ -162,12 +168,13 @@ export class Globe {
     const end = performance.now();
     debugManager.set("perf", "Generation time: " + (end - start).toFixed(4) + "ms");
   }
+
   private infection: Infection;
   private rigidBody!: RAPIER.RigidBody;
+
   private createPhysicsObject() {
     const fullGeometry = this.landGeometry;
 
-    // Create physics body first
     const rigidBodyDesc = RAPIER.RigidBodyDesc.fixed();
     this.rigidBody = this.world.createRigidBody(rigidBodyDesc);
 
@@ -178,9 +185,7 @@ export class Globe {
     this.world.createCollider(colliderDesc, this.rigidBody);
   }
 
-  // initChunks: Create chunks by looping over lat & lon
   private initChunks(sourceGeometry: THREE.BufferGeometry) {
-    // Clear existing chunks
     this.chunks.forEach((row) => {
       row.forEach((chunk) => {
         chunk.dispose();
@@ -195,7 +200,6 @@ export class Globe {
         const chunkGeo = this.extractChunkGeometry(sourceGeometry, lat, lon, this.CHUNK_SIZE);
         const chunk = new GlobeChunk(chunkGeo, this.landMaterial.clone());
 
-        // Store chunk boundaries for getChunkByPosition
         chunk.latStart = lat;
         chunk.latEnd = lat + this.CHUNK_SIZE;
         chunk.lonStart = lon;
@@ -215,12 +219,10 @@ export class Globe {
     const colorAttr = source.attributes.color;
     const indexAttr = source.index;
 
-    // Track vertices and build interleaved data
     const vertexMap = new Int32Array(positionAttr.count).fill(-1);
     const interleavedData = new Float32Array(positionAttr.count * 6);
     let vertexCount = 0;
 
-    // Sphere bounds checking
     const EPS = THREE.MathUtils.degToRad(1.0);
     const LAT_MIN = THREE.MathUtils.degToRad(lat) - EPS;
     const LAT_MAX = THREE.MathUtils.degToRad(lat + size) + EPS;
@@ -232,7 +234,6 @@ export class Globe {
     const posArray = positionAttr.array;
     const colArray = colorAttr.array;
 
-    // First pass: Mark vertices in bounds
     for (let i = 0; i < positionAttr.count; i++) {
       tempVec.set(posArray[i * 3], posArray[i * 3 + 1], posArray[i * 3 + 2]);
       spherical.setFromVector3(tempVec);
@@ -250,13 +251,11 @@ export class Globe {
       }
     }
 
-    // Second pass: Process triangles
     if (indexAttr) {
       const indexArray = indexAttr.array;
       const filteredIndices = new Uint32Array(indexArray.length);
       let indexCount = 0;
 
-      // Helper to add vertices that weren't in bounds but complete triangles
       function addVertex(index: number): number {
         const outIndex = vertexCount * 6;
         for (let j = 0; j < 3; j++) {
@@ -285,7 +284,6 @@ export class Globe {
       geometry.setIndex(new THREE.BufferAttribute(filteredIndices.slice(0, indexCount), 1));
     }
 
-    // Create final attributes
     const finalData = new Float32Array(interleavedData.buffer, 0, vertexCount * 6);
     const interleavedBuffer = new THREE.InterleavedBuffer(finalData, 6);
     geometry.setAttribute("position", new THREE.InterleavedBufferAttribute(interleavedBuffer, 3, 0));
@@ -295,20 +293,17 @@ export class Globe {
     return geometry;
   }
 
-  // Then modify generateLand() to use it:
   private generateLand() {
     const landGeometry = new THREE.IcosahedronGeometry(this.RADIUS + 0.1, this.DETAIL);
     const positionAttribute = landGeometry.attributes.position;
     const vertexCount = positionAttribute.count;
 
-    // Create buffers with fallback
     const vertices = new Float32Array(vertexCount * 3 * 4);
     const colors = new Float32Array(vertexCount * 3 * 4);
     const indices = new Uint32Array(vertexCount * 4);
     const positionArray = positionAttribute.array;
-    // Batch process vertices
+
     for (let i = 0; i < vertexCount; i++) {
-      // Direct array access is faster than push()
       const idx = i * 3;
 
       const x = positionArray[idx];
@@ -341,7 +336,7 @@ export class Globe {
     newGeometry.setAttribute("position", new THREE.BufferAttribute(vertices, 3));
     newGeometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
     newGeometry.setIndex(new THREE.BufferAttribute(indices, 1));
-    newGeometry.computeVertexNormals(); // Ensure normals are computed
+    newGeometry.computeVertexNormals();
 
     if (this.landGeometry) {
       this.landGeometry.dispose();
@@ -351,18 +346,11 @@ export class Globe {
   }
 
   public getSurfaceNormal(position: THREE.Vector3): THREE.Vector3 {
-    // Get the normal attribute buffer
     const normalAttr = this.landGeometry.attributes.normal;
-
-    // Find closest vertex index (you'll need to implement this based on your geometry)
     const closestIndex = this.findClosestVertexIndex(position);
-
-    // Get normal from buffer (3 components per vertex)
     const nx = normalAttr.array[closestIndex * 3];
     const ny = normalAttr.array[closestIndex * 3 + 1];
     const nz = normalAttr.array[closestIndex * 3 + 2];
-
-    // Return as normalized Vector3
     return new THREE.Vector3(nx, ny, nz).normalize();
   }
 
@@ -394,21 +382,19 @@ export class Globe {
   }
 
   public getHeight(x: number, y: number, z: number): number {
-    const BASE_HEIGHT = 0.2; // Ensures minimum elevation above water
+    const BASE_HEIGHT = 0.2;
 
     let height = BASE_HEIGHT;
     let totalWeight = 0;
 
-    // Iterate through all terrain types in noiseGenerators
     for (const [terrainType, generator] of Object.entries(this.noiseGenerators)) {
       const preset = TERRAIN_PRESETS[terrainType as TerrainPresetEnum];
       const noiseValue = generator.getValue(x * preset.cellSize, y * preset.cellSize, z * preset.cellSize);
-      const weight = preset.amplitude; // Use amplitude as weight for blending
+      const weight = preset.amplitude;
       height += noiseValue * weight;
       totalWeight += weight;
     }
 
-    // Normalize the height by the total weight to ensure proper blending
     if (totalWeight > 0) {
       height = (BASE_HEIGHT + (height - BASE_HEIGHT) / totalWeight) * this.terrainScale;
     }
@@ -417,21 +403,18 @@ export class Globe {
   }
 
   public getHeightPrecise(x: number, y: number, z: number, latitude: number): number {
-    const BASE_HEIGHT = 0.2; // Ensures minimum elevation above water
+    const BASE_HEIGHT = 0.2;
     const MOUNTAIN_SCALE = 1.2;
     const HILLS_SCALE = 0.8;
 
-    // Get noise values with adjusted scales
     const biomeNoise = this.noiseGenerators.PLAINS.getValue(x * 0.3, y * 0.3, z * 0.3);
     const snowNoise = this.noiseGenerators.SNOW_PEAKS.getValue(x, y, z) * MOUNTAIN_SCALE;
     const mountainNoise = this.noiseGenerators.MOUNTAINS.getValue(x, y, z) * MOUNTAIN_SCALE;
     const hillsNoise = this.noiseGenerators.HILLS.getValue(x, y, z) * HILLS_SCALE;
 
-    // Adjust biome weights
     const mountainWeight = smoothstep(0.4, 0.6, (biomeNoise + 1) * 0.5);
     const hillWeight = smoothstep(0.2, 0.4, (biomeNoise + 1) * 0.5);
 
-    // Calculate height with base elevation
     let height = BASE_HEIGHT;
 
     if (mountainWeight > 0) {
@@ -441,14 +424,12 @@ export class Globe {
       height += this.blendTerrains(hillsNoise, mountainNoise, hillWeight);
     }
     if (mountainWeight === 0 && hillWeight === 0) {
-      height += Math.max(0, hillsNoise * 0.6); // Ensure minimal height for plains
+      height += Math.max(0, hillsNoise * 0.6);
     }
 
-    // Apply latitude-based adjustment
     const latitudeInfluence = Math.cos(latitude * 2) * 0.2;
     height *= 1 + latitudeInfluence;
 
-    // Normalize and scale
     return Math.max(BASE_HEIGHT, height * this.terrainScale);
   }
 
@@ -466,18 +447,13 @@ export class Globe {
     const surfaceNormal = this.getSurfaceNormal(position);
     const up = position.clone().normalize();
     const steepness = 1 - surfaceNormal.dot(up);
-
     return steepness;
   }
 
   public getPositionOnSurface(worldPos: THREE.Vector3): THREE.Vector3 | null {
-    // Get normalized direction from center to position
     const direction = worldPos.clone().normalize();
-
-    // Get height at this point using noise
     const noise = this.getHeight(direction.x, direction.y, direction.z);
-    const elevation = this.elevationMultiplier(noise); // Same factor as in generateLand
-    // Scale direction by radius and elevation
+    const elevation = this.elevationMultiplier(noise);
     return direction.multiplyScalar(this.RADIUS * elevation);
   }
 
@@ -486,34 +462,21 @@ export class Globe {
   }
 
   public getHeightAboveSurface(v: THREE.Vector3, testUnderWater: boolean = false): number {
-    // Get normalized direction from center to position
     const direction = v.clone().normalize();
-
-    // Get height at this point using noise
     const noise = this.getHeight(direction.x, direction.y, direction.z);
-
     const noiseAboveWater = !testUnderWater && isLand(noise) ? noise : landBoundary;
-    const elevation = this.elevationMultiplier(noiseAboveWater); // Same elevation factor as in generateLand
-
-    // Calculate the height above the globe's radius
+    const elevation = this.elevationMultiplier(noiseAboveWater);
     const surfacePosition = direction.multiplyScalar(this.RADIUS * elevation);
     const height = v.distanceTo(surfacePosition);
-
     return height;
   }
 
   public getHeightOfSurface(v: THREE.Vector3): number {
-    // Get normalized direction from center to position
     const direction = v.clone().normalize();
-
-    // Get height at this point using noise
     const noise = this.getHeight(direction.x, direction.y, direction.z);
-    const elevation = this.elevationMultiplier(noise); // Same elevation factor as in generateLand
-
-    // Calculate the height above the globe's radius
+    const elevation = this.elevationMultiplier(noise);
     const surfacePosition = direction.multiplyScalar(this.RADIUS * elevation);
     const height = v.distanceTo(surfacePosition);
-
     return height;
   }
 
@@ -526,7 +489,6 @@ export class Globe {
   }
 
   deformTerrain(deformPosition: THREE.Vector3, strength: number = 2.5, radius: number = 25): void {
-    // this.terrainDeformer.deformTerrain(deformPosition, strength, radius);
     if (this.onTerrainDeformed) {
       this.onTerrainDeformed(deformPosition, radius);
     }
@@ -546,15 +508,12 @@ export class Globe {
       this.deformTerrain(intersect.point, -2.5);
     }
   }
+
   public getChunkByPosition(position: THREE.Vector3): GlobeChunk | null {
-    // Project the position onto the globe's surface
-    // Convert world coordinates to local coordinates
     const localPosition = position.clone().applyMatrix4(new THREE.Matrix4().copy(this.object.matrixWorld).invert());
-
-    // Then project onto surface
     const surfacePos = localPosition.clone().setLength(this.RADIUS);
-
     const { lat, lon } = this.xyzToLatLon(surfacePos);
+    
     for (const row of this.chunks) {
       for (const chunk of row) {
         if (lat >= chunk.latStart && lat < chunk.latEnd && lon >= chunk.lonStart && lon < chunk.lonEnd) {
@@ -564,6 +523,7 @@ export class Globe {
     }
     return null;
   }
+
   private xyzToLatLon(position: THREE.Vector3): { lat: number; lon: number } {
     const radius = this.RADIUS;
     const lat = Math.asin(position.y / radius) * (180 / Math.PI);
@@ -571,6 +531,7 @@ export class Globe {
     lon = ((lon + 180) % 360) - 180;
     return { lat: Math.max(-90, Math.min(90, lat)), lon };
   }
+
   public getVisibleChunks(): GlobeChunk[] {
     let visibleChunks: GlobeChunk[] = [];
     this.chunks.forEach((row) => {
@@ -599,11 +560,34 @@ export class Globe {
   }
 
   update(camera: THREE.Camera, deltaTime: number) {
-    // Only render visible chunks
-
     this.updateChunkVisibility(camera);
     this.water && this.water.animate();
     if (this.runInfection) this.infection.update(deltaTime);
+
+    // Update atmosphere and water with sun/moon positions
+    const time = performance.now() * 0.001;
+    const orbitRadius = this.RADIUS * 3;
+    const sunPosition = new THREE.Vector3(
+      Math.cos(time * this.dayNightCycleSpeed) * orbitRadius,
+      Math.sin(time * this.dayNightCycleSpeed) * orbitRadius * 0.3,
+      Math.sin(time * this.dayNightCycleSpeed) * orbitRadius
+    );
+    const moonPosition = new THREE.Vector3(
+      -Math.cos(time * this.dayNightCycleSpeed) * orbitRadius,
+      Math.sin(time * this.dayNightCycleSpeed + Math.PI) * orbitRadius * 0.3,
+      -Math.sin(time * this.dayNightCycleSpeed) * orbitRadius
+    );
+
+    // Update atmosphere
+    this.atmosphere.update(sunPosition, moonPosition);
+    
+    // Calculate day/night cycle
+    const dayNightCycle = (Math.sin(time * this.dayNightCycleSpeed) + 1) * 0.5;
+    this.atmosphere.setSunIntensity(Math.pow(dayNightCycle, 0.5));
+    this.atmosphere.setMoonIntensity(Math.pow(1 - dayNightCycle, 0.5) * 0.5);
+
+    // Update water reflections
+    this.water.updateLightPositions(sunPosition, moonPosition, dayNightCycle);
   }
 
   private updateChunkVisibility(camera: THREE.Camera) {

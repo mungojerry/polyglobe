@@ -34,6 +34,7 @@ export class BaseGameObject implements IGameObject {
   protected bullets: Bullet[] = [];
   protected lastShotTime = 0;
   protected shootCooldown = 150;
+  protected tilt: boolean = true;
   private healthBar: HealthBar;
 
   private tag: string;
@@ -92,6 +93,9 @@ export class BaseGameObject implements IGameObject {
       return this.scene.children.includes(sprite.sprite);
     });
 
+    vectorPool.releaseVector(position);
+  }
+  private tiltMesh() {
     // Calculate target rotations based on movement and rotation direction
     const targetRotationX = this.move * 0.4;
     const targetRotationZ = -this.rotationDirection * 0.4;
@@ -100,14 +104,13 @@ export class BaseGameObject implements IGameObject {
     const lerpFactor = 0.03; // Adjust this value to control the lerp speed
     this.objectMesh.rotation.x = THREE.MathUtils.lerp(this.objectMesh.rotation.x, targetRotationX, lerpFactor);
     this.objectMesh.rotation.z = THREE.MathUtils.lerp(this.objectMesh.rotation.z, targetRotationZ, lerpFactor);
-
-    vectorPool.releaseVector(position);
   }
-
   update(camera: THREE.Camera) {
     const position = this.body.translation();
 
     this.updateTrail();
+
+    if (this.tilt) this.tiltMesh();
 
     this.object.position.set(position.x, position.y, position.z);
 
