@@ -36,11 +36,11 @@ export interface ModelType {
   maxSlope?: number;
   useCollision?: boolean;
   nearTypes?: string[];
+  weight: number;
 }
 
 export interface ModelGroup {
-  primary: ModelType[];
-  secondary?: ModelType[];
+  models: ModelType[];
   placement: PlacementBehavior;
   type: StructureType;
   spacing?: number;
@@ -104,8 +104,10 @@ class SpatialHashGrid {
 export const modelGroups: ModelGroup[] = [
   {
     type: StructureType.Forest,
-    primary: [{ name: "Tree", filename: "Tree", files: [1, 2, 3, 4, 5], numInstances: 400 }],
-    secondary: [{ name: "DeadTree", filename: "Tree", files: [15, 16, 17], numInstances: 100, nearTypes: ["Tree"] }],
+    models: [
+      { name: "Tree", filename: "Tree", files: [1, 2, 3, 4, 5], numInstances: 400, weight: 0.8 },
+      { name: "DeadTree", filename: "Tree", files: [15, 16, 17], numInstances: 100, nearTypes: ["Tree"], weight: 0.2 },
+    ],
     placement: PlacementBehavior.Clustered,
     spacing: 50,
     maxSlope: 1.2,
@@ -114,8 +116,10 @@ export const modelGroups: ModelGroup[] = [
   },
   {
     type: StructureType.PineForest,
-    primary: [{ name: "Pine", filename: "Tree", files: [18, 19, 20, 21, 22, 23, 24, 27, 28, 6, 7], numInstances: 400 }],
-    secondary: [{ name: "DeadPine", filename: "Tree", files: [25, 26], numInstances: 100, nearTypes: ["Pine"] }],
+    models: [
+      { name: "Pine", filename: "Tree", files: [18, 19, 20, 21, 22, 23, 24, 27, 28, 6, 7], numInstances: 400, weight: 0.8 },
+      { name: "DeadPine", filename: "Tree", files: [25, 26], numInstances: 100, nearTypes: ["Pine"], weight: 0.2 },
+    ],
     placement: PlacementBehavior.Clustered,
     spacing: 50,
     maxSlope: 1.2,
@@ -125,12 +129,12 @@ export const modelGroups: ModelGroup[] = [
 
   {
     type: StructureType.Wilderness,
-    primary: [{ name: "Grass", filename: "Grass", files: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], numInstances: 20000 }],
+    models: [{ name: "Grass", filename: "Grass", files: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], numInstances: 20000, weight: 1 }],
     placement: PlacementBehavior.Random,
   },
   {
     type: StructureType.Wilderness,
-    primary: [{ name: "Rock", filename: "Rock", files: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19], numInstances: 5000 }],
+    models: [{ name: "Rock", filename: "Rock", files: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19], numInstances: 5000, weight: 1 }],
     placement: PlacementBehavior.Random,
   },
 ];
@@ -228,17 +232,11 @@ export class ObjectManager {
   public async placeObjects(modelGroups: ModelGroup[]): Promise<void> {
     this.poolIndex = 0;
 
-    const preloadPromises = modelGroups.flatMap((group) => [
-      ...group.primary.map((model) => this.preloadModelVariants(model)),
-      ...(group.secondary?.map((model) => this.preloadModelVariants(model)) || []),
-    ]);
+    const preloadPromises = modelGroups.flatMap((group) => [...group.models.map((model) => this.preloadModelVariants(model))]);
     await Promise.all(preloadPromises);
 
     for (const group of modelGroups) {
-      const allModelTypes = [...group.primary];
-      if (group.secondary) {
-        allModelTypes.push(...group.secondary);
-      }
+      const allModelTypes = group.models;
 
       const matrices: Map<string, THREE.Matrix4[]> = new Map();
       const totalInstances = allModelTypes.reduce((sum, type) => sum + type.numInstances, 0);
@@ -285,8 +283,29 @@ export class ObjectManager {
       });
     }
   }
-
   private selectModelTypesForBatch(modelTypes: ModelType[], batchCount: number): Map<ModelType, number> {
+    const selectedTypes = new Map<ModelType, number>();
+    const totalWeight = modelTypes.reduce((sum, type) => sum + type.weight, 0);
+
+    for (let i = 0; i < batchCount; i++) {
+      let random = Math.random() * totalWeight;
+      let weightSum = 0;
+
+      for (const modelType of modelTypes) {
+        weightSum += modelType.weight;
+        if (random <= weightSum) {
+          selectedTypes.set(modelType, (selectedTypes.get(modelType) || 0) + 1);
+          break;
+        }
+      }
+    }
+
+    return selectedTypes;
+  }
+
+  // Main placeObjects function remains the same, it now uses selectModelTypesForBatch
+  // in the clustered placement section as shown in the original code
+  private selectModelTypesForBatchOLD(modelTypes: ModelType[], batchCount: number): Map<ModelType, number> {
     const result = new Map<ModelType, number>();
     const totalWeight = modelTypes.reduce((sum, type) => sum + type.numInstances, 0);
     let remainingCount = batchCount;

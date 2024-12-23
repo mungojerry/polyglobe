@@ -39,7 +39,7 @@ export class ModelLoader {
       return {
         geometry: this.geometryCache.get(cacheKey)!,
         material: this.materialCache.get(cacheKey)!,
-        object: this.objectCache.get(cacheKey)!
+        object: this.objectCache.get(cacheKey)!,
       };
     }
 
@@ -70,6 +70,7 @@ export class ModelLoader {
                 child.receiveShadow = true;
                 if (child.material instanceof THREE.MeshPhongMaterial) {
                   child.material.flatShading = true;
+                  child.material.shininess = 0.1;
                   child.material.needsUpdate = true;
                 }
                 // Store the first mesh's geometry and material
@@ -84,7 +85,7 @@ export class ModelLoader {
               resolve({
                 geometry,
                 material,
-                object
+                object,
               });
             } else {
               reject(new Error("No valid mesh found in FBX model"));
