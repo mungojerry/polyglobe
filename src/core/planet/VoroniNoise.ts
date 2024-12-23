@@ -1,8 +1,6 @@
-import * as THREE from "three";
 import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise.js";
-import { vectorPool } from "../utils/vectorPool";
-export type VoronoiNoiseConfig = {
-  name: string;
+
+export interface VoronoiNoiseConfig {
   cellSize: number;
   jitter: number;
   amplitude: number;
@@ -16,9 +14,8 @@ export type VoronoiNoiseConfig = {
   erosionStrength: number;
   plateauThreshold: number;
   biomeScale: number;
-};
+}
 
-// Add this interface at the top
 interface GridCell {
   x: number;
   y: number;
@@ -26,25 +23,24 @@ interface GridCell {
 }
 
 export class VoronoiNoise {
-  // Use typed arrays for better performance with points
-  private points: Float32Array;
-  private pointCount: number = 0;
+  private readonly points: Float32Array;
+  private readonly pointCount: number;
+  private readonly simplexNoise: SimplexNoise;
+  private readonly spatialGrid: Int32Array;
+  private readonly gridSize: number;
 
-  // Pre-calculate constants
-  private readonly RANGE_MULT = 2;
-  private readonly JITTER_HALF = 0.5;
+  // Cache configuration
+  private readonly valueCache: Float32Array;
+  private readonly valueCacheKeys: Int32Array;
+  private readonly CACHE_SIZE = 8192; // Increased cache size, power of 2
+  private readonly COORD_SCALE = 100; // Scale for coordinate precision in cache
 
-  private simplexNoise: SimplexNoise;
-  private spatialGrid: Map<number, THREE.Vector3[]>;
-  private cachedResults: Map<string, THREE.Vector3[]>;
-  private voronoiCache: Map<string, number>;
-  private erosionCache: Map<string, number>;
-
+  // Configuration with validation
   public readonly config: VoronoiNoiseConfig;
 
-  constructor(config = {}) {
-    this.config = {
-      name: "voroni",
+  constructor(config: Partial<VoronoiNoiseConfig> = {}) {
+    // Default configuration with safe values
+    const defaultConfig: VoronoiNoiseConfig = {
       cellSize: 50,
       jitter: 0.8,
       amplitude: 1.0,
@@ -52,206 +48,272 @@ export class VoronoiNoise {
       octaves: 4,
       persistence: 0.5,
       lacunarity: 2.0,
-      warpStrength: 0.2, // Reduced warp strength
+      warpStrength: 0.2,
       ridgeOffset: 1.0,
-      turbulence: 0.15, // Reduced turbulence
-      erosionStrength: 0.2, // Reduced erosion
+      turbulence: 0.15,
+      erosionStrength: 0.2,
       plateauThreshold: 0.7,
-      biomeScale: 0.3, // Reduced biome scale
-      ...config,
+      biomeScale: 0.3,
     };
+
+    // Validate and clamp configuration values
+    this.config = this.validateConfig({ ...defaultConfig, ...config });
+
     this.simplexNoise = new SimplexNoise();
-    this.spatialGrid = new Map();
-    this.cachedResults = new Map();
-    this.voronoiCache = new Map();
-    this.erosionCache = new Map();
 
-    // Pre-allocate max points array based on range
-    const range = Math.ceil(this.RANGE_MULT * this.config.cellSize);
-    const maxPoints = Math.pow(Math.ceil((2 * range) / this.config.cellSize) + 1, 3);
-    this.points = new Float32Array(maxPoints * 3);
+    // Initialize grid with safe dimensions
+    this.gridSize = this.calculateGridSize();
+    const totalPoints = this.gridSize ** 3;
 
-    this.generatePoints();
+    // Initialize typed arrays with proper sizes
+    this.points = new Float32Array(totalPoints * 3);
+    this.spatialGrid = new Int32Array(totalPoints);
+    this.valueCache = new Float32Array(this.CACHE_SIZE);
+    this.valueCacheKeys = new Int32Array(this.CACHE_SIZE * 3);
+
+    // Generate and initialize
+    this.pointCount = this.generatePoints();
     this.initSpatialGrid();
   }
 
-  private generatePoints(): void {
-    const range = Math.ceil(this.RANGE_MULT * this.config.cellSize);
-    let idx = 0;
-
-    // Avoid repeated calculations
-    const jitterAmount = this.config.jitter * this.config.cellSize;
-
-    // Use single loop with pre-calculated bounds
-    const steps = Math.ceil((2 * range) / this.config.cellSize) + 1;
-    const total = steps * steps * steps;
-
-    for (let i = 0; i < total; i++) {
-      // Convert single index to x,y,z coordinates
-      const x = (i % steps) * this.config.cellSize - range;
-      const y = (Math.floor(i / steps) % steps) * this.config.cellSize - range;
-      const z = Math.floor(i / (steps * steps)) * this.config.cellSize - range;
-
-      // Direct array access is faster than push()
-      this.points[idx] = x + (Math.random() - this.JITTER_HALF) * jitterAmount;
-      this.points[idx + 1] = y + (Math.random() - this.JITTER_HALF) * jitterAmount;
-      this.points[idx + 2] = z + (Math.random() - this.JITTER_HALF) * jitterAmount;
-
-      idx += 3;
-    }
-
-    this.pointCount = idx / 3;
+  private validateConfig(config: VoronoiNoiseConfig): VoronoiNoiseConfig {
+    return {
+      cellSize: Math.max(1, Math.min(1000, config.cellSize)),
+      jitter: Math.max(0, Math.min(1, config.jitter)),
+      amplitude: Math.max(0.1, Math.min(10, config.amplitude)),
+      blendFactor: Math.max(0, Math.min(1, config.blendFactor)),
+      octaves: Math.max(1, Math.min(8, Math.floor(config.octaves))),
+      persistence: Math.max(0.1, Math.min(1, config.persistence)),
+      lacunarity: Math.max(1, Math.min(4, config.lacunarity)),
+      warpStrength: Math.max(0, Math.min(1, config.warpStrength)),
+      ridgeOffset: Math.max(0.1, Math.min(2, config.ridgeOffset)),
+      turbulence: Math.max(0, Math.min(1, config.turbulence)),
+      erosionStrength: Math.max(0, Math.min(1, config.erosionStrength)),
+      plateauThreshold: Math.max(0, Math.min(1, config.plateauThreshold)),
+      biomeScale: Math.max(0.1, Math.min(1, config.biomeScale)),
+    };
   }
 
-  private initSpatialGrid() {
-    this.spatialGrid.clear();
+  private calculateGridSize(): number {
+    // Ensure grid size is odd for proper centering
+    return Math.max(3, Math.ceil((2 * Math.ceil(2 * this.config.cellSize)) / this.config.cellSize) | 1);
+  }
 
-    // Process points in chunks for better performance
-    const CHUNK_SIZE = 1000;
+  private generatePoints(): number {
+    const { cellSize, jitter } = this.config;
+    const range = Math.ceil(2 * cellSize);
+    const jitterAmount = jitter * cellSize;
+    let idx = 0;
 
-    for (let i = 0; i < this.pointCount; i += CHUNK_SIZE) {
-      const end = Math.min(i + CHUNK_SIZE, this.pointCount);
+    for (let i = 0; i < this.gridSize ** 3; i++) {
+      const x = (i % this.gridSize) * cellSize - range;
+      const y = (Math.floor(i / this.gridSize) % this.gridSize) * cellSize - range;
+      const z = Math.floor(i / (this.gridSize * this.gridSize)) * cellSize - range;
 
-      for (let j = i; j < end; j++) {
-        const idx = j * 3;
-        const point = new THREE.Vector3(this.points[idx], this.points[idx + 1], this.points[idx + 2]);
-        const cell = this.getCellKey(point);
+      // Add jitter with bounds checking
+      const jx = x + (Math.random() - 0.5) * jitterAmount;
+      const jy = y + (Math.random() - 0.5) * jitterAmount;
+      const jz = z + (Math.random() - 0.5) * jitterAmount;
 
-        let points = this.spatialGrid.get(cell);
-        if (!points) {
-          points = [];
-          this.spatialGrid.set(cell, points);
-        }
-        points.push(point);
+      // Ensure points are within valid range
+      if (isFinite(jx) && isFinite(jy) && isFinite(jz)) {
+        this.points[idx] = jx;
+        this.points[idx + 1] = jy;
+        this.points[idx + 2] = jz;
+        idx += 3;
+      }
+    }
+
+    return idx / 3;
+  }
+
+  private initSpatialGrid(): void {
+    this.spatialGrid.fill(-1); // Initialize with invalid indices
+
+    for (let i = 0; i < this.pointCount; i++) {
+      const idx = i * 3;
+      const gridIdx = this.getGridIndex(this.points[idx], this.points[idx + 1], this.points[idx + 2]);
+
+      if (gridIdx >= 0 && gridIdx < this.spatialGrid.length) {
+        this.spatialGrid[i] = gridIdx;
       }
     }
   }
 
-  // Add helper method to convert 3D coordinates to single number
-  private getCellIndex(x: number, y: number, z: number): number {
-    // Use bit shifting for faster hashing
-    // Assuming reasonable coordinate ranges of ±2048
-    const px = x + 2048;
-    const py = y + 2048;
-    const pz = z + 2048;
-    return (px & 0xfff) | ((py & 0xfff) << 12) | ((pz & 0xfff) << 24);
-  }
+  private getGridIndex(x: number, y: number, z: number): number {
+    const gx = Math.floor(x / this.config.cellSize + this.gridSize / 2);
+    const gy = Math.floor(y / this.config.cellSize + this.gridSize / 2);
+    const gz = Math.floor(z / this.config.cellSize + this.gridSize / 2);
 
-  // Convert back to 3D coordinates when needed
-  private getCellCoords(index: number): GridCell {
-    return {
-      x: (index & 0xfff) - 2048,
-      y: ((index >> 12) & 0xfff) - 2048,
-      z: ((index >> 24) & 0xfff) - 2048,
-    };
-  }
-
-  // Update getCellKey to use numeric index
-  private getCellKey(point: THREE.Vector3): number {
-    const x = Math.floor(point.x / this.config.cellSize);
-    const y = Math.floor(point.y / this.config.cellSize);
-    const z = Math.floor(point.z / this.config.cellSize);
-    return this.getCellIndex(x, y, z);
-  }
-
-  private getBiomeValue(x: number, y: number, z: number): number {
-    const biomeNoise = this.simplexNoise.noise3d(x * this.config.biomeScale, y * this.config.biomeScale, z * this.config.biomeScale);
-    return (biomeNoise + 1) * 0.5; // Normalize to 0-1
-  }
-
-  private getErosion(x: number, y: number, z: number): number {
-    const cacheKey = `${(x / 0.1).toFixed(1)},${(y / 0.1).toFixed(1)},${(z / 0.1).toFixed(1)}`;
-    if (this.erosionCache.has(cacheKey)) {
-      return this.erosionCache.get(cacheKey)!;
+    if (gx < 0 || gx >= this.gridSize || gy < 0 || gy >= this.gridSize || gz < 0 || gz >= this.gridSize) {
+      return -1;
     }
 
-    const slope = this.getSlope(x, y, z);
-    const rainfall = this.simplexNoise.noise3d(x * 2, y * 2, z * 2) * 0.5 + 0.5;
-    const erosion = slope * rainfall * this.config.erosionStrength;
-
-    this.erosionCache.set(cacheKey, erosion);
-    return erosion;
+    return gz * this.gridSize * this.gridSize + gy * this.gridSize + gx;
   }
 
-  private getSlope(x: number, y: number, z: number): number {
-    const delta = 0.1;
-    const h1 = this.getBaseHeight(x + delta, y, z);
-    const h2 = this.getBaseHeight(x - delta, y, z);
-    const h3 = this.getBaseHeight(x, y, z + delta);
-    const h4 = this.getBaseHeight(x, y, z - delta);
-
-    const dx = (h1 - h2) / (2 * delta);
-    const dz = (h3 - h4) / (2 * delta);
-
-    return Math.sqrt(dx * dx + dz * dz);
-  }
-
-  private baseHeightCache = new Map<string, number>();
-
-  private getBaseHeight(x: number, y: number, z: number): number {
-    const key = `${x},${y},${z}`;
-    if (this.baseHeightCache.has(key)) {
-      return this.baseHeightCache.get(key)!;
+  private getBaseTerrain(x: number, y: number, z: number): number {
+    if (!isFinite(x) || !isFinite(y) || !isFinite(z)) {
+      return 0;
     }
-    const voronoiValue = this.getVoronoiValue(x, y, z);
-    const ridgeNoise = this.getRidgeNoise(x * 1.1, y * 0.9, z * 1.2);
-    const height = voronoiValue * this.config.blendFactor + ridgeNoise * (1 - this.config.blendFactor);
-    this.baseHeightCache.set(key, height);
-    return height;
-  }
 
-  private getMountainRange(x: number, y: number, z: number): number {
-    const angle = Math.atan2(z, x);
-    const distance = Math.sqrt(x * x + z * z);
+    // Apply warping with bounds checking
+    const warp = this.simplexNoise.noise3d(x, y, z) * this.config.warpStrength;
+    if (!isFinite(warp)) return 0;
 
-    const rangeNoise = this.simplexNoise.noise3d(Math.cos(angle) * distance * 0.02, y * 0.02, Math.sin(angle) * distance * 0.02);
+    const wx = x + warp;
+    const wy = y + warp;
+    const wz = z + warp;
 
-    return Math.pow(Math.max(0, rangeNoise), 2) * 2;
-  }
+    // Calculate and validate components
+    const voronoi = this.getVoronoiValue(wx, wy, wz);
+    const ridge = this.getRidgeNoise(wx, wy, wz);
+    const turbulence = this.simplexNoise.noise3d(wx * 2, wy * 2, wz * 2) * this.config.turbulence;
 
-  private getPlateau(height: number): number {
-    if (height > this.config.plateauThreshold) {
-      const t = (height - this.config.plateauThreshold) / (1 - this.config.plateauThreshold);
-      return this.config.plateauThreshold + (1 - Math.pow(1 - t, 3)) * (1 - this.config.plateauThreshold);
+    if (!isFinite(voronoi) || !isFinite(ridge) || !isFinite(turbulence)) {
+      return 0;
     }
-    return height;
+
+    // Blend components with validation
+    const value = voronoi * this.config.blendFactor + ridge * (1 - this.config.blendFactor) + turbulence;
+
+    return isFinite(value) ? value : 0;
   }
 
   public getValue(x: number, y: number, z: number): number {
-    // Add rotation-based warping
-    const rotation = this.getRotationalVariance(x, y, z);
-    const noise = this.simplexNoise.noise3d(x, y, z);
-    const wx = x + this.config.warpStrength * (noise + rotation);
-    const wy = y + this.config.warpStrength * (noise + rotation * 0.5);
-    const wz = z + this.config.warpStrength * (noise + rotation);
+    // Input validation
+    if (!isFinite(x) || !isFinite(y) || !isFinite(z)) {
+      return 0;
+    }
 
-    // Get base terrain components
-    const voronoiValue = this.getVoronoiValue(wx, wy, wz);
-    const ridgeNoise = this.getRidgeNoise(wx * 1.1, wy * 0.9, wz * 1.2);
-    const mountainRange = this.getMountainRange(wx, wy, wz);
-    const turbulence = this.getTurbulence(wx, wy, wz);
-    const fractalNoise = this.simplexNoise.noise3d(wx * 1.5, wy * 1.5, wz * 1.5) * 0.3;
+    // Check cache
+    const cacheKey = this.getCacheKey(x, y, z);
+    const cachedValue = this.checkCache(cacheKey, x, y, z);
+    if (cachedValue !== undefined && isFinite(cachedValue)) {
+      return cachedValue;
+    }
 
-    // Blend base terrain
-    let value =
-      voronoiValue * this.config.blendFactor + ridgeNoise * (1 - this.config.blendFactor) + mountainRange * 0.5 + turbulence + fractalNoise + rotation * 0.4;
+    // Get base terrain with validation
+    let value = this.getBaseTerrain(x, y, z);
+    if (!isFinite(value)) value = 0;
 
     // Apply erosion
-    const erosion = this.getErosion(wx, wy, wz);
-    value -= erosion;
+    const erosion = this.calculateErosion(x, y, z);
+    if (isFinite(erosion)) {
+      value = Math.max(-1, Math.min(1, value - erosion));
+    }
 
-    // Apply plateau formation
-    value = this.getPlateau(value);
+    // Apply plateau effect with validation
+    if (isFinite(value) && value > this.config.plateauThreshold) {
+      const t = (value - this.config.plateauThreshold) / (1 - this.config.plateauThreshold);
+      if (isFinite(t)) {
+        const plateau = this.config.plateauThreshold + (1 - Math.pow(1 - t, 3)) * (1 - this.config.plateauThreshold);
+        value = isFinite(plateau) ? plateau : value;
+      }
+    }
 
-    // Apply biome variation
-    const biomeValue = this.getBiomeValue(wx, wy, wz);
-    value *= 0.8 + biomeValue * 0.4;
+    // Ensure final value is within bounds
+    value = Math.max(-1, Math.min(1, value));
+
+    // Cache valid results
+    if (isFinite(value)) {
+      this.cacheValue(cacheKey, value, x, y, z);
+    }
 
     return value;
   }
 
-  private getTurbulence(x: number, y: number, z: number): number {
-    return this.simplexNoise.noise3d(x * 2.0, y * 2.0, z * 2.0) * this.config.turbulence;
+  private calculateErosion(x: number, y: number, z: number): number {
+    const delta = 0.1;
+
+    // Get height samples with validation
+    const heights = [
+      this.getBaseTerrain(x + delta, y, z),
+      this.getBaseTerrain(x - delta, y, z),
+      this.getBaseTerrain(x, y, z + delta),
+      this.getBaseTerrain(x, y, z - delta),
+    ];
+
+    if (!heights.every(isFinite)) {
+      return 0;
+    }
+
+    // Calculate slope
+    const dx = (heights[0] - heights[1]) / (2 * delta);
+    const dz = (heights[2] - heights[3]) / (2 * delta);
+
+    if (!isFinite(dx) || !isFinite(dz)) {
+      return 0;
+    }
+
+    const slope = Math.sqrt(dx * dx + dz * dz);
+    const rainfall = this.simplexNoise.noise3d(x * 2, y * 2, z * 2) * 0.5 + 0.5;
+
+    if (!isFinite(slope) || !isFinite(rainfall)) {
+      return 0;
+    }
+
+    const erosion = slope * rainfall * this.config.erosionStrength;
+    return isFinite(erosion) ? Math.min(1, Math.max(0, erosion)) : 0;
+  }
+
+  private getVoronoiValue(x: number, y: number, z: number): number {
+    let minDist = Infinity;
+    let secondMinDist = Infinity;
+    const gridIdx = this.getGridIndex(x, y, z);
+    let foundPoint = false;
+
+    if (gridIdx < 0) return 0;
+
+    // Check neighboring cells
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dz = -1; dz <= 1; dz++) {
+          const neighborIdx = gridIdx + dx + dy * this.gridSize + dz * this.gridSize * this.gridSize;
+
+          if (neighborIdx < 0 || neighborIdx >= this.spatialGrid.length) {
+            continue;
+          }
+
+          // Process points in this cell
+          for (let i = 0; i < this.pointCount; i++) {
+            if (this.spatialGrid[i] !== neighborIdx) continue;
+
+            const idx = i * 3;
+            const dx = this.points[idx] - x;
+            const dy = this.points[idx + 1] - y;
+            const dz = this.points[idx + 2] - z;
+
+            if (!isFinite(dx) || !isFinite(dy) || !isFinite(dz)) {
+              continue;
+            }
+
+            const distSq = dx * dx + dy * dy + dz * dz;
+            if (!isFinite(distSq)) continue;
+
+            if (distSq < minDist) {
+              secondMinDist = minDist;
+              minDist = distSq;
+              foundPoint = true;
+            } else if (distSq < secondMinDist) {
+              secondMinDist = distSq;
+            }
+          }
+        }
+      }
+    }
+
+    if (!foundPoint || !isFinite(minDist) || !isFinite(secondMinDist)) {
+      return 0;
+    }
+
+    // Prevent division by zero and ensure minimum difference
+    minDist = Math.max(minDist, 1e-10);
+    secondMinDist = Math.max(secondMinDist, minDist + 1e-10);
+
+    const value = ((Math.sqrt(secondMinDist) - Math.sqrt(minDist)) / this.config.cellSize) * this.config.amplitude;
+
+    return isFinite(value) ? Math.min(1, Math.max(-1, value)) : 0;
   }
 
   private getRidgeNoise(x: number, y: number, z: number): number {
@@ -259,113 +321,51 @@ export class VoronoiNoise {
     let frequency = 1;
     let amplitude = 1;
     let weight = 1;
-    const gain = 2.0;
 
     for (let i = 0; i < this.config.octaves; i++) {
-      let n = Math.abs(this.simplexNoise.noise3d(x * frequency, y * frequency, z * frequency));
-      n = this.config.ridgeOffset - n;
-      n = n * n;
+      const n = this.simplexNoise.noise3d(x * frequency, y * frequency, z * frequency);
 
-      value += n * amplitude * weight;
+      if (!isFinite(n)) continue;
+
+      const ridge = this.config.ridgeOffset - Math.abs(n);
+      if (!isFinite(ridge)) continue;
+
+      value += ridge * ridge * amplitude * weight;
+
       frequency *= this.config.lacunarity;
       amplitude *= this.config.persistence;
-      weight = n * gain;
-    }
+      weight = ridge * 2.0;
 
-    return value * this.config.amplitude;
-  }
-
-  private getRotationalVariance(x: number, y: number, z: number): number {
-    const angle = Math.atan2(z, x);
-    const rotationalNoise = this.simplexNoise.noise3d(Math.cos(angle) * 0.5, y * 0.3, Math.sin(angle) * 0.5);
-
-    return rotationalNoise * this.config.turbulence;
-  }
-
-  getNearbyPoints(position: THREE.Vector3, maxCount: number = 4): THREE.Vector3[] {
-    const key = `${Math.floor(position.x * 10)},${Math.floor(position.y * 10)},${Math.floor(position.z * 10)}_${maxCount}`;
-    if (this.cachedResults.has(key)) {
-      return this.cachedResults.get(key)!;
-    }
-
-    const cell = this.getCellKey(position);
-    const neighborCells = this.getNeighborCells(cell);
-    const candidates: Array<{ point: THREE.Vector3; distSq: number }> = [];
-    const tempVec = vectorPool.getVector();
-
-    neighborCells.forEach((cellKey) => {
-      const points = this.spatialGrid.get(cellKey);
-      if (points) {
-        for (const point of points) {
-          tempVec.copy(point).sub(position);
-          const distSq = tempVec.lengthSq();
-          if (candidates.length < maxCount) {
-            candidates.push({ point, distSq });
-            if (candidates.length === maxCount) {
-              candidates.sort((a, b) => a.distSq - b.distSq);
-            }
-          } else if (distSq < candidates[maxCount - 1].distSq) {
-            // replace the worst candidate, then do a quick insertion
-            candidates[maxCount - 1] = { point, distSq };
-            let i = maxCount - 2;
-            while (i >= 0 && candidates[i].distSq > candidates[i + 1].distSq) {
-              [candidates[i], candidates[i + 1]] = [candidates[i + 1], candidates[i]];
-              i--;
-            }
-          }
-        }
-      }
-    });
-
-    const result = candidates.map((c) => c.point);
-    this.cachedResults.set(key, result);
-    vectorPool.releaseVector(tempVec);
-    return result;
-  }
-
-  // Update neighbor cell calculation
-  private getNeighborCells(cellIndex: number): number[] {
-    const cell = this.getCellCoords(cellIndex);
-    const neighbors: number[] = [];
-
-    for (let dx = -1; dx <= 1; dx++) {
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dz = -1; dz <= 1; dz++) {
-          neighbors.push(this.getCellIndex(cell.x + dx, cell.y + dy, cell.z + dz));
-        }
-      }
-    }
-    return neighbors;
-  }
-
-  private getVoronoiValue(x: number, y: number, z: number): number {
-    const cacheKey = `${(x / 0.1).toFixed(1)},${(y / 0.1).toFixed(1)},${(z / 0.1).toFixed(1)}`;
-    if (this.voronoiCache.has(cacheKey)) {
-      return this.voronoiCache.get(cacheKey)!;
-    }
-
-    let minDistSq = Infinity;
-    let secondMinDistSq = Infinity;
-    const v = vectorPool.getVector(x, y, z);
-    const nearbyPoints = this.getNearbyPoints(v);
-    vectorPool.releaseVector(v);
-
-    for (const point of nearbyPoints) {
-      const dx = point.x - x;
-      const dy = point.y - y;
-      const dz = point.z - z;
-      const distSq = dx * dx + dy * dy + dz * dz;
-
-      if (distSq < minDistSq) {
-        secondMinDistSq = minDistSq;
-        minDistSq = distSq;
-      } else if (distSq < secondMinDistSq) {
-        secondMinDistSq = distSq;
+      if (!isFinite(frequency) || !isFinite(amplitude) || !isFinite(weight)) {
+        break;
       }
     }
 
-    const value = ((Math.sqrt(secondMinDistSq) - Math.sqrt(minDistSq)) / this.config.cellSize) * this.config.amplitude;
-    this.voronoiCache.set(cacheKey, value);
-    return value;
+    const finalValue = value * this.config.amplitude;
+    return isFinite(finalValue) ? Math.min(1, Math.max(-1, finalValue)) : 0;
+  }
+
+  private getCacheKey(x: number, y: number, z: number): number {
+    return (Math.floor(x * 73856093) ^ Math.floor(y * 19349663) ^ Math.floor(z * 83492791)) & (this.CACHE_SIZE - 1);
+  }
+
+  private checkCache(key: number, x: number, y: number, z: number): number | undefined {
+    const idx = key * 3;
+    if (
+      this.valueCacheKeys[idx] === Math.floor(x * 100) &&
+      this.valueCacheKeys[idx + 1] === Math.floor(y * 100) &&
+      this.valueCacheKeys[idx + 2] === Math.floor(z * 100)
+    ) {
+      return this.valueCache[key];
+    }
+    return undefined;
+  }
+
+  private cacheValue(key: number, value: number, x: number, y: number, z: number): void {
+    const idx = key * 3;
+    this.valueCacheKeys[idx] = Math.floor(x * 100);
+    this.valueCacheKeys[idx + 1] = Math.floor(y * 100);
+    this.valueCacheKeys[idx + 2] = Math.floor(z * 100);
+    this.valueCache[key] = value;
   }
 }
