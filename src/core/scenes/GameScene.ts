@@ -1,6 +1,9 @@
 import RAPIER, { EventQueue, RigidBody, Vector3, World } from "@dimforge/rapier3d";
 import * as THREE from "three";
+
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { controlManager } from "../managers/controlManager";
 import { debugManager } from "../managers/debugManager";
 import { modelGroups, ObjectManager } from "../managers/ObjectManager";
@@ -26,6 +29,13 @@ const config = {
     nightColor: new THREE.Color(0x000000),
     skyColor: new THREE.Color(0, 0, 0),
   },
+  tiltShift: {
+    amount: 100.003,
+    focusPosition: new THREE.Vector2(0.5, 0.5),
+    angle: Math.PI / 4,
+    brightness: 1.2,
+    luminanceThreshold: 0.8,
+  },
 };
 
 export class GameScene {
@@ -36,6 +46,8 @@ export class GameScene {
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
   private renderer: THREE.WebGLRenderer;
+  private composer: EffectComposer;
+  // private tiltShiftPass: ShaderPass;
   private bodyMeshes: any[] = [];
   private controls: OrbitControls;
   private globe: Globe;
@@ -69,6 +81,11 @@ export class GameScene {
     this.renderer.toneMapping = THREE.CineonToneMapping;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+    // Initialize EffectComposer
+    this.composer = new EffectComposer(this.renderer);
+    const renderPass = new RenderPass(this.scene, this.camera);
+    this.composer.addPass(renderPass);
 
     document.body.appendChild(this.renderer.domElement);
 
@@ -105,7 +122,6 @@ export class GameScene {
 
     this.objectManager = new ObjectManager(this.globe, this.scene);
     this.objectManager.placeObjects(modelGroups);
-    // this.initializeWorldObjects();
 
     this.initializeFlyingObjects();
 
@@ -122,18 +138,15 @@ export class GameScene {
         this.toggleDebugView();
       }
     });
-  }
 
-  // private async initializeWorldObjects(): Promise<void> {
-  //   try {
-  //     await this.objectManager.placeModels(STRUCTURES.find((s) => s.type === StructureType.Forest)!);
-  //     await this.objectManager.placeModels(STRUCTURES.find((s) => s.type === StructureType.PineForest)!);
-  //     await this.objectManager.placeModels(STRUCTURES.find((s) => s.type === StructureType.Village)!);
-  //     await this.objectManager.placeModels(STRUCTURES.find((s) => s.type === StructureType.Cemetery)!);
-  //   } catch (error) {
-  //     console.error("Error initializing world objects:", error);
-  //   }
-  // }
+    // Handle window resize
+    window.addEventListener("resize", () => {
+      this.camera.aspect = window.innerWidth / window.innerHeight;
+      this.camera.updateProjectionMatrix();
+      this.renderer.setSize(window.innerWidth, window.innerHeight);
+      this.composer.setSize(window.innerWidth, window.innerHeight);
+    });
+  }
 
   private createGlobe(): Globe {
     const globe = new Globe(this.camera, this.scene, this.world);
@@ -249,7 +262,6 @@ export class GameScene {
         this.globe.update(this.camera, 1);
         this.player.update(this.camera);
         this.updateDayNightCycle();
-        // this.objectManager.update(this.camera);
         if (this.orbitCoontrols) this.controls.update();
         else this.updateCamera(this.cameraAttachedTo.position.clone(), this.cameraAttachedTo.quaternion.clone());
         BulletGenerator.getInstance(this.world).update(1);
@@ -269,7 +281,8 @@ export class GameScene {
         this.flyingObjects.forEach((flyingObject) => flyingObject.update(this.camera));
       }
       this.miniGlobe.update();
-      this.renderer.render(this.scene, this.camera);
+      this.composer.render();
+      // this.renderer.render(this.scene, this.camera);
       debugManager.set("polys", "Polys: " + this.renderer.info.render.triangles);
       requestAnimationFrame(step);
     };
@@ -312,6 +325,7 @@ export class GameScene {
       pseudoRandom.setSeed(performance.now());
       this.globe.createGlobe();
     });
+
     controlManager.addSlider(
       "terrainscale",
       "Terrain scale: ",
