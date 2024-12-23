@@ -138,7 +138,12 @@ export const modelGroups: ModelGroup[] = [
   },
   {
     type: StructureType.Wilderness,
-    models: [{ name: "Rock", filename: "Rock", files: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19], numInstances: 5000, weight: 1 }],
+    models: [
+      { name: "Rock", filename: "Rock", files: [1, 2, 3, 4], numInstances: 2000, weight: 1 },
+      { name: "Rock", filename: "Rock", files: [5, 6, 7, 8], numInstances: 2000, weight: 1 },
+      { name: "Rock", filename: "Rock", files: [9, 10, 11, 12, 13], numInstances: 2000, weight: 1 },
+      { name: "Rock", filename: "Rock", files: [14, 15, 16, 17, 18, 19], numInstances: 2000, weight: 1 },
+    ],
     placement: PlacementBehavior.Random,
   },
 ];
