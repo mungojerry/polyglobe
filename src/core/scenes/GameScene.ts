@@ -97,6 +97,8 @@ export class GameScene {
     const ambientLight = new THREE.AmbientLight(0xffffd0, 0.2);
     this.scene.add(ambientLight);
 
+    this.scene.fog = new THREE.FogExp2(0xddddff, 0.004);
+
     this.globe = this.createGlobe();
     this.scene.add(this.globe.getObject());
 

@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@dimforge/rapier3d": "^0.14.0",
+    "fast-simplex-noise": "^4.0.0",
     "gsap": "^3.12.5",
     "simplex-noise": "^4.0.3",
     "stats.js": "^0.17.0",

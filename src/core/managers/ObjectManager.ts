@@ -105,7 +105,10 @@ export const modelGroups: ModelGroup[] = [
   {
     type: StructureType.Forest,
     models: [
-      { name: "Tree", filename: "Tree", files: [1, 2, 3, 4, 5], numInstances: 400, weight: 0.8 },
+      { name: "Tree", filename: "Tree", files: [1, 2], numInstances: 200, weight: 0.3 },
+      { name: "Tree", filename: "Tree", files: [3, 4, 5], numInstances: 200, weight: 0.3 },
+      { name: "Tree", filename: "Tree", files: [5], numInstances: 100, weight: 0.2 },
+
       { name: "DeadTree", filename: "Tree", files: [15, 16, 17], numInstances: 100, nearTypes: ["Tree"], weight: 0.2 },
     ],
     placement: PlacementBehavior.Clustered,
@@ -237,38 +240,13 @@ export class ObjectManager {
     await Promise.all(preloadPromises);
 
     for (const group of modelGroups) {
-      const allModelTypes = group.models;
-
       const matrices: Map<string, THREE.Matrix4[]> = new Map();
-      const totalInstances = allModelTypes.reduce((sum, type) => sum + type.numInstances, 0);
       const batchSize = 100;
 
       if (group.placement === PlacementBehavior.Clustered && group.numInCluster) {
-        const numClusters = Math.ceil(totalInstances / group.numInCluster);
-        const clusterCenters = Array(numClusters)
-          .fill(null)
-          .map(() => this.landVertices[Math.floor(Math.random() * this.landVertices.length)]);
-
-        for (const center of clusterCenters) {
-          const nearbyVertices = this.spatialGrid.getNearby(center.position, group.spacing || 5);
-          const numInThisCluster = Math.min(group.numInCluster, totalInstances);
-
-          for (let i = 0; i < numInThisCluster; i += batchSize) {
-            const batchCount = Math.min(batchSize, numInThisCluster - i);
-            const selectedTypes = this.selectModelTypesForBatch(allModelTypes, batchCount);
-
-            for (const [modelType, count] of selectedTypes) {
-              await this.placeBatch(modelType, nearbyVertices, count, matrices);
-            }
-          }
-        }
+        await this.placeClusteredObjects(group, batchSize, matrices);
       } else {
-        for (const modelType of allModelTypes) {
-          for (let i = 0; i < modelType.numInstances; i += batchSize) {
-            const batchCount = Math.min(batchSize, modelType.numInstances - i);
-            await this.placeBatch(modelType, this.landVertices, batchCount, matrices);
-          }
-        }
+        await this.placeNormalObjects(group, batchSize, matrices);
       }
 
       matrices.forEach((matrixArray, modelKey) => {
@@ -284,6 +262,43 @@ export class ObjectManager {
       });
     }
   }
+
+  private async placeNormalObjects(group: ModelGroup, batchSize: number, matrices: Map<string, THREE.Matrix4[]>) {
+    const promises = [];
+    for (const modelType of group.models) {
+      for (let i = 0; i < modelType.numInstances; i += batchSize) {
+        const batchCount = Math.min(batchSize, modelType.numInstances - i);
+        promises.push(this.placeBatch(modelType, this.landVertices, batchCount, matrices));
+      }
+    }
+    await Promise.all(promises);
+  }
+
+  private async placeClusteredObjects(group: ModelGroup, batchSize: number, matrices: Map<string, THREE.Matrix4[]>) {
+    const promises = [];
+    const totalInstances = group.models.reduce((sum, type) => sum + type.numInstances, 0);
+    const numInCluster = group.numInCluster ?? 1;
+    const numClusters = Math.ceil(totalInstances / numInCluster);
+    const clusterCenters = Array(numClusters)
+      .fill(null)
+      .map(() => this.landVertices[Math.floor(Math.random() * this.landVertices.length)]);
+
+    for (const center of clusterCenters) {
+      const nearbyVertices = this.spatialGrid.getNearby(center.position, group.spacing || 5);
+      const numInThisCluster = Math.min(numInCluster, totalInstances);
+
+      for (let i = 0; i < numInThisCluster; i += batchSize) {
+        const batchCount = Math.min(batchSize, numInThisCluster - i);
+        const selectedTypes = this.selectModelTypesForBatch(group.models, batchCount);
+
+        for (const [modelType, count] of selectedTypes) {
+          promises.push(this.placeBatch(modelType, nearbyVertices, count, matrices));
+        }
+      }
+    }
+    await Promise.all(promises);
+  }
+
   private selectModelTypesForBatch(modelTypes: ModelType[], batchCount: number): Map<ModelType, number> {
     const selectedTypes = new Map<ModelType, number>();
     const totalWeight = modelTypes.reduce((sum, type) => sum + type.weight, 0);
@@ -302,36 +317,6 @@ export class ObjectManager {
     }
 
     return selectedTypes;
-  }
-
-  // Main placeObjects function remains the same, it now uses selectModelTypesForBatch
-  // in the clustered placement section as shown in the original code
-  private selectModelTypesForBatchOLD(modelTypes: ModelType[], batchCount: number): Map<ModelType, number> {
-    const result = new Map<ModelType, number>();
-    const totalWeight = modelTypes.reduce((sum, type) => sum + type.numInstances, 0);
-    let remainingCount = batchCount;
-
-    for (const modelType of modelTypes) {
-      if (remainingCount <= 0) break;
-
-      const baseCount = Math.floor((modelType.numInstances / totalWeight) * batchCount);
-      const variance = Math.floor(baseCount * 0.3);
-      const actualCount = Math.min(remainingCount, baseCount + Math.floor(Math.random() * variance * 2 - variance));
-
-      if (actualCount > 0) {
-        result.set(modelType, actualCount);
-        remainingCount -= actualCount;
-      }
-    }
-
-    while (remainingCount > 0) {
-      const randomType = modelTypes[Math.floor(Math.random() * modelTypes.length)];
-      const current = result.get(randomType) || 0;
-      result.set(randomType, current + 1);
-      remainingCount--;
-    }
-
-    return result;
   }
 
   private async placeBatch(modelType: ModelType, vertices: CachedLandVertex[], count: number, matrices: Map<string, THREE.Matrix4[]>): Promise<void> {

@@ -58,7 +58,7 @@ export class MiniGlobe {
     // Assign colors to icosahedronGeometry vertices
     const icosahedronPositions = icosahedronGeometry.attributes.position;
     const colors = new Float32Array(icosahedronPositions.count * 3);
-
+    let lastColor = new THREE.Color(0.5, 0.5, 0.5);
     for (let i = 0; i < icosahedronPositions.count; i++) {
       vertex.fromBufferAttribute(icosahedronPositions, i).normalize();
       const theta = Math.acos(vertex.y); // 0 to PI
@@ -67,8 +67,8 @@ export class MiniGlobe {
       const thetaIndex = Math.min(Math.floor((theta / Math.PI) * numTheta), numTheta - 1);
       const phiIndex = Math.min(Math.floor((phi / (2 * Math.PI)) * numPhi), numPhi - 1);
 
-      const color = colorMap[thetaIndex][phiIndex] || new THREE.Color(1, 1, 1);
-
+      const color = colorMap[thetaIndex][phiIndex] || lastColor;
+      lastColor = color;
       colors[i * 3] = color.r;
       colors[i * 3 + 1] = color.g;
       colors[i * 3 + 2] = color.b;
@@ -119,11 +119,6 @@ export class MiniGlobe {
 
     miniGlobeElementShadow.style.background = "radial-gradient(circle, rgba(0,0,0,0) 0%, rgba(0,0,0,0) 50%, rgba(0,0,0,.71) 80%, rgba(0,0,0,.91) 100%)";
     miniGlobeElementShadow.style.borderRadius = "50%";
-
-    // const cameraMarkerGeometry = new THREE.SphereGeometry(0.05, 8, 8);
-    // const cameraMarkerMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-    // this.cameraMarker = new THREE.Mesh(cameraMarkerGeometry, cameraMarkerMaterial);
-    // this.scene.add(this.cameraMarker);
   }
 
   public update() {

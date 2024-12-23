@@ -201,9 +201,10 @@ export class VoronoiNoise {
   public getValue(x: number, y: number, z: number): number {
     // Add rotation-based warping
     const rotation = this.getRotationalVariance(x, y, z);
-    const wx = x + this.warpStrength * (this.simplexNoise.noise3d(x, y, z) + rotation);
-    const wy = y + this.warpStrength * (this.simplexNoise.noise3d(y, z, x) + rotation * 0.5);
-    const wz = z + this.warpStrength * (this.simplexNoise.noise3d(z, x, y) + rotation);
+    const noise = this.simplexNoise.noise3d(x, y, z);
+    const wx = x + this.warpStrength * (noise + rotation);
+    const wy = y + this.warpStrength * (noise + rotation * 0.5);
+    const wz = z + this.warpStrength * (noise + rotation);
 
     // Get base terrain components
     const voronoiValue = this.getVoronoiValue(wx, wy, wz);

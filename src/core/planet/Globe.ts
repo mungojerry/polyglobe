@@ -25,7 +25,7 @@ export class Globe {
   public runInfection: boolean = false;
   public onTerrainDeformed: ((position: THREE.Vector3, radius: number) => void) | null = null;
   private chunks: GlobeChunk[][] = [];
-  private readonly CHUNK_SIZE = 30; //360 / 10; // degrees per chunk
+  private readonly CHUNK_SIZE = 40;
   // private terrainDeformer: TerrainDeformer;
   private frustum = new THREE.Frustum();
   private cameraViewProjectionMatrix = new THREE.Matrix4();
@@ -71,7 +71,6 @@ export class Globe {
         object.receiveShadow = true;
       }
     });
-    // this.createAtmosphere();
   }
 
   public infect(p: THREE.Vector3) {
