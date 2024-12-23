@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { debugManager } from "../managers/debugManager";
 import { Globe } from "./Globe";
 import { GlobeChunk } from "./GlobeChunk";
 
@@ -16,6 +17,7 @@ export class Infection {
   }
 
   public infect(position: THREE.Vector3, chunk: GlobeChunk) {
+    const start = performance.now();
     const mesh = chunk.mesh;
     const geometry = mesh.geometry as THREE.BufferGeometry;
     const material = mesh.material as THREE.MeshStandardMaterial;
@@ -77,6 +79,8 @@ export class Infection {
         material.needsUpdate = true;
       }
     }
+    const end = performance.now();
+    debugManager.set("infectiontime", "infect: " + (end - start).toFixed(4));
   }
 
   public update(deltaTime: number): void {}

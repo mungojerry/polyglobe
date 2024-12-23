@@ -3,7 +3,14 @@ import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise.js";
 import { vectorPool } from "../utils/vectorPool";
 
 export class VoronoiNoise {
-  private points: Array<[number, number, number]>;
+  // Use typed arrays for better performance with points
+  private points: Float32Array;
+  private pointCount: number = 0;
+
+  // Pre-calculate constants
+  private readonly RANGE_MULT = 2;
+  private readonly JITTER_HALF = 0.5;
+
   public name: string;
   public cellSize: number;
   public jitter: number;
@@ -41,7 +48,6 @@ export class VoronoiNoise {
     biomeScale = 0.5,
   } = {}) {
     this.name = name;
-    this.points = [];
     this.cellSize = cellSize;
     this.jitter = jitter;
     this.amplitude = amplitude;
@@ -60,35 +66,66 @@ export class VoronoiNoise {
     this.cachedResults = new Map();
     this.voronoiCache = new Map();
     this.erosionCache = new Map();
+
+    // Pre-allocate max points array based on range
+    const range = Math.ceil(this.RANGE_MULT * cellSize);
+    const maxPoints = Math.pow(Math.ceil((2 * range) / cellSize) + 1, 3);
+    this.points = new Float32Array(maxPoints * 3);
+
     this.generatePoints();
     this.initSpatialGrid();
   }
 
   private generatePoints(): void {
-    const range = Math.ceil(2 * this.cellSize);
-    this.points = [];
-    for (let x = -range; x <= range; x += this.cellSize) {
-      for (let y = -range; y <= range; y += this.cellSize) {
-        for (let z = -range; z <= range; z += this.cellSize) {
-          this.points.push([
-            x + (Math.random() - 0.5) * this.jitter * this.cellSize,
-            y + (Math.random() - 0.5) * this.jitter * this.cellSize,
-            z + (Math.random() - 0.5) * this.jitter * this.cellSize,
-          ]);
-        }
-      }
+    const range = Math.ceil(this.RANGE_MULT * this.cellSize);
+    let idx = 0;
+
+    // Avoid repeated calculations
+    const jitterAmount = this.jitter * this.cellSize;
+
+    // Use single loop with pre-calculated bounds
+    const steps = Math.ceil((2 * range) / this.cellSize) + 1;
+    const total = steps * steps * steps;
+
+    for (let i = 0; i < total; i++) {
+      // Convert single index to x,y,z coordinates
+      const x = (i % steps) * this.cellSize - range;
+      const y = (Math.floor(i / steps) % steps) * this.cellSize - range;
+      const z = Math.floor(i / (steps * steps)) * this.cellSize - range;
+
+      // Direct array access is faster than push()
+      this.points[idx] = x + (Math.random() - this.JITTER_HALF) * jitterAmount;
+      this.points[idx + 1] = y + (Math.random() - this.JITTER_HALF) * jitterAmount;
+      this.points[idx + 2] = z + (Math.random() - this.JITTER_HALF) * jitterAmount;
+
+      idx += 3;
     }
+
+    this.pointCount = idx / 3;
   }
 
   private initSpatialGrid() {
     this.spatialGrid.clear();
-    this.points.forEach((point) => {
-      const cell = this.getCellKey(new THREE.Vector3(point[0], point[1], point[2]));
-      if (!this.spatialGrid.has(cell)) {
-        this.spatialGrid.set(cell, []);
+
+    // Process points in chunks for better performance
+    const CHUNK_SIZE = 1000;
+
+    for (let i = 0; i < this.pointCount; i += CHUNK_SIZE) {
+      const end = Math.min(i + CHUNK_SIZE, this.pointCount);
+
+      for (let j = i; j < end; j++) {
+        const idx = j * 3;
+        const point = new THREE.Vector3(this.points[idx], this.points[idx + 1], this.points[idx + 2]);
+        const cell = this.getCellKey(point);
+
+        let points = this.spatialGrid.get(cell);
+        if (!points) {
+          points = [];
+          this.spatialGrid.set(cell, points);
+        }
+        points.push(point);
       }
-      this.spatialGrid.get(cell)!.push(new THREE.Vector3(point[0], point[1], point[2]));
-    });
+    }
   }
 
   private getCellKey(point: THREE.Vector3): string {
