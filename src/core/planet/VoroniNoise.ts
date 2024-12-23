@@ -167,10 +167,18 @@ export class VoronoiNoise {
     return Math.sqrt(dx * dx + dz * dz);
   }
 
+  private baseHeightCache = new Map<string, number>();
+
   private getBaseHeight(x: number, y: number, z: number): number {
+    const key = `${x},${y},${z}`;
+    if (this.baseHeightCache.has(key)) {
+      return this.baseHeightCache.get(key)!;
+    }
     const voronoiValue = this.getVoronoiValue(x, y, z);
     const ridgeNoise = this.getRidgeNoise(x * 1.1, y * 0.9, z * 1.2);
-    return voronoiValue * this.blendFactor + ridgeNoise * (1 - this.blendFactor);
+    const height = voronoiValue * this.blendFactor + ridgeNoise * (1 - this.blendFactor);
+    this.baseHeightCache.set(key, height);
+    return height;
   }
 
   private getMountainRange(x: number, y: number, z: number): number {
@@ -221,7 +229,6 @@ export class VoronoiNoise {
     return value;
   }
 
-  // ... (keeping the rest of the existing methods unchanged: getNearbyPoints, getNeighborCells, getTurbulence, getRidgeNoise, getRotationalVariance, getVoronoiValue)
   private getTurbulence(x: number, y: number, z: number): number {
     return this.simplexNoise.noise3d(x * 2.0, y * 2.0, z * 2.0) * this.turbulence;
   }
@@ -271,10 +278,19 @@ export class VoronoiNoise {
         for (const point of points) {
           tempVec.copy(point).sub(position);
           const distSq = tempVec.lengthSq();
-          if (candidates.length < maxCount || distSq < candidates[candidates.length - 1].distSq) {
+          if (candidates.length < maxCount) {
             candidates.push({ point, distSq });
-            candidates.sort((a, b) => a.distSq - b.distSq);
-            if (candidates.length > maxCount) candidates.pop();
+            if (candidates.length === maxCount) {
+              candidates.sort((a, b) => a.distSq - b.distSq);
+            }
+          } else if (distSq < candidates[maxCount - 1].distSq) {
+            // replace the worst candidate, then do a quick insertion
+            candidates[maxCount - 1] = { point, distSq };
+            let i = maxCount - 2;
+            while (i >= 0 && candidates[i].distSq > candidates[i + 1].distSq) {
+              [candidates[i], candidates[i + 1]] = [candidates[i + 1], candidates[i]];
+              i--;
+            }
           }
         }
       }
