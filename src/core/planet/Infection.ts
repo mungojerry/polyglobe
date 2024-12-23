@@ -11,6 +11,7 @@ export class Infection {
   constructor(private globe: Globe) {
     this.raycaster = new THREE.Raycaster();
     this.raycaster.firstHitOnly = true;
+    this.raycaster.layers.set(1);
   }
 
   private getVertexKey(chunkId: string, index: number): string {

@@ -147,7 +147,7 @@ export class Globe {
             chunk.latEnd = lat + this.CHUNK_SIZE;
             chunk.lonStart = lon;
             chunk.lonEnd = lon + this.CHUNK_SIZE;
-
+            chunk.mesh.layers.enable(1);
             row.push(chunk);
             this.object.add(chunk.mesh);
             worker.terminate();
