@@ -10,6 +10,7 @@ export class Infection {
 
   constructor(private globe: Globe) {
     this.raycaster = new THREE.Raycaster();
+    this.raycaster.firstHitOnly = true;
   }
 
   private getVertexKey(chunkId: string, index: number): string {

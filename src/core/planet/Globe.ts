@@ -27,7 +27,7 @@ export class Globe {
   public runInfection: boolean = false;
   public onTerrainDeformed: ((position: THREE.Vector3, radius: number) => void) | null = null;
   private chunks: GlobeChunk[][] = [];
-  private readonly CHUNK_SIZE = 40;
+  private readonly CHUNK_SIZE = 20;
   private frustum = new THREE.Frustum();
   private cameraViewProjectionMatrix = new THREE.Matrix4();
   private landGeometry!: THREE.BufferGeometry;
@@ -141,7 +141,7 @@ export class Globe {
             // Reconstruct the geometry from the serialized data
             const loader = new THREE.BufferGeometryLoader();
             const geometry = loader.parse(serializedGeometry);
-
+            geometry.computeBoundsTree();
             const chunk = new GlobeChunk(geometry, this.landMaterial.clone());
             chunk.latStart = lat;
             chunk.latEnd = lat + this.CHUNK_SIZE;

@@ -1,6 +1,7 @@
 import RAPIER, { EventQueue, RigidBody, Vector3, World } from "@dimforge/rapier3d";
 import * as THREE from "three";
 
+import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from "three-mesh-bvh";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
@@ -19,6 +20,11 @@ import { TerrainPresetEnum } from "../planet/TerrainPresets";
 import { VoronoiNoise } from "../planet/VoroniNoise";
 import { pseudoRandom } from "../utils/PseudoRandom";
 import { BulletGenerator } from "../weapons/BulletGenerator";
+
+// Add the extension functions
+THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
+THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 const config = {
   numUFOs: 1,
