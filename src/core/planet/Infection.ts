@@ -4,65 +4,78 @@ import { GlobeChunk } from "./GlobeChunk";
 
 export class Infection {
   private raycaster: THREE.Raycaster;
+  private infectedVertices: Set<string> = new Set();
+  private infectionRadius: number = 10.0; // Very large radius
 
   constructor(private globe: Globe) {
     this.raycaster = new THREE.Raycaster();
   }
 
+  private getVertexKey(chunkId: string, index: number): string {
+    return `${chunkId}_${index}`;
+  }
+
   public infect(position: THREE.Vector3, chunk: GlobeChunk) {
-    // Move origin slightly above surface
+    const mesh = chunk.mesh;
+    const geometry = mesh.geometry as THREE.BufferGeometry;
+    const material = mesh.material as THREE.MeshStandardMaterial;
+
+    // Setup raycaster
     const origin = position
       .clone()
       .normalize()
       .multiplyScalar(this.globe.getRadius() * 2);
-
-    // Direction towards center
     const direction = origin.clone().normalize().negate();
+    this.raycaster.set(origin, direction);
 
-    // Transform ray to chunk's local space
-    const localOrigin = origin.clone().applyMatrix4(chunk.mesh.matrixWorld.invert());
-    const localDirection = direction.clone().transformDirection(chunk.mesh.matrixWorld.invert());
+    const intersects = this.raycaster.intersectObject(mesh, false);
 
-    // Setup raycaster in local space
-    this.raycaster.set(localOrigin, localDirection);
-    const intersects = this.raycaster.intersectObject(chunk.mesh, false);
     if (intersects.length > 0) {
-      const intersect = intersects[0]; // Take the closest intersection
-      const mesh = intersect.object as THREE.Mesh;
+      const intersect = intersects[0];
 
-      // Access the geometry and material
-      const geometry = mesh.geometry as THREE.BufferGeometry;
-      const material = mesh.material as THREE.MeshStandardMaterial; // Replace with your actual material type
+      // Ensure we have color attribute
+      if (!geometry.attributes.color) {
+        const colors = new Float32Array(geometry.attributes.position.count * 3);
+        for (let i = 0; i < colors.length; i++) colors[i] = 1;
+        geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+      }
 
-      // Get the index of the face's vertices
-      const indexAttr = geometry.index;
+      const positionAttr = geometry.attributes.position;
       const colorAttr = geometry.attributes.color as THREE.BufferAttribute;
 
-      if (indexAttr && intersect.faceIndex !== undefined) {
-        const vertexIndices = [
-          indexAttr.getX(intersect.faceIndex * 3),
-          indexAttr.getX(intersect.faceIndex * 3 + 1),
-          indexAttr.getX(intersect.faceIndex * 3 + 2),
+      // Get intersection point in local space
+      const localIntersectionPoint = intersect.point.clone().applyMatrix4(mesh.matrixWorld.invert());
 
-          indexAttr.getX(intersect.faceIndex * 3 + 3),
-          indexAttr.getX(intersect.faceIndex * 3 + 4),
-          indexAttr.getX(intersect.faceIndex * 3 + 5),
-        ];
+      // Process all vertices
+      for (let i = 0; i < positionAttr.count; i++) {
+        const vertexKey = this.getVertexKey(mesh.uuid, i);
 
-        // Set the colors of the face's vertices to red
-        for (const vertexIndex of vertexIndices) {
-          colorAttr.setXYZ(vertexIndex, 1, 0, 0);
-        }
-        colorAttr.needsUpdate = true;
+        // Skip already infected vertices
+        if (this.infectedVertices.has(vertexKey)) continue;
 
-        // Ensure the material uses vertex colors
-        if (!material.vertexColors) {
-          material.vertexColors = true;
-          material.needsUpdate = true;
+        const vertex = new THREE.Vector3();
+        vertex.fromBufferAttribute(positionAttr, i);
+
+        const distance = vertex.distanceTo(localIntersectionPoint);
+
+        // Use a larger radius and more aggressive infection
+        if (distance <= this.infectionRadius) {
+          // Mark as infected
+          this.infectedVertices.add(vertexKey);
+
+          // Set to pure red immediately
+          colorAttr.setXYZ(i, 1, 0, 0);
         }
       }
-    } else {
-      console.log("No intersection found.");
+
+      // Mark color attribute as needing update
+      colorAttr.needsUpdate = true;
+
+      // Ensure the material uses vertex colors
+      if (!material.vertexColors) {
+        material.vertexColors = true;
+        material.needsUpdate = true;
+      }
     }
   }
 
