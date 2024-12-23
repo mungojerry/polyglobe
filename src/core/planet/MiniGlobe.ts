@@ -22,7 +22,7 @@ export class MiniGlobe {
     this.viewportHeight = height;
     this.mainCamera = mainCamera;
 
-    const radius = 1; // Smaller radius than the main globe
+    const radius = 0.85; // Smaller radius than the main globe
     const detail = 80; // Lower detail for the mini globe
     const icosahedronGeometry = new THREE.IcosahedronGeometry(radius, detail);
 

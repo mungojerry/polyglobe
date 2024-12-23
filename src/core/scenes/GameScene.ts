@@ -339,6 +339,18 @@ export class GameScene {
       2,
       0.01
     );
+    controlManager.addSlider(
+      "fov",
+      "FOV: ",
+      () => this.camera.fov,
+      (value) => {
+        this.camera.fov = value as number;
+        this.camera.updateProjectionMatrix();
+      },
+      0,
+      120,
+      1
+    );
 
     controlManager.addCheckbox(
       "orbit",

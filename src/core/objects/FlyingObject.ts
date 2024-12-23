@@ -59,7 +59,7 @@ export class FlyingObject extends BaseGameObject implements IGameObject {
     this.body.setAngularDamping(0.8);
     const loader = new GLTFLoader();
 
-    loader.load("assets/models/wooden_ufo_toy.glb", (gltf) => {
+    loader.load("assets/models/baddies/bomber.glb", (gltf) => {
       this.objectMesh = gltf.scene;
       this.object.add(this.objectMesh);
       this.object.position.copy(position);
