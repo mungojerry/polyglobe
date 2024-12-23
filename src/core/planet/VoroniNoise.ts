@@ -1,5 +1,5 @@
+import * as THREE from "three";
 import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise.js";
-
 export interface VoronoiNoiseConfig {
   cellSize: number;
   jitter: number;
@@ -37,6 +37,9 @@ export class VoronoiNoise {
 
   // Configuration with validation
   public readonly config: VoronoiNoiseConfig;
+
+  // Add property to cache cell bounds
+  private readonly cellBounds: Map<number, { min: THREE.Vector3; max: THREE.Vector3 }> = new Map();
 
   constructor(config: Partial<VoronoiNoiseConfig> = {}) {
     // Default configuration with safe values
@@ -127,6 +130,7 @@ export class VoronoiNoise {
     return idx / 3;
   }
 
+  // Precompute cell bounds during initialization
   private initSpatialGrid(): void {
     this.spatialGrid.fill(-1); // Initialize with invalid indices
 
@@ -136,6 +140,22 @@ export class VoronoiNoise {
 
       if (gridIdx >= 0 && gridIdx < this.spatialGrid.length) {
         this.spatialGrid[i] = gridIdx;
+
+        // Update cell bounds
+        if (!this.cellBounds.has(gridIdx)) {
+          this.cellBounds.set(gridIdx, {
+            min: new THREE.Vector3(Infinity, Infinity, Infinity),
+            max: new THREE.Vector3(-Infinity, -Infinity, -Infinity),
+          });
+        }
+
+        const bounds = this.cellBounds.get(gridIdx)!;
+        bounds.min.x = Math.min(bounds.min.x, this.points[idx]);
+        bounds.min.y = Math.min(bounds.min.y, this.points[idx + 1]);
+        bounds.min.z = Math.min(bounds.min.z, this.points[idx + 2]);
+        bounds.max.x = Math.max(bounds.max.x, this.points[idx]);
+        bounds.max.y = Math.max(bounds.max.y, this.points[idx + 1]);
+        bounds.max.z = Math.max(bounds.max.z, this.points[idx + 2]);
       }
     }
   }
@@ -367,5 +387,96 @@ export class VoronoiNoise {
     this.valueCacheKeys[idx + 1] = Math.floor(y * 100);
     this.valueCacheKeys[idx + 2] = Math.floor(z * 100);
     this.valueCache[key] = value;
+  }
+
+  // Only check points in cells that could contain nearest neighbors
+  getNoise(x: number, y: number, z: number): number {
+    let minDist = Infinity;
+    let secondMinDist = Infinity;
+    let foundPoint = false;
+
+    const radius = Math.sqrt(minDist); // Initial search radius
+    const cellsToCheck = this.getCellsInRadius(x, y, z, radius);
+
+    for (const cellIdx of cellsToCheck) {
+      // Skip if cell is empty
+      if (!this.cellBounds.has(cellIdx)) continue;
+
+      // Skip if cell bounds are too far
+      const bounds = this.cellBounds.get(cellIdx)!;
+      const minDistToBounds = this.getMinDistanceToBounds(x, y, z, bounds);
+      if (minDistToBounds > minDist) continue;
+
+      // Check points in this cell
+      for (let i = 0; i < this.pointCount; i++) {
+        if (this.spatialGrid[i] !== cellIdx) continue;
+
+        const idx = i * 3;
+        const dx = this.points[idx] - x;
+        const dy = this.points[idx + 1] - y;
+        const dz = this.points[idx + 2] - z;
+
+        const distSq = dx * dx + dy * dy + dz * dz;
+        if (!isFinite(distSq)) continue;
+
+        if (distSq < minDist) {
+          secondMinDist = minDist;
+          minDist = distSq;
+          foundPoint = true;
+        } else if (distSq < secondMinDist) {
+          secondMinDist = distSq;
+        }
+      }
+    }
+
+    if (!foundPoint || !isFinite(minDist) || !isFinite(secondMinDist)) {
+      return 0;
+    }
+
+    return this.smoothMin(minDist, secondMinDist);
+  }
+  private readonly SMOOTHING_FACTOR = 0.5;
+
+  private smoothMin(a: number, b: number): number {
+    if (!isFinite(a) || !isFinite(b)) return 0;
+
+    const h = Math.max(this.SMOOTHING_FACTOR - Math.abs(a - b), 0) / this.SMOOTHING_FACTOR;
+    return Math.min(a, b) - h * h * this.SMOOTHING_FACTOR * 0.25;
+  }
+  private getCellsInRadius(x: number, y: number, z: number, radius: number): number[] {
+    const cells: number[] = [];
+    const centerIdx = this.getGridIndex(x, y, z);
+
+    // Calculate grid range to check based on radius
+    const gridRadius = Math.ceil(radius * this.gridSize);
+
+    // Check cubic volume around point
+    for (let dx = -gridRadius; dx <= gridRadius; dx++) {
+      for (let dy = -gridRadius; dy <= gridRadius; dy++) {
+        for (let dz = -gridRadius; dz <= gridRadius; dz++) {
+          const neighborIdx = centerIdx + dx + dy * this.gridSize + dz * this.gridSize * this.gridSize;
+
+          // Skip invalid indices
+          if (neighborIdx < 0 || neighborIdx >= this.spatialGrid.length) {
+            continue;
+          }
+
+          const distSq = dx * dx + dy * dy + dz * dz;
+          if (distSq <= gridRadius * gridRadius) {
+            cells.push(neighborIdx);
+          }
+        }
+      }
+    }
+
+    return cells;
+  }
+
+  // Helper to get min distance to bounds
+  private getMinDistanceToBounds(x: number, y: number, z: number, bounds: { min: THREE.Vector3; max: THREE.Vector3 }): number {
+    const dx = Math.max(bounds.min.x - x, 0, x - bounds.max.x);
+    const dy = Math.max(bounds.min.y - y, 0, y - bounds.max.y);
+    const dz = Math.max(bounds.min.z - z, 0, z - bounds.max.z);
+    return dx * dx + dy * dy + dz * dz;
   }
 }

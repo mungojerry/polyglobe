@@ -136,7 +136,7 @@ export class Noise {
   }
 
   // Modify getTerrainHeight if you have one
-  public getTerrainHeight(x: number, y: number, z: number): number {
+  public getValue(x: number, y: number, z: number): number {
     return this.layeredNoise(x, y, z);
   }
 }
