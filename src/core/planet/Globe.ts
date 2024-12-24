@@ -11,10 +11,9 @@ import { vectorPool } from "../utils/vectorPool";
 import { Atmosphere } from "./Atmosphere";
 import { GlobeChunk } from "./GlobeChunk";
 import { Infection } from "./Infection";
-import { VoronoiNoise } from "./noise/VoroniNoise";
-import { TERRAIN_PRESETS, TerrainPresetEnum } from "./TerrainPresets";
 
 import ChunkWorker from "./chunkWorker?worker";
+import { Noise } from "./noise/Noise";
 
 const globeConfig = {
   showWall: false,
@@ -44,10 +43,7 @@ export class Globe {
   public waterLevel: number = 0;
   public terrainClickAllowed: boolean = false;
   public terrainScale = 0.9;
-  public noiseGenerators: VoronoiNoise[] = [
-    new VoronoiNoise(TERRAIN_PRESETS[TerrainPresetEnum.PLAINS]),
-    new VoronoiNoise(TERRAIN_PRESETS[TerrainPresetEnum.SNOW_PEAKS]),
-  ];
+  public noise: Noise = new Noise();
 
   private landGeometry!: THREE.BufferGeometry;
   private tempLandMesh!: THREE.Mesh;
@@ -275,13 +271,11 @@ export class Globe {
     let height = this.BASE_HEIGHT;
     let totalWeight = 0;
 
-    this.noiseGenerators.forEach((generator) => {
-      const { cellSize, amplitude } = generator.config;
+    const { amplitude } = this.noise.config;
 
-      const noiseValue = generator.getValue(x * cellSize, y * cellSize, z * cellSize);
-      height += noiseValue * amplitude;
-      totalWeight += amplitude;
-    });
+    const noiseValue = this.noise.getValue(x, y, z);
+    height += noiseValue * amplitude;
+    totalWeight += amplitude;
 
     if (totalWeight > 0) {
       height = (this.BASE_HEIGHT + (height - this.BASE_HEIGHT) / totalWeight) * this.terrainScale;

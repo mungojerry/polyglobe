@@ -16,7 +16,7 @@ import { Stars } from "../objects/Stars";
 import { Sun } from "../objects/Sun";
 import { Globe } from "../planet/Globe";
 import { MiniGlobe } from "../planet/MiniGlobe";
-import { VoronoiNoise } from "../planet/noise/VoroniNoise";
+import { Noise, NoiseConfig } from "../planet/noise/Noise";
 import { pseudoRandom } from "../utils/PseudoRandom";
 import { generateRandomPosition } from "../utils/utils";
 import { vectorPool } from "../utils/vectorPool";
@@ -64,7 +64,7 @@ export class GameScene {
   private debugMesh: THREE.LineSegments;
   private orbitCoontrols: boolean = true;
   private currentTerrainType: number = 0;
-  private currentGenerator: VoronoiNoise;
+  private currentGenerator: Noise;
   private sun!: Sun;
   private moon!: Moon;
   private flyingObjects: FlyingObject[] = [];
@@ -109,7 +109,7 @@ export class GameScene {
 
     this.miniGlobe = new MiniGlobe(this.globe.getLandGeometry(), this.camera, 200, 200);
 
-    this.currentGenerator = this.globe.noiseGenerators[this.currentTerrainType];
+    this.currentGenerator = this.globe.noise;
     this.dynamicBodies = [];
     this.player = new Player(this.scene, this.world, generateRandomPosition(this.globe.getRadius() * 1.3));
     this.cameraAttachedTo = this.player.getObject();
@@ -384,138 +384,27 @@ export class GameScene {
       ["Player", ...this.flyingObjects.map((_, index) => "UFO #" + index)]
     );
 
-    controlManager.addDropdown(
-      "terrain",
-      "Terrain: ",
-      () => this.globe.noiseGenerators[this.currentTerrainType].config.name,
-      (value) => {
-        this.currentTerrainType = this.globe.noiseGenerators.findIndex((generator) => generator.config.name === value);
-        this.currentGenerator = this.globe.noiseGenerators[this.currentTerrainType];
-        controlManager.updateDisplay(Object.keys(this.currentGenerator));
-      },
-      this.globe.noiseGenerators.map((generator) => generator.config.name)
-    );
+    const config = this.currentGenerator.config as NoiseConfig;
 
-    controlManager.addSlider(
-      "cellSize",
-      "Cell Size",
-      () => this.currentGenerator.config.cellSize,
-      (value) => {
-        this.currentGenerator.config.cellSize = value as number;
-      },
-      0,
-      20,
-      1
-    );
-
-    controlManager.addSlider(
-      "jitter",
-      "Jitter",
-      () => this.currentGenerator.config.jitter,
-      (value) => {
-        this.currentGenerator.config.jitter = value as number;
-      },
-      0,
-      1,
-      0.05
-    );
-
-    controlManager.addSlider(
-      "amplitude",
-      "Amplitude",
-      () => this.currentGenerator.config.amplitude,
-      (value) => {
-        this.currentGenerator.config.amplitude = value as number;
-      },
-      0,
-      3,
-      0.1
-    );
-
-    controlManager.addSlider(
-      "blendFactor",
-      "Blend Factor",
-      () => this.currentGenerator.config.blendFactor,
-      (value) => {
-        this.currentGenerator.config.blendFactor = value as number;
-      },
-      0,
-      1,
-      0.05
-    );
-
-    controlManager.addSlider(
-      "octaves",
-      "Octaves",
-      () => this.currentGenerator.config.octaves,
-      (value) => {
-        Object.values(this.globe.noiseGenerators).forEach((noise) => {
-          noise.config.octaves = value as number;
-        });
-      },
-      1,
-      8,
-      1
-    );
-
-    controlManager.addSlider(
-      "persistence",
-      "Persistence",
-      () => this.currentGenerator.config.persistence,
-      (value) => {
-        this.currentGenerator.config.persistence = value as number;
-      },
-      0,
-      1,
-      0.05
-    );
-
-    controlManager.addSlider(
-      "lacunarity",
-      "Lacunarity",
-      () => this.currentGenerator.config.lacunarity,
-      (value) => {
-        this.currentGenerator.config.lacunarity = value as number;
-      },
-      1,
-      3,
-      0.1
-    );
-
-    controlManager.addSlider(
-      "warpStrength",
-      "Warp Strength",
-      () => this.currentGenerator.config.warpStrength,
-      (value) => {
-        this.currentGenerator.config.warpStrength = value as number;
-      },
-      0,
-      1,
-      0.05
-    );
-
-    controlManager.addSlider(
-      "ridgeOffset",
-      "Ridge Offset",
-      () => this.currentGenerator.config.ridgeOffset,
-      (value) => {
-        this.currentGenerator.config.ridgeOffset = value as number;
-      },
-      0,
-      2,
-      0.05
-    );
-
-    controlManager.addSlider(
-      "turbulence",
-      "Turbulence",
-      () => this.currentGenerator.config.turbulence,
-      (value) => {
-        this.currentGenerator.config.turbulence = value as number;
-      },
-      0,
-      1,
-      0.05
-    );
+    Object.keys(config).forEach((propKey) => {
+      // Simple numeric slider example (adjust min/max/increment as needed).
+      // For string or other types, you'd handle them separately.
+      if (typeof config[propKey as keyof NoiseConfig] === "number") {
+        controlManager.addSlider(
+          propKey,
+          propKey,
+          () => config[propKey as keyof NoiseConfig] as number,
+          (value) => {
+            (config as any)[propKey] = Number(value);
+          },
+          0,
+          5,
+          0.1
+        );
+      } else {
+        // You can add different controls for non-numeric properties
+        console.log(`Skipping control for ${propKey}, type not numeric.`);
+      }
+    });
   }
 }
