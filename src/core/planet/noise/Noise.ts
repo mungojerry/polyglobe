@@ -16,49 +16,19 @@ export type NoiseConfig = {
   erosionStrength: number;
 };
 
-export const TERRAIN_MOUNTAINS = {
-  octaves: 5,
-  persistence: 0.55,
-  lacunarity: 2.0,
-  baseRoughness: 1.2,
-  ridgedOffset: 1.1,
-  plateauStrength: 0.4,
-  valleyDepth: 0.6,
-  frequency: 0.4,
-  amplitude: 1.8,
-  detailScale: 0.9,
-  warpStrength: 0.45,
-  erosionStrength: 0.4,
-};
-
-export const TERRAIN_HILLS = {
-  octaves: 4,
-  persistence: 0.5,
+export const DEFAULT_CONFIG = {
+  octaves: 6,
+  persistence: 0.4,
   lacunarity: 1.8,
   baseRoughness: 0.8,
   ridgedOffset: 0.9,
-  plateauStrength: 0.5,
+  plateauStrength: 0.3,
   valleyDepth: 0.4,
-  frequency: 0.35,
-  amplitude: 1.4,
-  detailScale: 0.7,
-  warpStrength: 0.35,
-  erosionStrength: 0.3,
-};
-
-export const TERRAIN_PLAINS = {
-  octaves: 3,
-  persistence: 0.45,
-  lacunarity: 1.6,
-  baseRoughness: 0.5,
-  ridgedOffset: 0.7,
-  plateauStrength: 0.6,
-  valleyDepth: 0.3,
-  frequency: 0.3,
-  amplitude: 1.0,
-  detailScale: 0.5,
-  warpStrength: 0.25,
-  erosionStrength: 0.25,
+  frequency: 1.3,
+  amplitude: 1.3,
+  detailScale: 0.6,
+  warpStrength: 0.3,
+  erosionStrength: 0.2,
 };
 
 export class Noise {
@@ -68,13 +38,13 @@ export class Noise {
   private cache: Map<number, number>;
   private readonly MAX_CACHE_SIZE = 1024;
   private readonly CACHE_PRECISION = 100;
-  private readonly WARP_FREQUENCY = 0.6;
-  private readonly SECONDARY_WARP = 0.3;
+  private readonly WARP_FREQUENCY = 0.4;
+  private readonly SECONDARY_WARP = 0.2;
 
   public config: NoiseConfig;
 
   constructor(config: Partial<NoiseConfig> = {}) {
-    this.config = { ...TERRAIN_MOUNTAINS, ...config };
+    this.config = { ...DEFAULT_CONFIG, ...config };
     this.cache = new Map();
   }
 
@@ -86,6 +56,13 @@ export class Noise {
     return [x + wx, y + wy, z + wz];
   }
 
+  private ridgeNoise(noiseValue: number): number {
+    const absValue = Math.abs(noiseValue);
+    const ridge = this.config.ridgedOffset - absValue;
+    // Make ridge formation more subtle
+    return ridge * 0.7;
+  }
+
   public layeredNoise(x: number, y: number, z: number): number {
     const cacheKey = Math.round(x * this.CACHE_PRECISION) * 1000000 + Math.round(y * this.CACHE_PRECISION) * 1000 + Math.round(z * this.CACHE_PRECISION);
 
@@ -95,9 +72,9 @@ export class Noise {
     const [wx, wy, wz] = this.fastDomainWarp(x, y, z);
 
     let total = 0;
-    let currentAmplitude = this.config.amplitude;
     let frequency = this.config.frequency;
-    let maxValue = 0;
+    let amplitude = 1.0;
+    let maxAmplitude = 0;
 
     for (let i = 0; i < this.config.octaves; i++) {
       const noiseValue = Noise.baseNoiseGenerator.noise3d(
@@ -106,54 +83,32 @@ export class Noise {
         wz * frequency * this.config.baseRoughness
       );
 
-      // Ridge formation with variable sharpness
-      const absNoise = Math.abs(noiseValue);
-      const ridgeBase = this.config.ridgedOffset - absNoise;
-      const ridge = Math.pow(Math.abs(ridgeBase), 1.5) * Math.sign(ridgeBase);
+      const ridgeValue = this.ridgeNoise(noiseValue);
 
-      // Height factor with plateau influence
-      const heightBase = (ridge + 1) * 0.5;
-      const plateau = Math.pow(heightBase, 1 + this.config.plateauStrength);
-      const heightFactor = Math.max(0, Math.min(1, plateau));
+      // Reduce weight of higher octaves
+      const weight = 1.0 / (i + 1.5);
+      total += ridgeValue * amplitude * weight;
+      maxAmplitude += amplitude * weight;
 
-      // Valley formation with depth variation
-      const valleyDepth = this.config.valleyDepth * (1 + heightFactor * 0.2);
-      const valleyFactor = heightFactor < 0.4 
-        ? 1 - (valleyDepth * Math.pow(0.4 - heightFactor, 1.8))
-        : 1;
+      // Add subtle detail noise only for first two octaves
+      // if (i < 2) {
+      const detailNoise = Noise.baseNoiseGenerator.noise3d(
+        wx * frequency * this.config.detailScale,
+        wy * frequency * this.config.detailScale,
+        wz * frequency * this.config.detailScale
+      );
 
-      // Amplitude modification with octave weighting
-      const octaveWeight = 1.0 / (1.0 + i * 0.5);
-      const terrainAmplitude = currentAmplitude * valleyFactor * octaveWeight;
+      const detailWeight = 0.15 * weight;
+      total += detailNoise * amplitude * detailWeight;
+      maxAmplitude += amplitude * detailWeight;
+      // }
 
-      // Erosion influence
-      const erosionFactor = 1 - (this.config.erosionStrength * Math.pow(absNoise, 1.2));
-
-      // Combine all factors
-      const contribution = ridge * terrainAmplitude * erosionFactor;
-
-      total += contribution;
-      maxValue += terrainAmplitude;
-
-      // Detail noise for higher elevations
-      if (heightFactor > 0.6 && i > 1) {
-        const detailNoise = Noise.baseNoiseGenerator.noise3d(
-          wx * frequency * this.config.detailScale,
-          wy * frequency * this.config.detailScale,
-          wz * frequency * this.config.detailScale
-        );
-
-        const detailWeight = Math.pow(heightFactor - 0.6, 1.5);
-        const detailContribution = detailNoise * currentAmplitude * 0.25 * detailWeight;
-        total += detailContribution;
-        maxValue += currentAmplitude * 0.25;
-      }
-
-      currentAmplitude *= this.config.persistence;
       frequency *= this.config.lacunarity;
+      amplitude *= this.config.persistence;
     }
 
-    const result = (total / maxValue) * this.config.amplitude;
+    // Normalize and scale down the final value
+    const normalizedValue = (total / maxAmplitude) * this.config.amplitude;
 
     if (this.cache.size >= this.MAX_CACHE_SIZE) {
       const oldestKey = this.cache.keys().next().value;
@@ -161,9 +116,9 @@ export class Noise {
         this.cache.delete(oldestKey);
       }
     }
-    this.cache.set(cacheKey, result);
+    this.cache.set(cacheKey, normalizedValue);
 
-    return result;
+    return normalizedValue;
   }
 
   public batchProcess(coordinates: ReadonlyArray<[number, number, number]>): Float32Array {

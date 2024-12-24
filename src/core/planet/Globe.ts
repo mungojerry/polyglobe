@@ -42,7 +42,6 @@ export class Globe {
 
   public waterLevel: number = 0;
   public terrainClickAllowed: boolean = false;
-  public terrainScale = 0.9;
   public noise: Noise = new Noise();
 
   private landGeometry!: THREE.BufferGeometry;
@@ -264,30 +263,8 @@ export class Globe {
     // this.object.add(this.water.getObject());
   }
 
-  private readonly BASE_HEIGHT = 0.2;
-
   public getHeight(x: number, y: number, z: number): number {
-    let height = this.BASE_HEIGHT;
-    let totalWeight = 0;
-
-    const { amplitude } = this.noise.config;
-
-    const noiseValue = this.noise.getValue(x, y, z);
-    height += noiseValue * amplitude;
-    totalWeight += amplitude;
-
-    if (totalWeight > 0) {
-      height = (this.BASE_HEIGHT + (height - this.BASE_HEIGHT) / totalWeight) * this.terrainScale;
-    }
-
-    // Normalize height to range -1 to 1
-    // First shift the range to be centered around 0
-    height = height - this.BASE_HEIGHT;
-    // Then scale it to fit in -1 to 1 range
-    const maxPossibleHeight = amplitude * this.terrainScale;
-    height = height / maxPossibleHeight;
-
-    return height;
+    return this.noise.getValue(x, y, z);
   }
 
   public isLand(position: THREE.Vector3): boolean {
@@ -311,7 +288,11 @@ export class Globe {
   }
 
   private elevationMultiplier(noise: number) {
-    return 1 + noise * 0.3;
+    // Convert normalized noise [-1, 1] to elevation multiplier [0.7, 1.3]
+    // Using a more dramatic curve for elevation changes
+    const normalizedHeight = (noise + 1) * 0.5; // Convert to [0, 1]
+    const curve = Math.pow(normalizedHeight, 1.5); // Apply curve for more dramatic changes
+    return 0.7 + curve * 0.6; // Map to [0.7, 1.3]
   }
 
   public getHeightAboveSurface(v: THREE.Vector3, testUnderWater: boolean = false): number {

@@ -327,17 +327,6 @@ export class GameScene {
     });
 
     controlManager.addSlider(
-      "terrainscale",
-      "Terrain scale: ",
-      () => this.globe.terrainScale,
-      (value) => {
-        this.globe.terrainScale = value as number;
-      },
-      0,
-      2,
-      0.01
-    );
-    controlManager.addSlider(
       "fov",
       "FOV: ",
       () => this.camera.fov,
