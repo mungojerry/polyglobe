@@ -16,7 +16,7 @@ import { Stars } from "../objects/Stars";
 import { Sun } from "../objects/Sun";
 import { Globe } from "../planet/Globe";
 import { MiniGlobe } from "../planet/MiniGlobe";
-import { VoronoiNoise } from "../planet/VoroniNoise";
+import { VoronoiNoise } from "../planet/noise/VoroniNoise";
 import { pseudoRandom } from "../utils/PseudoRandom";
 import { generateRandomPosition } from "../utils/utils";
 import { vectorPool } from "../utils/vectorPool";

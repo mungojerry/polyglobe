@@ -29,7 +29,7 @@ export class BaseGameObject implements IGameObject {
   protected rotationDirection: RotationDirection = 0;
   protected thrusting: boolean = false;
   private trailPool: TrailPool;
-  private activeSprites: Trail[] = [];
+  protected activeSprites: Trail[] = [];
   protected scene: THREE.Scene;
   protected bullets: Bullet[] = [];
   protected lastShotTime = 0;
@@ -90,9 +90,8 @@ export class BaseGameObject implements IGameObject {
 
     this.activeSprites = this.activeSprites.filter((sprite) => {
       sprite.update();
-      return this.scene.children.includes(sprite.sprite);
+      return !sprite.isDisposed();
     });
-
     vectorPool.releaseVector(position);
   }
   private tiltMesh() {
@@ -218,16 +217,16 @@ export class BaseGameObject implements IGameObject {
     console.warn("Onerrdide GameObject::onHit");
   }
 
-  protected shoot(scene: THREE.Scene) {
+  protected shoot() {
     const now = Date.now();
     if (now - this.lastShotTime < this.shootCooldown) return;
-    console.log("shoot");
 
-    const position = new THREE.Vector3(this.body.translation().x, this.body.translation().y, this.body.translation().z);
+    const bodyPos = this.body.translation();
+    const position = new THREE.Vector3(bodyPos.x, bodyPos.y, bodyPos.z);
     const forward = this.getForwardDirection();
 
     const bulletGenerator = BulletGenerator.getInstance(this.world);
-    bulletGenerator.createBullet(scene, this, position.add(forward.multiplyScalar(2)), forward, this.tag);
+    bulletGenerator.createBullet(this.scene, this, position, forward, this.tag);
 
     this.lastShotTime = now;
   }

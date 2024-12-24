@@ -1,5 +1,6 @@
 import RAPIER from "@dimforge/rapier3d";
 import * as THREE from "three";
+import { debugManager } from "../managers/debugManager";
 import { IGameObject } from "../objects/BaseGameObject";
 import { colliderToGameObjectMap } from "../utils/colliderMap";
 import { Bullet } from "./Bullet";
@@ -54,6 +55,7 @@ export class BulletGenerator {
 
     // Update active bullets and remove expired ones
     this.activeBullets.forEach((data, handle) => {
+      data.bullet.update();
       if (now - data.createdAt > this.bulletLifetime) {
         this.destroyBullet(handle);
       }
@@ -61,6 +63,7 @@ export class BulletGenerator {
   }
 
   private processCollisions() {
+    debugManager.set("bullets", "bullets: " + this.activeBullets.size);
     // Iterate over each active bullet
     this.activeBullets.forEach((data, handle) => {
       const bulletCollider = data.bullet.collider;
@@ -98,6 +101,7 @@ export class BulletGenerator {
   }
 
   private destroyBullet(handle: number) {
+    console.log("destroyBullet");
     const bulletData = this.activeBullets.get(handle);
     if (bulletData) {
       bulletData.bullet.destroy();

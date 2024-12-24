@@ -71,7 +71,7 @@ export class Trail {
   }
 
   recycle(position: THREE.Vector3, size: number, color: number) {
-    if (this.disposed) return this;
+    this.disposed = false;
 
     this.sprite.position.copy(position);
     this.sprite.scale.set(size, size, 1);

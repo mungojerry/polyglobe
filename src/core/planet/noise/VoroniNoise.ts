@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise.js";
 export interface VoronoiNoiseConfig {
+  name: string;
   cellSize: number;
   jitter: number;
   amplitude: number;
@@ -44,6 +45,7 @@ export class VoronoiNoise {
   constructor(config: Partial<VoronoiNoiseConfig> = {}) {
     // Default configuration with safe values
     const defaultConfig: VoronoiNoiseConfig = {
+      name: "voronoi noise",
       cellSize: 50,
       jitter: 0.8,
       amplitude: 1.0,
@@ -60,7 +62,7 @@ export class VoronoiNoise {
     };
 
     // Validate and clamp configuration values
-    this.config = this.validateConfig({ ...defaultConfig, ...config });
+    this.config = { ...defaultConfig, ...config };
 
     this.simplexNoise = new SimplexNoise();
 
@@ -77,24 +79,6 @@ export class VoronoiNoise {
     // Generate and initialize
     this.pointCount = this.generatePoints();
     this.initSpatialGrid();
-  }
-
-  private validateConfig(config: VoronoiNoiseConfig): VoronoiNoiseConfig {
-    return {
-      cellSize: Math.max(1, Math.min(1000, config.cellSize)),
-      jitter: Math.max(0, Math.min(1, config.jitter)),
-      amplitude: Math.max(0.1, Math.min(10, config.amplitude)),
-      blendFactor: Math.max(0, Math.min(1, config.blendFactor)),
-      octaves: Math.max(1, Math.min(8, Math.floor(config.octaves))),
-      persistence: Math.max(0.1, Math.min(1, config.persistence)),
-      lacunarity: Math.max(1, Math.min(4, config.lacunarity)),
-      warpStrength: Math.max(0, Math.min(1, config.warpStrength)),
-      ridgeOffset: Math.max(0.1, Math.min(2, config.ridgeOffset)),
-      turbulence: Math.max(0, Math.min(1, config.turbulence)),
-      erosionStrength: Math.max(0, Math.min(1, config.erosionStrength)),
-      plateauThreshold: Math.max(0, Math.min(1, config.plateauThreshold)),
-      biomeScale: Math.max(0.1, Math.min(1, config.biomeScale)),
-    };
   }
 
   private calculateGridSize(): number {

@@ -1,6 +1,14 @@
 import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise.js";
-import { pseudoRandom } from "../utils/PseudoRandom";
-
+import { pseudoRandom } from "../../utils/PseudoRandom";
+export type NoiseConfig = {
+  octaves: number;
+  persistence: number;
+  lacunarity: number;
+  ridgedOffset: number;
+  frequency: number;
+  amplitude: number;
+  warpStrength: number;
+};
 export class Noise {
   // Static noise generators to reduce object creation overhead
   private static baseNoiseGenerator = new SimplexNoise(pseudoRandom);
@@ -15,14 +23,7 @@ export class Noise {
   private readonly WARP_FREQUENCY = 0.8;
   private readonly SECONDARY_WARP = 0.4;
 
-  // Configurable parameters with sensible defaults
-  public octaves: number; // Number of noise layers
-  public persistence: number; // How much each octave contributes
-  public lacunarity: number; // How frequency changes between octaves
-  public ridgedOffset: number; // Offset for ridge formation
-  public frequency: number; // Base frequency
-  public amplitude: number; // Base amplitude
-  public warpStrength: number; // Domain warping strength
+  private config: NoiseConfig;
 
   // Add terrain presets as static members
   public static readonly TERRAIN_MOUNTAINS = {
@@ -35,14 +36,8 @@ export class Noise {
     warpStrength: 0.45,
   };
 
-  constructor({ octaves = 6, persistence = 0.65, lacunarity = 2.2, ridgedOffset = 1.1, frequency = 0.45, amplitude = 0.5, warpStrength = 0.45 } = {}) {
-    this.octaves = octaves;
-    this.persistence = persistence;
-    this.lacunarity = lacunarity;
-    this.ridgedOffset = ridgedOffset;
-    this.frequency = frequency;
-    this.amplitude = amplitude;
-    this.warpStrength = warpStrength;
+  constructor(config: NoiseConfig) {
+    this.config = { ...config, ...Noise.TERRAIN_MOUNTAINS };
 
     // Use a fixed-size Map to prevent unbounded memory growth
     this.cache = new Map();
@@ -50,11 +45,9 @@ export class Noise {
 
   // Optimized domain warping with inline calculations
   private fastDomainWarp(x: number, y: number, z: number): [number, number, number] {
-    const wx = Noise.warpNoiseGenerator.noise3d(x * this.WARP_FREQUENCY, y * this.SECONDARY_WARP, z * this.SECONDARY_WARP) * this.warpStrength;
-
-    const wy = Noise.warpNoiseGenerator.noise3d(y * this.WARP_FREQUENCY, z * this.SECONDARY_WARP, x * this.SECONDARY_WARP) * this.warpStrength;
-
-    const wz = Noise.warpNoiseGenerator.noise3d(z * this.WARP_FREQUENCY, x * this.SECONDARY_WARP, y * this.SECONDARY_WARP) * this.warpStrength;
+    const wx = Noise.warpNoiseGenerator.noise3d(x * this.WARP_FREQUENCY, y * this.SECONDARY_WARP, z * this.SECONDARY_WARP) * this.config.warpStrength;
+    const wy = Noise.warpNoiseGenerator.noise3d(y * this.WARP_FREQUENCY, z * this.SECONDARY_WARP, x * this.SECONDARY_WARP) * this.config.warpStrength;
+    const wz = Noise.warpNoiseGenerator.noise3d(z * this.WARP_FREQUENCY, x * this.SECONDARY_WARP, y * this.SECONDARY_WARP) * this.config.warpStrength;
 
     return [x + wx, y + wy, z + wz];
   }
@@ -70,16 +63,16 @@ export class Noise {
     const [wx, wy, wz] = this.fastDomainWarp(x, y, z);
 
     let total = 0;
-    let currentAmplitude = this.amplitude;
-    let frequency = this.frequency;
+    let currentAmplitude = this.config.amplitude;
+    let frequency = this.config.frequency;
     let maxValue = 0;
 
     // Base mountain noise
-    for (let i = 0; i < this.octaves; i++) {
+    for (let i = 0; i < this.config.octaves; i++) {
       const noiseValue = Noise.baseNoiseGenerator.noise3d(wx * frequency, wy * frequency, wz * frequency);
 
       // Enhanced ridge formation
-      const ridge = this.ridgedOffset - Math.abs(noiseValue);
+      const ridge = this.config.ridgedOffset - Math.abs(noiseValue);
 
       // Apply height-based blending
       const heightFactor = Math.max(0, Math.min(1, (ridge + 1) / 2));
@@ -96,8 +89,8 @@ export class Noise {
       total += scaled * (1.0 + Math.abs(noiseValue));
 
       maxValue += blendedAmplitude;
-      currentAmplitude *= this.persistence;
-      frequency *= this.lacunarity;
+      currentAmplitude *= this.config.persistence;
+      frequency *= this.config.lacunarity;
 
       // Add detail noise at higher elevations
       if (heightFactor > 0.6 && i > 2) {
@@ -107,7 +100,7 @@ export class Noise {
       }
     }
 
-    const result = (total / maxValue) * this.amplitude;
+    const result = (total / maxValue) * this.config.amplitude;
 
     // Cache management
     if (this.cache.size >= this.MAX_CACHE_SIZE) {

@@ -1,6 +1,7 @@
 import RAPIER from "@dimforge/rapier3d";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { debugManager } from "../managers/debugManager";
 import { BaseGameObject, IGameObject } from "./BaseGameObject";
 
 export class Player extends BaseGameObject implements IGameObject {
@@ -82,9 +83,11 @@ export class Player extends BaseGameObject implements IGameObject {
     this.gravityArrowHelper = new THREE.ArrowHelper(new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 0, 0), arrowLength, gravityColor);
     scene.add(this.gravityArrowHelper);
   }
+
   onHit() {
     console.log("Player hit");
   }
+
   private handleKeyDown(event: KeyboardEvent) {
     switch (event.key.toLowerCase()) {
       case "w":
@@ -103,7 +106,7 @@ export class Player extends BaseGameObject implements IGameObject {
         this.thrusting = true;
         break;
       case "t":
-        this.shoot(this.scene);
+        this.shoot();
         break;
     }
   }
@@ -141,5 +144,10 @@ export class Player extends BaseGameObject implements IGameObject {
     this.gravityArrowHelper.setDirection(gravityDirection);
     this.gravityArrowHelper.setLength(gravityMagnitude * 10);
     this.gravityArrowHelper.position.copy(this.object.position);
+  }
+
+  update(camera: THREE.Camera) {
+    super.update(camera);
+    debugManager.set("activetrail", "trail sprites: " + this.activeSprites.length);
   }
 }

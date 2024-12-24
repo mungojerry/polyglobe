@@ -11,8 +11,8 @@ import { vectorPool } from "../utils/vectorPool";
 import { Atmosphere } from "./Atmosphere";
 import { GlobeChunk } from "./GlobeChunk";
 import { Infection } from "./Infection";
+import { VoronoiNoise } from "./noise/VoroniNoise";
 import { TERRAIN_PRESETS, TerrainPresetEnum } from "./TerrainPresets";
-import { VoronoiNoise } from "./VoroniNoise";
 
 import ChunkWorker from "./chunkWorker?worker";
 
