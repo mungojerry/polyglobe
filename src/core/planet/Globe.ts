@@ -92,6 +92,7 @@ export class Globe {
   public createGlobe(seed: number = new Date().getTime()) {
     const start = performance.now();
     pseudoRandom.setSeed(seed);
+    this.noise.clearCache();
     if (this.landGeometry) {
       this.landGeometry.dispose();
     }
@@ -183,8 +184,6 @@ export class Globe {
     const colors = new Float32Array(vertexCount * 3 * 4);
     const indices = new Uint32Array(vertexCount * 4);
     const positionArray = positionAttribute.array;
-    const getHeight = this.getHeight.bind(this);
-    const elevationMultiplier = this.elevationMultiplier.bind(this);
     for (let i = 0; i < vertexCount; i++) {
       const idx = i * 3;
 
@@ -199,8 +198,8 @@ export class Globe {
 
       const latitude = Math.asin(ny);
 
-      const height = getHeight(nx, ny, nz);
-      const elevation = elevationMultiplier(height);
+      const height = this.getHeight(nx, ny, nz);
+      const elevation = this.elevationMultiplier(height);
 
       vertices[idx] = x * elevation;
       vertices[idx + 1] = y * elevation;
@@ -262,7 +261,7 @@ export class Globe {
 
   private generateWater() {
     this.water = new Water(this.waterLevel, Math.round(this.DETAIL / 3));
-    this.object.add(this.water.getObject());
+    // this.object.add(this.water.getObject());
   }
 
   private readonly BASE_HEIGHT = 0.2;
@@ -280,6 +279,13 @@ export class Globe {
     if (totalWeight > 0) {
       height = (this.BASE_HEIGHT + (height - this.BASE_HEIGHT) / totalWeight) * this.terrainScale;
     }
+
+    // Normalize height to range -1 to 1
+    // First shift the range to be centered around 0
+    height = height - this.BASE_HEIGHT;
+    // Then scale it to fit in -1 to 1 range
+    const maxPossibleHeight = amplitude * this.terrainScale;
+    height = height / maxPossibleHeight;
 
     return height;
   }

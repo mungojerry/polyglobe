@@ -384,7 +384,7 @@ export class GameScene {
       ["Player", ...this.flyingObjects.map((_, index) => "UFO #" + index)]
     );
 
-    const config = this.currentGenerator.config as NoiseConfig;
+    const config = this.currentGenerator.config;
 
     Object.keys(config).forEach((propKey) => {
       // Simple numeric slider example (adjust min/max/increment as needed).
@@ -395,11 +395,11 @@ export class GameScene {
           propKey,
           () => config[propKey as keyof NoiseConfig] as number,
           (value) => {
-            (config as any)[propKey] = Number(value);
+            config[propKey as keyof NoiseConfig] = Number(value);
           },
           0,
-          5,
-          0.1
+          propKey === "octaves" ? 8 : 2,
+          propKey === "octaves" ? 1 : 0.1
         );
       } else {
         // You can add different controls for non-numeric properties
