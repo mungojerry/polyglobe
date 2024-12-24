@@ -13,7 +13,7 @@ import { GlobeChunk } from "./GlobeChunk";
 import { Infection } from "./Infection";
 
 import ChunkWorker from "./chunkWorker?worker";
-import { Noise } from "./noise/Noise";
+import { VoronoiNoise } from "./noise/VoroniNoise";
 
 const globeConfig = {
   showWall: false,
@@ -42,7 +42,7 @@ export class Globe {
 
   public waterLevel: number = 0;
   public terrainClickAllowed: boolean = false;
-  public noise: Noise = new Noise();
+  public noise: VoronoiNoise = new VoronoiNoise();
 
   private landGeometry!: THREE.BufferGeometry;
   private tempLandMesh!: THREE.Mesh;
@@ -91,7 +91,6 @@ export class Globe {
   public createGlobe(seed: number = new Date().getTime()) {
     const start = performance.now();
     pseudoRandom.setSeed(seed);
-    this.noise.clearCache();
     if (this.landGeometry) {
       this.landGeometry.dispose();
     }
@@ -260,11 +259,11 @@ export class Globe {
 
   private generateWater() {
     this.water = new Water(this.waterLevel, Math.round(this.DETAIL / 3));
-    // this.object.add(this.water.getObject());
+    this.object.add(this.water.getObject());
   }
 
   public getHeight(x: number, y: number, z: number): number {
-    return this.noise.getValue(x, y, z);
+    return 0.4 + this.noise.getValue(x, y, z) * 0.7;
   }
 
   public isLand(position: THREE.Vector3): boolean {

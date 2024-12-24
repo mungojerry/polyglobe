@@ -18,7 +18,7 @@ export type NoiseConfig = {
 
 export const DEFAULT_CONFIG = {
   octaves: 6,
-  persistence: 0.4,
+  persistence: 0.6,
   lacunarity: 1.8,
   baseRoughness: 0.8,
   ridgedOffset: 0.9,
@@ -47,78 +47,87 @@ export class Noise {
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.cache = new Map();
   }
+  private static hashCoordinate(x: number, y: number, z: number): number {
+    return ((x * 73856093) ^ (y * 19349663) ^ (z * 83492791)) >>> 0;
+  }
+  private cleanCache() {
+    if (this.cache.size > this.MAX_CACHE_SIZE) {
+      const entries = Array.from(this.cache.entries());
+      entries.sort((a, b) => b[1] - a[1]); // Sort by value
+      this.cache = new Map(entries.slice(0, this.MAX_CACHE_SIZE / 2));
+    }
+  }
+  private getCachedNoise(x: number, y: number, z: number): number | undefined {
+    const key = Noise.hashCoordinate(Math.round(x * this.CACHE_PRECISION), Math.round(y * this.CACHE_PRECISION), Math.round(z * this.CACHE_PRECISION));
+    return this.cache.get(key);
+  }
+
+  private setCachedNoise(x: number, y: number, z: number, value: number): void {
+    const key = Noise.hashCoordinate(Math.round(x * this.CACHE_PRECISION), Math.round(y * this.CACHE_PRECISION), Math.round(z * this.CACHE_PRECISION));
+    this.cache.set(key, value);
+    this.cleanCache(); // Call cleanup after setting new value
+  }
 
   private fastDomainWarp(x: number, y: number, z: number): [number, number, number] {
-    const wx = Noise.warpNoiseGenerator.noise3d(x * this.WARP_FREQUENCY, y * this.SECONDARY_WARP, z * this.SECONDARY_WARP) * this.config.warpStrength;
-    const wy = Noise.warpNoiseGenerator.noise3d(y * this.WARP_FREQUENCY, z * this.SECONDARY_WARP, x * this.SECONDARY_WARP) * this.config.warpStrength;
-    const wz = Noise.warpNoiseGenerator.noise3d(z * this.WARP_FREQUENCY, x * this.SECONDARY_WARP, y * this.SECONDARY_WARP) * this.config.warpStrength;
+    const strength = Math.min(1, this.config.warpStrength);
+    const freq = this.WARP_FREQUENCY;
+    const sec = this.SECONDARY_WARP;
 
-    return [x + wx, y + wy, z + wz];
+    // Smoother warping with frequency blending
+    const wx = Noise.warpNoiseGenerator.noise3d(x * freq + sec, y * freq, z * freq) * strength;
+
+    const wy = Noise.warpNoiseGenerator.noise3d(y * freq + sec, z * freq, x * freq) * strength;
+
+    const wz = Noise.warpNoiseGenerator.noise3d(z * freq + sec, x * freq, y * freq) * strength;
+
+    return [x + wx * (1 - Math.abs(x) * 0.2), y + wy * (1 - Math.abs(y) * 0.2), z + wz * (1 - Math.abs(z) * 0.2)];
   }
 
-  private ridgeNoise(noiseValue: number): number {
-    const absValue = Math.abs(noiseValue);
-    const ridge = this.config.ridgedOffset - absValue;
-    // Make ridge formation more subtle
-    return ridge * 0.7;
-  }
-
-  public layeredNoise(x: number, y: number, z: number): number {
-    const cacheKey = Math.round(x * this.CACHE_PRECISION) * 1000000 + Math.round(y * this.CACHE_PRECISION) * 1000 + Math.round(z * this.CACHE_PRECISION);
-
-    const cachedValue = this.cache.get(cacheKey);
-    if (cachedValue !== undefined) return cachedValue;
-
-    const [wx, wy, wz] = this.fastDomainWarp(x, y, z);
-
-    let total = 0;
+  private layeredNoise(x: number, y: number, z: number): number {
+    let noiseValue = 0;
     let frequency = this.config.frequency;
-    let amplitude = 1.0;
-    let maxAmplitude = 0;
+    let amplitude = this.config.amplitude;
+    let weightSum = 0;
 
+    // Apply smoother domain warping
+    if (this.config.warpStrength > 0) {
+      [x, y, z] = this.fastDomainWarp(x, y, z);
+    }
+
+    // Improved octave accumulation
     for (let i = 0; i < this.config.octaves; i++) {
-      const noiseValue = Noise.baseNoiseGenerator.noise3d(
-        wx * frequency * this.config.baseRoughness,
-        wy * frequency * this.config.baseRoughness,
-        wz * frequency * this.config.baseRoughness
-      );
+      const noise = Noise.baseNoiseGenerator.noise3d(x * frequency, y * frequency, z * frequency);
 
-      const ridgeValue = this.ridgeNoise(noiseValue);
-
-      // Reduce weight of higher octaves
-      const weight = 1.0 / (i + 1.5);
-      total += ridgeValue * amplitude * weight;
-      maxAmplitude += amplitude * weight;
-
-      // Add subtle detail noise only for first two octaves
-      // if (i < 2) {
-      const detailNoise = Noise.baseNoiseGenerator.noise3d(
-        wx * frequency * this.config.detailScale,
-        wy * frequency * this.config.detailScale,
-        wz * frequency * this.config.detailScale
-      );
-
-      const detailWeight = 0.15 * weight;
-      total += detailNoise * amplitude * detailWeight;
-      maxAmplitude += amplitude * detailWeight;
-      // }
+      // Smooth noise blending
+      const weight = 1 / (1 + i);
+      noiseValue += noise * amplitude * weight;
+      weightSum += amplitude * weight;
 
       frequency *= this.config.lacunarity;
       amplitude *= this.config.persistence;
     }
 
-    // Normalize and scale down the final value
-    const normalizedValue = (total / maxAmplitude) * this.config.amplitude;
+    // Proper normalization
+    noiseValue = noiseValue / weightSum;
 
-    if (this.cache.size >= this.MAX_CACHE_SIZE) {
-      const oldestKey = this.cache.keys().next().value;
-      if (oldestKey !== undefined) {
-        this.cache.delete(oldestKey);
-      }
+    // Apply terrain features
+    if (this.config.plateauStrength > 0) {
+      noiseValue = this.applyPlateau(noiseValue);
     }
-    this.cache.set(cacheKey, normalizedValue);
 
-    return normalizedValue;
+    return Math.max(-1, Math.min(1, noiseValue));
+  }
+
+  private applyPlateau(value: number): number {
+    const strength = this.config.plateauStrength;
+    const threshold = 0.3;
+
+    if (value > threshold) {
+      const t = (value - threshold) / (1 - threshold);
+      value = threshold + (1 - Math.pow(1 - t, 1 + strength)) * (1 - threshold);
+    }
+
+    return value;
   }
 
   public batchProcess(coordinates: ReadonlyArray<[number, number, number]>): Float32Array {
@@ -134,6 +143,18 @@ export class Noise {
   }
 
   public getValue(x: number, y: number, z: number): number {
-    return this.layeredNoise(x, y, z);
+    const cached = this.getCachedNoise(x, y, z);
+    if (cached !== undefined) return cached;
+
+    let value = this.layeredNoise(x, y, z);
+
+    // Apply erosion smoothing
+    if (this.config.erosionStrength > 0) {
+      const eroded = this.layeredNoise(x + 0.1, y + 0.1, z + 0.1);
+      value = value * (1 - this.config.erosionStrength) + eroded * this.config.erosionStrength;
+    }
+
+    this.setCachedNoise(x, y, z, value);
+    return value;
   }
 }

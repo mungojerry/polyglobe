@@ -17,12 +17,23 @@ export interface VoronoiNoiseConfig {
   biomeScale: number;
 }
 
-interface GridCell {
-  x: number;
-  y: number;
-  z: number;
-}
-
+// Default configuration with safe values
+export const DEFAULT_CONFIG: VoronoiNoiseConfig = {
+  name: "voronoi noise",
+  cellSize: 50,
+  jitter: 0.8,
+  amplitude: 1.0,
+  blendFactor: 0.5,
+  octaves: 4,
+  persistence: 0.5,
+  lacunarity: 2.0,
+  warpStrength: 0.2,
+  ridgeOffset: 1.0,
+  turbulence: 0.15,
+  erosionStrength: 0.2,
+  plateauThreshold: 0.7,
+  biomeScale: 0.3,
+};
 export class VoronoiNoise {
   private readonly points: Float32Array;
   private readonly pointCount: number;
@@ -34,7 +45,6 @@ export class VoronoiNoise {
   private readonly valueCache: Float32Array;
   private readonly valueCacheKeys: Int32Array;
   private readonly CACHE_SIZE = 8192; // Increased cache size, power of 2
-  private readonly COORD_SCALE = 100; // Scale for coordinate precision in cache
 
   // Configuration with validation
   public readonly config: VoronoiNoiseConfig;
@@ -43,26 +53,8 @@ export class VoronoiNoise {
   private readonly cellBounds: Map<number, { min: THREE.Vector3; max: THREE.Vector3 }> = new Map();
 
   constructor(config: Partial<VoronoiNoiseConfig> = {}) {
-    // Default configuration with safe values
-    const defaultConfig: VoronoiNoiseConfig = {
-      name: "voronoi noise",
-      cellSize: 50,
-      jitter: 0.8,
-      amplitude: 1.0,
-      blendFactor: 0.5,
-      octaves: 4,
-      persistence: 0.5,
-      lacunarity: 2.0,
-      warpStrength: 0.2,
-      ridgeOffset: 1.0,
-      turbulence: 0.15,
-      erosionStrength: 0.2,
-      plateauThreshold: 0.7,
-      biomeScale: 0.3,
-    };
-
     // Validate and clamp configuration values
-    this.config = { ...defaultConfig, ...config };
+    this.config = { ...DEFAULT_CONFIG, ...config };
 
     this.simplexNoise = new SimplexNoise();
 

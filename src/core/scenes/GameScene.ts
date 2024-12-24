@@ -16,7 +16,7 @@ import { Stars } from "../objects/Stars";
 import { Sun } from "../objects/Sun";
 import { Globe } from "../planet/Globe";
 import { MiniGlobe } from "../planet/MiniGlobe";
-import { Noise, NoiseConfig } from "../planet/noise/Noise";
+import { VoronoiNoise, VoronoiNoiseConfig } from "../planet/noise/VoroniNoise";
 import { pseudoRandom } from "../utils/PseudoRandom";
 import { generateRandomPosition } from "../utils/utils";
 import { vectorPool } from "../utils/vectorPool";
@@ -63,8 +63,7 @@ export class GameScene {
   private cameraAttachedTo: THREE.Object3D;
   private debugMesh: THREE.LineSegments;
   private orbitCoontrols: boolean = true;
-  private currentTerrainType: number = 0;
-  private currentGenerator: Noise;
+  private currentGenerator: VoronoiNoise;
   private sun!: Sun;
   private moon!: Moon;
   private flyingObjects: FlyingObject[] = [];
@@ -378,13 +377,13 @@ export class GameScene {
     Object.keys(config).forEach((propKey) => {
       // Simple numeric slider example (adjust min/max/increment as needed).
       // For string or other types, you'd handle them separately.
-      if (typeof config[propKey as keyof NoiseConfig] === "number") {
+      if (typeof config[propKey as keyof VoronoiNoiseConfig] === "number") {
         controlManager.addSlider(
           propKey,
           propKey,
-          () => config[propKey as keyof NoiseConfig] as number,
+          () => config[propKey as keyof VoronoiNoiseConfig] as number,
           (value) => {
-            config[propKey as keyof NoiseConfig] = Number(value);
+            (config[propKey as keyof VoronoiNoiseConfig] as number) = Number(value);
           },
           0,
           propKey === "octaves" ? 8 : 2,
