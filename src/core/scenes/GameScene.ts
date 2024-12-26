@@ -318,11 +318,11 @@ export class GameScene {
 
   private setupControls(): void {
     controlManager.addButton("rebuild", "Rebuild globe", () => {
-      this.globe.createGlobe();
+      // this.globe.createGlobe();
     });
     controlManager.addButton("random", "Randomise globe", () => {
       pseudoRandom.setSeed(performance.now());
-      this.globe.createGlobe();
+      // this.globe.createGlobe();
     });
 
     controlManager.addSlider(

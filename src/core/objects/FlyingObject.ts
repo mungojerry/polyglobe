@@ -239,8 +239,8 @@ export class FlyingObject extends BaseGameObject implements IGameObject {
     }
 
     // check slightly in front
-    const heightAboveSurface = this.globe.getHeightAboveSurface(this.object.position.clone().add(this.getForwardDirection().multiplyScalar(2)));
-    const pointHeightAboveSurface = this.globe.getHeightAboveSurface(p);
+    const heightAboveSurface = this.globe.computeHeightAboveSurface(this.object.position.clone().add(this.getForwardDirection().multiplyScalar(2)));
+    const pointHeightAboveSurface = this.globe.computeHeightAboveSurface(p);
 
     // Prevent crashing into the terrain
     if (heightAboveSurface < pointHeightAboveSurface || heightAboveSurface < 50) {
@@ -261,7 +261,7 @@ export class FlyingObject extends BaseGameObject implements IGameObject {
 
     if (distanceToPlayer < this.shootRange && this.hasLineOfSight()) {
       if (now - this.lastShootTime > this.shootCooldown) {
-        this.shoot(this.scene);
+        this.shoot();
         this.lastShootTime = now;
       }
     }
@@ -273,7 +273,7 @@ export class FlyingObject extends BaseGameObject implements IGameObject {
   }
 
   private hover(idealDistance: number) {
-    const distanceFromGround = this.globe.getHeightAboveSurface(this.object.position);
+    const distanceFromGround = this.globe.computeHeightAboveSurface(this.object.position);
 
     if (distanceFromGround < idealDistance) {
       this.setThrusting(true);

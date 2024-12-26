@@ -4,16 +4,14 @@ import { Vector3 } from "three";
 import { mergeVertices } from "three-stdlib";
 import { Water } from "../effects/Water";
 import { debugManager } from "../managers/debugManager";
-import { getTerrainColor, isLand, landBoundary } from "../utils/biomes";
 import { pseudoRandom } from "../utils/PseudoRandom";
 import { optimizeGeometry } from "../utils/utils";
 import { vectorPool } from "../utils/vectorPool";
-import { Atmosphere } from "./Atmosphere";
+import { ChunkGenerator } from "./ChunkGenerator";
 import { GlobeChunk } from "./GlobeChunk";
 import { Infection } from "./Infection";
-
-import ChunkWorker from "./chunkWorker?worker";
 import { VoronoiNoise } from "./noise/VoroniNoise";
+import { TerrainGenerator } from "./TerrainGenerator";
 
 const globeConfig = {
   showWall: false,
@@ -38,7 +36,6 @@ export class Globe {
     clipShadows: false,
   });
   private readonly infection: Infection;
-  private readonly dayNightCycleSpeed = 0.05;
 
   public waterLevel: number = 0;
   public terrainClickAllowed: boolean = false;
@@ -48,162 +45,130 @@ export class Globe {
   private tempLandMesh!: THREE.Mesh;
   private rigidBody!: RAPIER.RigidBody;
   private water!: Water;
-  private atmosphere!: Atmosphere;
+  private terrainGenerator: TerrainGenerator;
 
   constructor(private camera: THREE.Camera, private world: RAPIER.World) {
     this.object = new THREE.Object3D();
+    this.terrainGenerator = new TerrainGenerator(this.noise);
 
     window.addEventListener("click", (e) => {
-      if (this.terrainClickAllowed) this.onClickTerrain(e);
+      if (this.terrainClickAllowed) this.handleClickTerrain(e);
     });
     this.waterLevel = this.RADIUS * 1.09;
 
-    this.createGlobe();
-    this.generateWater();
-    this.generateAtmosphere();
+    this.initializeGlobe();
+    this.buildWater();
 
-    if (globeConfig.showWall) this.addEquatorWall();
+    if (globeConfig.showWall) this.buildEquatorWall();
     this.object.castShadow = true;
     this.object.receiveShadow = true;
     this.infection = new Infection(this);
 
     const globeObject = this.getObject();
-    globeObject.traverse((object) => {
-      if (object instanceof THREE.Mesh) {
-        object.castShadow = true;
-        object.receiveShadow = true;
+    globeObject.traverse((obj) => {
+      if (obj instanceof THREE.Mesh) {
+        obj.castShadow = true;
+        obj.receiveShadow = true;
       }
     });
   }
 
-  private generateAtmosphere() {
-    this.atmosphere = new Atmosphere(this.RADIUS);
-    this.object.add(this.atmosphere.getObject());
-  }
-
-  public infect(p: THREE.Vector3) {
-    const chunk = this.getChunkByPosition(p);
-    if (chunk) {
-      this.infection.infect(p, chunk);
-    }
-  }
-
-  public createGlobe(seed: number = new Date().getTime()) {
+  /** Initialization */
+  private initializeGlobe(seed: number = new Date().getTime()) {
     const start = performance.now();
     pseudoRandom.setSeed(seed);
+
     if (this.landGeometry) {
       this.landGeometry.dispose();
     }
-
     if (this.rigidBody) {
       this.world.removeRigidBody(this.rigidBody);
       this.rigidBody = null!;
     }
 
-    this.generateLand();
-    this.createPhysicsObject();
-    this.initChunks();
+    this.buildLandGeometry();
+    this.buildPhysicsObject();
+    this.buildChunks();
 
     const end = performance.now();
     debugManager.set("perf", "Generation time: " + (end - start).toFixed(4) + "ms");
   }
 
-  private removeTemporaryGeometry() {
+  private buildWater() {
+    this.water = new Water(this.waterLevel, Math.round(this.DETAIL / 3));
+    this.object.add(this.water.getObject());
+  }
+
+  private buildEquatorWall() {
+    const sph = new THREE.CircleGeometry(this.RADIUS * 0.6, 50);
+    const spm = new THREE.MeshStandardMaterial({
+      color: 0x00ff00,
+      transparent: true,
+      opacity: 0.6,
+      side: THREE.DoubleSide,
+    });
+    const wall = new THREE.Mesh(sph, spm);
+    wall.rotateOnWorldAxis(new Vector3(0, 1, 1), 180 * THREE.MathUtils.DEG2RAD);
+    this.object.add(wall);
+  }
+
+  /** Chunks */
+  private async buildChunks() {
+    const chunkGenerator = new ChunkGenerator();
+    const newChunks = await chunkGenerator.generateChunks(this.landGeometry, this.landMaterial, this.object, this.CHUNK_SIZE);
+
+    this.chunks.push(...newChunks);
+    this.discardTemporaryMesh();
+  }
+
+  private discardTemporaryMesh() {
     this.object.remove(this.tempLandMesh);
     this.tempLandMesh.geometry.dispose();
   }
 
-  private createPhysicsObject() {
+  /** Physics */
+  private buildPhysicsObject() {
     const fullGeometry = this.landGeometry;
-
     const rigidBodyDesc = RAPIER.RigidBodyDesc.fixed();
     this.rigidBody = this.world.createRigidBody(rigidBodyDesc);
 
     const vertices = fullGeometry.attributes.position.array;
     const indices = fullGeometry.index ? fullGeometry.index.array : undefined;
-
     const colliderDesc = RAPIER.ColliderDesc.trimesh(vertices as Float32Array, indices as Uint32Array);
     this.world.createCollider(colliderDesc, this.rigidBody);
   }
 
-  private initChunks() {
-    const start = performance.now();
-    const workerPromises = [];
+  /** Land generation */
+  private buildLandGeometry() {
+    const icosahedron = new THREE.IcosahedronGeometry(this.RADIUS + 0.2, this.DETAIL);
+    const positionAttr = icosahedron.attributes.position;
+    const vertexCount = positionAttr.count;
 
-    for (let lat = -90; lat < 90; lat += this.CHUNK_SIZE) {
-      const row: GlobeChunk[] = [];
-      for (let lon = -180; lon < 180; lon += this.CHUNK_SIZE) {
-        const worker = new ChunkWorker();
-        worker.postMessage({ source: this.landGeometry, lat, lon, size: this.CHUNK_SIZE });
-
-        const promise = new Promise<void>((resolve) => {
-          worker.onmessage = (event) => {
-            const serializedGeometry = event.data.geometry;
-
-            // Reconstruct the geometry from the serialized data
-            const loader = new THREE.BufferGeometryLoader();
-            const geometry = loader.parse(serializedGeometry);
-            geometry.computeBoundsTree();
-
-            const chunk = new GlobeChunk(geometry, this.landMaterial.clone());
-            chunk.latStart = lat;
-            chunk.latEnd = lat + this.CHUNK_SIZE;
-            chunk.lonStart = lon;
-            chunk.lonEnd = lon + this.CHUNK_SIZE;
-            chunk.mesh.layers.enable(1);
-            row.push(chunk);
-            this.object.add(chunk.mesh);
-            worker.terminate();
-            resolve();
-          };
-        });
-
-        workerPromises.push(promise);
-      }
-      this.chunks.push(row);
-    }
-
-    Promise.all(workerPromises).then(() => {
-      this.removeTemporaryGeometry();
-      debugManager.set("initChunks", "initChunks: " + (performance.now() - start).toFixed(4));
-    });
-  }
-
-  public getChunkById(id: string): GlobeChunk | undefined {
-    return this.chunks.flat().find((chunk) => chunk.mesh.uuid === id);
-  }
-
-  private generateLand() {
-    const landGeometry = new THREE.IcosahedronGeometry(this.RADIUS + 0.2, this.DETAIL);
-    const positionAttribute = landGeometry.attributes.position;
-    const vertexCount = positionAttribute.count;
-
-    const vertices = new Float32Array(vertexCount * 3 * 4);
-    const colors = new Float32Array(vertexCount * 3 * 4);
+    const vertices = new Float32Array(vertexCount * 12);
+    const colors = new Float32Array(vertexCount * 12);
     const indices = new Uint32Array(vertexCount * 4);
-    const positionArray = positionAttribute.array;
+    const posArray = positionAttr.array;
+
     for (let i = 0; i < vertexCount; i++) {
       const idx = i * 3;
-
-      const x = positionArray[idx];
-      const y = positionArray[idx + 1];
-      const z = positionArray[idx + 2];
+      const x = posArray[idx];
+      const y = posArray[idx + 1];
+      const z = posArray[idx + 2];
 
       const length = Math.sqrt(x * x + y * y + z * z);
       const nx = x / length;
       const ny = y / length;
       const nz = z / length;
-
       const latitude = Math.asin(ny);
 
-      const height = this.getHeight(nx, ny, nz);
-      const elevation = this.elevationMultiplier(height);
+      const height = this.terrainGenerator.computeSurfaceHeight(nx, ny, nz);
+      const elevation = this.terrainGenerator.computeElevationMultiplier(height);
 
       vertices[idx] = x * elevation;
       vertices[idx + 1] = y * elevation;
       vertices[idx + 2] = z * elevation;
 
-      const color = getTerrainColor(height, latitude);
+      const color = this.terrainGenerator.getTerrainColorValue(height, latitude);
       colors[idx] = color.r;
       colors[idx + 1] = color.g;
       colors[idx + 2] = color.b;
@@ -226,16 +191,26 @@ export class Globe {
     this.object.add(this.tempLandMesh);
   }
 
+  /** Terrain data */
+  public computeSurfaceHeight(x: number, y: number, z: number): number {
+    return this.terrainGenerator.computeSurfaceHeight(x, y, z);
+  }
+
+  private computeElevationMultiplier(noise: number) {
+    return this.terrainGenerator.computeElevationMultiplier(noise);
+  }
+
+  /** Terrain queries */
   public getSurfaceNormal(position: THREE.Vector3): THREE.Vector3 {
     const normalAttr = this.landGeometry.attributes.normal;
-    const closestIndex = this.findClosestVertexIndex(position);
+    const closestIndex = this.getClosestVertexIndex(position);
     const nx = normalAttr.array[closestIndex * 3];
     const ny = normalAttr.array[closestIndex * 3 + 1];
     const nz = normalAttr.array[closestIndex * 3 + 2];
     return new THREE.Vector3(nx, ny, nz).normalize();
   }
 
-  private findClosestVertexIndex(position: THREE.Vector3): number {
+  private getClosestVertexIndex(position: THREE.Vector3): number {
     const vertices = this.landGeometry.attributes.position;
     let minDist = Infinity;
     let closestIndex = 0;
@@ -246,88 +221,60 @@ export class Globe {
       const vz = vertices.array[i * 3 + 2];
       const v = vectorPool.getVector(vx, vy, vz);
       const dist = position.distanceToSquared(v);
-
       if (dist < minDist) {
         minDist = dist;
         closestIndex = i;
       }
       vectorPool.releaseVector(v);
     }
-
     return closestIndex;
   }
 
-  private generateWater() {
-    this.water = new Water(this.waterLevel, Math.round(this.DETAIL / 3));
-    this.object.add(this.water.getObject());
-  }
-
-  public getHeight(x: number, y: number, z: number): number {
-    return 0.4 + this.noise.getValue(x, y, z) * 0.7;
-  }
-
   public isLand(position: THREE.Vector3): boolean {
-    const direction = position.clone().normalize();
-    const noise = this.getHeight(direction.x, direction.y, direction.z);
-    return isLand(noise);
+    const dir = position.clone().normalize();
+    const noiseValue = this.computeSurfaceHeight(dir.x, dir.y, dir.z);
+    return this.terrainGenerator.isLandHeight(noiseValue);
   }
 
-  public getTerrainSlope(position: THREE.Vector3): number {
+  public computeTerrainSlope(position: THREE.Vector3): number {
     const surfaceNormal = this.getSurfaceNormal(position);
     const up = position.clone().normalize();
-    const steepness = 1 - surfaceNormal.dot(up);
-    return steepness;
+    return 1 - surfaceNormal.dot(up);
   }
 
-  public getPositionOnSurface(worldPos: THREE.Vector3): THREE.Vector3 | null {
-    const direction = worldPos.clone().normalize();
-    const noise = this.getHeight(direction.x, direction.y, direction.z);
-    const elevation = this.elevationMultiplier(noise);
-    return direction.multiplyScalar(this.RADIUS * elevation);
+  public computePositionOnSurface(worldPos: THREE.Vector3): THREE.Vector3 | null {
+    const dir = worldPos.clone().normalize();
+    const noise = this.computeSurfaceHeight(dir.x, dir.y, dir.z);
+    const elevation = this.computeElevationMultiplier(noise);
+    return dir.multiplyScalar(this.RADIUS * elevation);
   }
 
-  private elevationMultiplier(noise: number) {
-    // Convert normalized noise [-1, 1] to elevation multiplier [0.7, 1.3]
-    // Using a more dramatic curve for elevation changes
-    const normalizedHeight = (noise + 1) * 0.5; // Convert to [0, 1]
-    const curve = Math.pow(normalizedHeight, 1.5); // Apply curve for more dramatic changes
-    return 0.7 + curve * 0.6; // Map to [0.7, 1.3]
+  public computeHeightAboveSurface(v: THREE.Vector3, testUnderWater: boolean = false): number {
+    const dir = v.clone().normalize();
+    const noiseValue = this.terrainGenerator.computeSurfaceHeight(dir.x, dir.y, dir.z);
+    const validNoise = !testUnderWater && this.terrainGenerator.isLandHeight(noiseValue) ? noiseValue : this.terrainGenerator.getTerrainBoundary();
+
+    const elevation = this.computeElevationMultiplier(validNoise);
+    const surfacePos = dir.multiplyScalar(this.RADIUS * elevation);
+    return v.distanceTo(surfacePos);
   }
 
-  public getHeightAboveSurface(v: THREE.Vector3, testUnderWater: boolean = false): number {
-    const direction = v.clone().normalize();
-    const noise = this.getHeight(direction.x, direction.y, direction.z);
-    const noiseAboveWater = !testUnderWater && isLand(noise) ? noise : landBoundary;
-    const elevation = this.elevationMultiplier(noiseAboveWater);
-    const surfacePosition = direction.multiplyScalar(this.RADIUS * elevation);
-    const height = v.distanceTo(surfacePosition);
-    return height;
+  public computeAbsoluteHeightOfSurface(v: THREE.Vector3): number {
+    const dir = v.clone().normalize();
+    const noise = this.computeSurfaceHeight(dir.x, dir.y, dir.z);
+    const elevation = this.computeElevationMultiplier(noise);
+    const surfacePos = dir.multiplyScalar(this.RADIUS * elevation);
+    return v.distanceTo(surfacePos);
   }
 
-  public getHeightOfSurface(v: THREE.Vector3): number {
-    const direction = v.clone().normalize();
-    const noise = this.getHeight(direction.x, direction.y, direction.z);
-    const elevation = this.elevationMultiplier(noise);
-    const surfacePosition = direction.multiplyScalar(this.RADIUS * elevation);
-    const height = v.distanceTo(surfacePosition);
-    return height;
-  }
-
-  public getObject(): THREE.Object3D {
-    return this.object;
-  }
-
-  public getRadius(): number {
-    return this.RADIUS;
-  }
-
-  deformTerrain(deformPosition: THREE.Vector3, strength: number = 2.5, radius: number = 25): void {
+  /** Basic interactions */
+  public deformTerrain(deformPosition: THREE.Vector3, strength: number = 2.5, radius: number = 25) {
     if (this.onTerrainDeformed) {
       this.onTerrainDeformed(deformPosition, radius);
     }
   }
 
-  onClickTerrain(event: MouseEvent) {
+  private handleClickTerrain(event: MouseEvent) {
     const mouse = new THREE.Vector2();
     mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
     mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
@@ -342,9 +289,14 @@ export class Globe {
     }
   }
 
+  /** Chunk queries */
+  public getChunkById(id: string): GlobeChunk | undefined {
+    return this.chunks.flat().find((chunk) => chunk.mesh.uuid === id);
+  }
+
   public getChunkByPosition(position: THREE.Vector3): GlobeChunk | null {
-    const localPosition = position.clone().applyMatrix4(new THREE.Matrix4().copy(this.object.matrixWorld).invert());
-    const surfacePos = localPosition.clone().setLength(this.RADIUS);
+    const localPos = position.clone().applyMatrix4(new THREE.Matrix4().copy(this.object.matrixWorld).invert());
+    const surfacePos = localPos.clone().setLength(this.RADIUS);
     const { lat, lon } = this.xyzToLatLon(surfacePos);
 
     for (const row of this.chunks) {
@@ -357,16 +309,8 @@ export class Globe {
     return null;
   }
 
-  private xyzToLatLon(position: THREE.Vector3): { lat: number; lon: number } {
-    const radius = this.RADIUS;
-    const lat = Math.asin(position.y / radius) * (180 / Math.PI);
-    let lon = Math.atan2(position.x, position.z) * (180 / Math.PI);
-    lon = ((lon + 180) % 360) - 180;
-    return { lat: Math.max(-90, Math.min(90, lat)), lon };
-  }
-
   public getVisibleChunks(): GlobeChunk[] {
-    let visibleChunks: GlobeChunk[] = [];
+    const visibleChunks: GlobeChunk[] = [];
     this.chunks.forEach((row) => {
       row.forEach((chunk) => {
         if (chunk.mesh.visible) visibleChunks.push(chunk);
@@ -375,52 +319,27 @@ export class Globe {
     return visibleChunks;
   }
 
-  public getLandGeometry() {
-    return this.landGeometry;
+  private xyzToLatLon(position: THREE.Vector3): { lat: number; lon: number } {
+    const radius = this.RADIUS;
+    const lat = Math.asin(position.y / radius) * (180 / Math.PI);
+    let lon = Math.atan2(position.x, position.z) * (180 / Math.PI);
+    lon = ((lon + 180) % 360) - 180;
+    return { lat: Math.max(-90, Math.min(90, lat)), lon };
   }
 
-  private addEquatorWall() {
-    const sph = new THREE.CircleGeometry(this.RADIUS * 0.6, 50);
-    const spm = new THREE.MeshStandardMaterial({
-      color: 0x00ff00,
-      transparent: true,
-      opacity: 0.6,
-      side: THREE.DoubleSide,
-    });
-    const wall = new THREE.Mesh(sph, spm);
-    wall.rotateOnWorldAxis(new Vector3(0, 1, 1), 180 * THREE.MathUtils.DEG2RAD);
-    this.object.add(wall);
+  /** Infection */
+  public infect(p: THREE.Vector3) {
+    const chunk = this.getChunkByPosition(p);
+    if (chunk) {
+      this.infection.infect(p, chunk);
+    }
   }
 
-  update(camera: THREE.Camera, deltaTime: number) {
+  /** Lifecycle */
+  public update(camera: THREE.Camera, deltaTime: number) {
     this.updateChunkVisibility(camera);
-    this.water && this.water.animate();
+    if (this.water) this.water.animate();
     if (this.runInfection) this.infection.update(deltaTime);
-
-    // Update atmosphere and water with sun/moon positions
-    const time = performance.now() * 0.001;
-    const orbitRadius = this.RADIUS * 3;
-    const sunPosition = new THREE.Vector3(
-      Math.cos(time * this.dayNightCycleSpeed) * orbitRadius,
-      Math.sin(time * this.dayNightCycleSpeed) * orbitRadius * 0.3,
-      Math.sin(time * this.dayNightCycleSpeed) * orbitRadius
-    );
-    const moonPosition = new THREE.Vector3(
-      -Math.cos(time * this.dayNightCycleSpeed) * orbitRadius,
-      Math.sin(time * this.dayNightCycleSpeed + Math.PI) * orbitRadius * 0.3,
-      -Math.sin(time * this.dayNightCycleSpeed) * orbitRadius
-    );
-
-    // Update atmosphere
-    this.atmosphere.update(sunPosition, moonPosition);
-
-    // Calculate day/night cycle
-    const dayNightCycle = (Math.sin(time * this.dayNightCycleSpeed) + 1) * 0.5;
-    this.atmosphere.setSunIntensity(Math.pow(dayNightCycle, 0.5));
-    this.atmosphere.setMoonIntensity(Math.pow(1 - dayNightCycle, 0.5) * 0.5);
-
-    // Update water reflections
-    this.water.updateLightPositions(sunPosition, moonPosition, dayNightCycle);
   }
 
   private updateChunkVisibility(camera: THREE.Camera) {
@@ -428,6 +347,7 @@ export class Globe {
     this.frustum.setFromProjectionMatrix(this.cameraViewProjectionMatrix);
     let chunksVisible = 0;
     let numChunks = 0;
+
     this.chunks.forEach((row) => {
       row.forEach((chunk) => {
         chunk.mesh.visible = this.frustum.intersectsObject(chunk.mesh);
@@ -436,5 +356,18 @@ export class Globe {
       });
     });
     debugManager.set("chucnks", "Chunks: " + chunksVisible + "/" + numChunks);
+  }
+
+  /** Accessors */
+  public getObject(): THREE.Object3D {
+    return this.object;
+  }
+
+  public getRadius(): number {
+    return this.RADIUS;
+  }
+
+  public getLandGeometry() {
+    return this.landGeometry;
   }
 }
