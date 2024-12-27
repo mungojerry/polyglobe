@@ -32,6 +32,10 @@ class PseudoRandomNumberGenerator {
   public setSeed(newSeed: number): void {
     this.seed = newSeed;
   }
+
+  public getSeed(): number {
+    return this.seed;
+  }
 }
 
 export const pseudoRandom = PseudoRandomNumberGenerator.getInstance(10182);

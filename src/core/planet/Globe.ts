@@ -1,15 +1,15 @@
 import RAPIER from "@dimforge/rapier3d";
 import * as THREE from "three";
 import { Vector3 } from "three";
-import { mergeVertices } from "three-stdlib";
 import { Water } from "../effects/Water";
 import { debugManager } from "../managers/debugManager";
 import { pseudoRandom } from "../utils/PseudoRandom";
-import { optimizeGeometry } from "../utils/utils";
+import { ProgressCallback } from "../utils/utils";
 import { vectorPool } from "../utils/vectorPool";
 import { ChunkGenerator } from "./ChunkGenerator";
 import { GlobeChunk } from "./GlobeChunk";
 import { Infection } from "./Infection";
+import { LandGeometryGenerator } from "./LangGeometryGenerator";
 import { VoronoiNoise } from "./noise/VoroniNoise";
 import { TerrainGenerator } from "./TerrainGenerator";
 
@@ -45,36 +45,26 @@ export class Globe {
   private tempLandMesh!: THREE.Mesh;
   private rigidBody!: RAPIER.RigidBody;
   private water!: Water;
-  private terrainGenerator: TerrainGenerator;
+  private terrainGenerator: TerrainGenerator = new TerrainGenerator(this.noise);
 
   constructor(private camera: THREE.Camera, private world: RAPIER.World) {
     this.object = new THREE.Object3D();
-    this.terrainGenerator = new TerrainGenerator(this.noise);
 
     window.addEventListener("click", (e) => {
       if (this.terrainClickAllowed) this.handleClickTerrain(e);
     });
     this.waterLevel = this.RADIUS * 1.09;
 
-    this.initializeGlobe();
     this.buildWater();
 
     if (globeConfig.showWall) this.buildEquatorWall();
     this.object.castShadow = true;
     this.object.receiveShadow = true;
     this.infection = new Infection(this);
-
-    const globeObject = this.getObject();
-    globeObject.traverse((obj) => {
-      if (obj instanceof THREE.Mesh) {
-        obj.castShadow = true;
-        obj.receiveShadow = true;
-      }
-    });
   }
 
   /** Initialization */
-  private initializeGlobe(seed: number = new Date().getTime()) {
+  public async initializeGlobe(seed: number = new Date().getTime(), onProgress: ProgressCallback) {
     const start = performance.now();
     pseudoRandom.setSeed(seed);
 
@@ -86,9 +76,17 @@ export class Globe {
       this.rigidBody = null!;
     }
 
-    this.buildLandGeometry();
+    await this.buildLandGeometry(onProgress);
+
+    // const globeObject = this.getObject();
+    // globeObject.traverse((obj) => {
+    //   if (obj instanceof THREE.Mesh) {
+    //     obj.castShadow = true;
+    //     obj.receiveShadow = true;
+    //   }
+    // });
+
     this.buildPhysicsObject();
-    this.buildChunks();
 
     const end = performance.now();
     debugManager.set("perf", "Generation time: " + (end - start).toFixed(4) + "ms");
@@ -113,9 +111,9 @@ export class Globe {
   }
 
   /** Chunks */
-  private async buildChunks() {
+  public async buildChunks(onProgress: ProgressCallback) {
     const chunkGenerator = new ChunkGenerator();
-    const newChunks = await chunkGenerator.generateChunks(this.landGeometry, this.landMaterial, this.object, this.CHUNK_SIZE);
+    const newChunks = await chunkGenerator.generateChunks(this.landGeometry, this.landMaterial, this.object, this.CHUNK_SIZE, onProgress);
 
     this.chunks.push(...newChunks);
     this.discardTemporaryMesh();
@@ -139,55 +137,13 @@ export class Globe {
   }
 
   /** Land generation */
-  private buildLandGeometry() {
-    const icosahedron = new THREE.IcosahedronGeometry(this.RADIUS + 0.2, this.DETAIL);
-    const positionAttr = icosahedron.attributes.position;
-    const vertexCount = positionAttr.count;
-
-    const vertices = new Float32Array(vertexCount * 12);
-    const colors = new Float32Array(vertexCount * 12);
-    const indices = new Uint32Array(vertexCount * 4);
-    const posArray = positionAttr.array;
-
-    for (let i = 0; i < vertexCount; i++) {
-      const idx = i * 3;
-      const x = posArray[idx];
-      const y = posArray[idx + 1];
-      const z = posArray[idx + 2];
-
-      const length = Math.sqrt(x * x + y * y + z * z);
-      const nx = x / length;
-      const ny = y / length;
-      const nz = z / length;
-      const latitude = Math.asin(ny);
-
-      const height = this.terrainGenerator.computeSurfaceHeight(nx, ny, nz);
-      const elevation = this.terrainGenerator.computeElevationMultiplier(height);
-
-      vertices[idx] = x * elevation;
-      vertices[idx + 1] = y * elevation;
-      vertices[idx + 2] = z * elevation;
-
-      const color = this.terrainGenerator.getTerrainColorValue(height, latitude);
-      colors[idx] = color.r;
-      colors[idx + 1] = color.g;
-      colors[idx + 2] = color.b;
-
-      indices[i] = i;
-    }
-
-    const newGeometry = new THREE.BufferGeometry();
-    newGeometry.setAttribute("position", new THREE.BufferAttribute(vertices, 3));
-    newGeometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-    newGeometry.setIndex(new THREE.BufferAttribute(indices, 1));
-    newGeometry.computeVertexNormals();
-
-    if (this.landGeometry) {
-      this.landGeometry.dispose();
-    }
-
-    this.landGeometry = mergeVertices(optimizeGeometry(newGeometry));
-    this.tempLandMesh = new THREE.Mesh(this.landGeometry, this.landMaterial);
+  private async buildLandGeometry(onProgress: ProgressCallback) {
+    const landWorker = new LandGeometryGenerator();
+    const geometry = await landWorker.generateLand(this.RADIUS, this.DETAIL, Math.random(), this.noise, this.terrainGenerator, onProgress);
+    console.log("##############");
+    console.log(geometry);
+    this.landGeometry = geometry;
+    this.tempLandMesh = new THREE.Mesh(geometry, this.landMaterial);
     this.object.add(this.tempLandMesh);
   }
 

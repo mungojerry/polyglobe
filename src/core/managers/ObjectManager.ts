@@ -1,6 +1,8 @@
+// Previous imports remain the same
 import * as THREE from "three";
 import { Globe } from "../planet/Globe";
 import { BiomeName } from "../utils/biomes";
+import { ProgressCallback } from "../utils/utils";
 import { ModelLoader } from "./ModelLoader";
 
 export enum PlacementType {
@@ -220,8 +222,11 @@ export class ObjectManager {
     return quaternion.identity();
   }
 
-  private async preloadModelVariants(modelType: ModelType): Promise<void> {
+  private async preloadModelVariants(modelType: ModelType, onProgress?: ProgressCallback): Promise<void> {
     const basePath = "assets/models/fbx/" + modelType.filename;
+    const totalFiles = modelType.files.length;
+    let loadedFiles = 0;
+
     const promises = modelType.files.map(async (fileIndex) => {
       const modelKey = this.getModelKey(basePath, fileIndex);
       if (!this.instancedMeshes.has(modelKey)) {
@@ -233,55 +238,109 @@ export class ObjectManager {
         this.instancedMeshes.set(modelKey, instancedMesh);
         this.instanceCounts.set(modelKey, 0);
         this.scene.add(instancedMesh);
+
+        loadedFiles++;
+        if (onProgress) {
+          onProgress((loadedFiles / totalFiles) * 100);
+        }
       }
     });
     await Promise.all(promises);
   }
 
-  public async placeObjects(modelGroups: ModelGroup[]): Promise<void> {
+  public async placeObjects(modelGroups: ModelGroup[], onProgress?: ProgressCallback): Promise<void> {
     this.poolIndex = 0;
+    let totalProgress = 0;
 
-    const preloadPromises = modelGroups.flatMap((group) => [...group.models.map((model) => this.preloadModelVariants(model))]);
+    // Phase 1: Preload models (30% of total progress)
+    const totalModels = modelGroups.reduce((sum, group) => sum + group.models.length, 0);
+    let loadedModels = 0;
+
+    const preloadPromises = modelGroups.flatMap((group) =>
+      group.models.map(async (model) => {
+        await this.preloadModelVariants(model, (modelProgress) => {
+          if (onProgress) {
+            const phaseProgress = (loadedModels + modelProgress / 100) / totalModels;
+            onProgress(phaseProgress * 30);
+          }
+        });
+        loadedModels++;
+      })
+    );
     await Promise.all(preloadPromises);
+    totalProgress = 30;
+
+    // Phase 2: Place objects (70% of total progress)
+    const matrices: Map<string, THREE.Matrix4[]> = new Map();
+    const batchSize = 100;
+    let processedGroups = 0;
 
     for (const group of modelGroups) {
-      const matrices: Map<string, THREE.Matrix4[]> = new Map();
-      const batchSize = 100;
-
       if (group.placement === PlacementBehavior.Clustered && group.numInCluster) {
-        await this.placeClusteredObjects(group, batchSize, matrices);
-      } else {
-        await this.placeNormalObjects(group, batchSize, matrices);
-      }
-
-      matrices.forEach((matrixArray, modelKey) => {
-        const instancedMesh = this.instancedMeshes.get(modelKey)!;
-        for (let i = 0; i < matrixArray.length; i += batchSize) {
-          const end = Math.min(i + batchSize, matrixArray.length);
-          for (let j = i; j < end; j++) {
-            instancedMesh.setMatrixAt(j, matrixArray[j]);
+        await this.placeClusteredObjects(group, batchSize, matrices, (groupProgress) => {
+          if (onProgress) {
+            const phaseProgress = (processedGroups + groupProgress / 100) / modelGroups.length;
+            onProgress(totalProgress + phaseProgress * 70);
           }
+        });
+      } else {
+        await this.placeNormalObjects(group, batchSize, matrices, (groupProgress) => {
+          if (onProgress) {
+            const phaseProgress = (processedGroups + groupProgress / 100) / modelGroups.length;
+            onProgress(totalProgress + phaseProgress * 70);
+          }
+        });
+      }
+      processedGroups++;
+    }
+
+    // Apply matrices
+    matrices.forEach((matrixArray, modelKey) => {
+      const instancedMesh = this.instancedMeshes.get(modelKey)!;
+      for (let i = 0; i < matrixArray.length; i += batchSize) {
+        const end = Math.min(i + batchSize, matrixArray.length);
+        for (let j = i; j < end; j++) {
+          instancedMesh.setMatrixAt(j, matrixArray[j]);
         }
-        instancedMesh.count = matrixArray.length;
-        instancedMesh.instanceMatrix.needsUpdate = true;
-      });
+      }
+      instancedMesh.count = matrixArray.length;
+      instancedMesh.instanceMatrix.needsUpdate = true;
+    });
+
+    if (onProgress) {
+      onProgress(100);
     }
   }
 
-  private async placeNormalObjects(group: ModelGroup, batchSize: number, matrices: Map<string, THREE.Matrix4[]>) {
+  private async placeNormalObjects(group: ModelGroup, batchSize: number, matrices: Map<string, THREE.Matrix4[]>, onProgress?: ProgressCallback) {
     const promises = [];
+    let totalInstances = 0;
+    let placedInstances = 0;
+
+    group.models.forEach((model) => {
+      totalInstances += model.numInstances;
+    });
+
     for (const modelType of group.models) {
       for (let i = 0; i < modelType.numInstances; i += batchSize) {
         const batchCount = Math.min(batchSize, modelType.numInstances - i);
-        promises.push(this.placeBatch(modelType, this.landVertices, batchCount, matrices));
+        promises.push(
+          this.placeBatch(modelType, this.landVertices, batchCount, matrices).then(() => {
+            placedInstances += batchCount;
+            if (onProgress) {
+              onProgress((placedInstances / totalInstances) * 100);
+            }
+          })
+        );
       }
     }
     await Promise.all(promises);
   }
 
-  private async placeClusteredObjects(group: ModelGroup, batchSize: number, matrices: Map<string, THREE.Matrix4[]>) {
+  private async placeClusteredObjects(group: ModelGroup, batchSize: number, matrices: Map<string, THREE.Matrix4[]>, onProgress?: ProgressCallback) {
     const promises = [];
     const totalInstances = group.models.reduce((sum, type) => sum + type.numInstances, 0);
+    let placedInstances = 0;
     const numInCluster = group.numInCluster ?? 1;
     const numClusters = Math.ceil(totalInstances / numInCluster);
     const clusterCenters = Array(numClusters)
@@ -297,7 +356,14 @@ export class ObjectManager {
         const selectedTypes = this.selectModelTypesForBatch(group.models, batchCount);
 
         for (const [modelType, count] of selectedTypes) {
-          promises.push(this.placeBatch(modelType, nearbyVertices, count, matrices));
+          promises.push(
+            this.placeBatch(modelType, nearbyVertices, count, matrices).then(() => {
+              placedInstances += count;
+              if (onProgress) {
+                onProgress((placedInstances / totalInstances) * 100);
+              }
+            })
+          );
         }
       }
     }

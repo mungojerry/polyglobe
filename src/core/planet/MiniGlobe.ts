@@ -1,9 +1,11 @@
 import * as THREE from "three";
 import { IGameObject } from "../objects/BaseGameObject";
+
 export interface Marker {
   mesh: THREE.Mesh;
   object: IGameObject;
 }
+
 export class MiniGlobe {
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
@@ -13,6 +15,8 @@ export class MiniGlobe {
   private viewportWidth: number;
   private viewportHeight: number;
   private objectMarkers: Marker[] = [];
+  private markerRadius = 0.05; // Globe surface radius
+
   constructor(bufferGeometry: THREE.BufferGeometry, mainCamera: THREE.Camera, width: number = 200, height: number = 200) {
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 1000);
@@ -22,6 +26,12 @@ export class MiniGlobe {
     this.viewportHeight = height;
     this.mainCamera = mainCamera;
 
+    this.globe = this.createGlobe(bufferGeometry);
+    this.setupScene();
+    this.setupUI();
+  }
+
+  private createGlobe(bufferGeometry: THREE.BufferGeometry): THREE.Mesh {
     const radius = 0.85; // Smaller radius than the main globe
     const detail = 80; // Lower detail for the mini globe
     const icosahedronGeometry = new THREE.IcosahedronGeometry(radius, detail);
@@ -81,8 +91,12 @@ export class MiniGlobe {
       vertexColors: true,
     });
 
-    this.globe = new THREE.Mesh(icosahedronGeometry, material);
+    const globe = new THREE.Mesh(icosahedronGeometry, material);
     icosahedronGeometry.computeVertexNormals();
+    return globe;
+  }
+
+  private setupScene(): void {
     this.scene.add(this.globe);
 
     // Add light
@@ -92,7 +106,9 @@ export class MiniGlobe {
     this.scene.add(new THREE.AmbientLight(0xffffff));
 
     this.camera.position.z = 2;
+  }
 
+  private setupUI(): void {
     const miniGlobeElement = this.getElement();
     miniGlobeElement.id = "mini-globe";
     document.body.appendChild(miniGlobeElement);
@@ -104,7 +120,6 @@ export class MiniGlobe {
     miniGlobeElement.style.width = this.viewportWidth + "px";
     miniGlobeElement.style.height = this.viewportHeight + "px";
     miniGlobeElement.style.background = "#000";
-    // miniGlobeElement.style.background = "radial-gradient(circle, #333, #000)";
     miniGlobeElement.style.borderRadius = "50%";
 
     const miniGlobeElementShadow = document.createElement("div");
@@ -116,12 +131,22 @@ export class MiniGlobe {
     miniGlobeElementShadow.style.right = "10px";
     miniGlobeElementShadow.style.width = this.viewportWidth + "px";
     miniGlobeElementShadow.style.height = this.viewportHeight + "px";
-
     miniGlobeElementShadow.style.background = "radial-gradient(circle, rgba(0,0,0,0) 0%, rgba(0,0,0,0) 50%, rgba(0,0,0,.71) 80%, rgba(0,0,0,.91) 100%)";
     miniGlobeElementShadow.style.borderRadius = "50%";
   }
 
-  public update() {
+  public updateGeometry(bufferGeometry: THREE.BufferGeometry): void {
+    // Remove old globe
+    this.scene.remove(this.globe);
+    this.globe.geometry.dispose();
+    (this.globe.material as THREE.Material).dispose();
+
+    // Create new globe with updated geometry
+    this.globe = this.createGlobe(bufferGeometry);
+    this.scene.add(this.globe);
+  }
+
+  public update(): void {
     // Get main camera position and normalize it
     const mainCameraPos = new THREE.Vector3();
     this.mainCamera.getWorldPosition(mainCameraPos);
@@ -141,9 +166,8 @@ export class MiniGlobe {
 
     this.renderer.render(this.scene, this.camera);
   }
-  private markerRadius = 0.05; // Globe surface radius
-  public addMarkers(gameObjects: IGameObject[], color: number) {
-    console.log(color);
+
+  public addMarkers(gameObjects: IGameObject[], color: number): void {
     this.objectMarkers = [
       ...this.objectMarkers,
       ...gameObjects.map((gameObject) => {

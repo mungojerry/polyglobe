@@ -1,0 +1,90 @@
+import { BufferAttribute, BufferGeometry, IcosahedronGeometry } from "three";
+import { getTerrainColor } from "../utils/biomes";
+import { TerrainGenerator } from "./TerrainGenerator";
+import { VoronoiNoise } from "./noise/VoroniNoise";
+
+self.onmessage = (event: MessageEvent) => {
+  try {
+    const { radius, detail, seed } = event.data as {
+      radius: number;
+      detail: number;
+      seed: number;
+    };
+    console.log(radius, detail, seed);
+
+    // Create base icosahedron
+    const icosahedron = new IcosahedronGeometry(radius + 0.2, detail);
+    const positionAttr = icosahedron.attributes.position;
+    const vertexCount = positionAttr.count;
+
+    const vertices = new Float32Array(vertexCount * 3);
+    const colors = new Float32Array(vertexCount * 3);
+    const indices = new Uint32Array(vertexCount);
+    const posArray = positionAttr.array;
+
+    const noise = new VoronoiNoise();
+
+    const terrainGenerator = new TerrainGenerator(noise);
+
+    // Process vertices in chunks to report progress
+    const CHUNK_SIZE = 1000;
+    const totalVertices = vertexCount;
+    console.log(terrainGenerator.computeSurfaceHeight);
+
+    for (let i = 0; i < vertexCount; i += CHUNK_SIZE) {
+      const end = Math.min(i + CHUNK_SIZE, vertexCount);
+
+      for (let j = i; j < end; j++) {
+        const idx = j * 3;
+        const x = posArray[idx];
+        const y = posArray[idx + 1];
+        const z = posArray[idx + 2];
+
+        const length = Math.sqrt(x * x + y * y + z * z);
+        const nx = x / length;
+        const ny = y / length;
+        const nz = z / length;
+        const latitude = Math.asin(ny);
+
+        // Use actual terrain generation logic
+        const height = terrainGenerator.computeSurfaceHeight(nx, ny, nz);
+        const elevation = terrainGenerator.computeElevationMultiplier(height);
+
+        vertices[idx] = x * elevation;
+        vertices[idx + 1] = y * elevation;
+        vertices[idx + 2] = z * elevation;
+
+        // Use the same color generation as main thread
+        const color = getTerrainColor(height, latitude);
+        colors[idx] = color.r;
+        colors[idx + 1] = color.g;
+        colors[idx + 2] = color.b;
+
+        indices[j] = j;
+      }
+
+      const progress = Math.min((end / totalVertices) * 100, 99);
+      self.postMessage({ type: "progress", progress });
+    }
+
+    // Create geometry
+    const geometry = new BufferGeometry();
+    geometry.setAttribute("position", new BufferAttribute(vertices, 3));
+    geometry.setAttribute("color", new BufferAttribute(colors, 3));
+    geometry.setIndex(new BufferAttribute(indices, 1));
+    geometry.computeVertexNormals();
+
+    // Convert to transferable format
+    const geometryJson = geometry.toJSON();
+
+    self.postMessage({
+      type: "complete",
+      geometry: geometryJson,
+    });
+  } catch (error) {
+    self.postMessage({
+      type: "error",
+      error: error instanceof Error ? error.message : "Unknown error in worker",
+    });
+  }
+};

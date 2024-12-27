@@ -24,3 +24,5 @@ export function generateRandomPosition(minDistance: number): THREE.Vector3 {
 
   return new THREE.Vector3(x, y, z);
 }
+
+export type ProgressCallback = (progress: number) => void;
