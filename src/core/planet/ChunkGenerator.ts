@@ -9,6 +9,11 @@ export class ChunkGenerator {
   private totalChunks: number = 0;
   private completedChunks: number = 0;
   private chunkProgress: Map<number, number> = new Map();
+  private activeWorkers: Worker[] = [];
+
+  private readonly MAX_WORKERS = navigator.hardwareConcurrency || 4;
+
+  constructor() {}
 
   public async generateChunks(
     landGeometry: THREE.BufferGeometry,
@@ -19,7 +24,6 @@ export class ChunkGenerator {
   ): Promise<GlobeChunk[][]> {
     const start = performance.now();
     const chunks: GlobeChunk[][] = [];
-    const workerPromises: Promise<void>[] = [];
     let chunkId = 0;
 
     // Calculate total chunks
@@ -27,16 +31,20 @@ export class ChunkGenerator {
     this.completedChunks = 0;
     this.chunkProgress.clear();
     const jsonLandgeometry = landGeometry.toJSON();
-    console.log("building chunks");
+    console.log(`Starting chunk generation. Total chunks: ${this.totalChunks}`);
+
+    const BATCH_SIZE = this.MAX_WORKERS; // Process 4 chunks at a time
+    let currentBatch: Promise<void>[] = [];
 
     for (let lat = -90; lat < 90; lat += chunkSize) {
       const row: GlobeChunk[] = [];
+      chunks.push(row);
       for (let lon = -180; lon < 180; lon += chunkSize) {
-        console.log(lat, lon);
         const currentChunkId = chunkId++;
         this.chunkProgress.set(currentChunkId, 0);
 
         const worker = new ChunkWorker();
+        this.activeWorkers.push(worker);
         worker.postMessage({ source: jsonLandgeometry, lat, lon, size: chunkSize });
 
         const promise = new Promise<void>((resolve, reject) => {
@@ -90,27 +98,34 @@ export class ChunkGenerator {
             reject(error);
           };
         });
-        workerPromises.push(promise);
+        currentBatch.push(promise);
+
+        if (currentBatch.length >= BATCH_SIZE) {
+          await Promise.all(currentBatch);
+          currentBatch = [];
+        }
+
+        worker.postMessage({
+          source: jsonLandgeometry,
+          lat,
+          lon,
+          size: chunkSize,
+        });
       }
-      chunks.push(row);
     }
-    console.log("kicking off the chunk workers now");
-    try {
-      await Promise.all(workerPromises);
-      const end = performance.now();
-      debugManager.set("initChunks", "initChunks: " + (end - start).toFixed(4));
-      return chunks;
-    } catch (error) {
-      debugManager.set("error", `Chunk generation failed: ${error instanceof Error ? error.message : "Unknown error"}`);
-      throw error;
-    }
+    // Process remaining chunks
+    await Promise.all(currentBatch);
+
+    console.log(`Total chunk generation time: ${performance.now() - start}ms`);
+    return chunks;
   }
 
   private updateTotalProgress(onProgress?: ProgressCallback): void {
     if (this.chunkProgress.size === 0) return;
 
-    const totalProgress = Array.from(this.chunkProgress.values()).reduce((sum, progress) => sum + progress, 0);
-    const averageProgress = totalProgress / this.chunkProgress.size;
+    const totalProgress = Array.from(this.chunkProgress.values()).reduce((sum, progress) => sum + progress, 0) / 100;
+
+    const averageProgress = (totalProgress / this.totalChunks) * 100;
 
     if (onProgress) {
       onProgress(averageProgress);

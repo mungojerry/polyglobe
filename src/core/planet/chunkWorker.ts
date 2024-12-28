@@ -8,13 +8,12 @@ const workerVectorPool = {
     return this.vector;
   },
 };
-
+let geometryObj: THREE.BufferGeometry;
 self.onmessage = (event) => {
   try {
     const { source, lat, lon, size } = event.data;
-    console.log("working on it!");
     const loader = new THREE.BufferGeometryLoader();
-    const geometryObj = loader.parse(source);
+    if (!geometryObj) geometryObj = loader.parse(source);
     const geometry = extractChunkGeometry(geometryObj, lat, lon, size, (progress) => {
       self.postMessage({ type: "progress", progress });
     });
