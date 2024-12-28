@@ -168,7 +168,7 @@ export class GameScene {
         this.loadingScreen.updateStage("Generating Land", progress);
       });
       this.loadingScreen.setStageComplete("Generating Land");
-      console.log("Initislised globe");
+
       // Create chunks
       this.loadingScreen.updateStage("Creating Chunks", 0);
       await this.globe.buildChunks((progress: number) => {
@@ -375,25 +375,6 @@ export class GameScene {
   }
 
   private setupControls(): void {
-    // controlManager.addButton("rebuild", "Rebuild globe", async () => {
-    //     if (!this.isInitializing) {
-    //         await this.globe.initializeGlobe();
-    //         if (this.miniGlobe) {
-    //             this.miniGlobe.updateGeometry(this.globe.getLandGeometry());
-    //         }
-    //     }
-    // });
-
-    // controlManager.addButton("random", "Randomise globe", async () => {
-    //     if (!this.isInitializing) {
-    //         pseudoRandom.setSeed(performance.now());
-    //         await this.globe.initializeGlobe();
-    //         if (this.miniGlobe) {
-    //             this.miniGlobe.updateGeometry(this.globe.getLandGeometry());
-    //         }
-    //     }
-    // });
-
     controlManager.addSlider(
       "fov",
       "FOV: ",
