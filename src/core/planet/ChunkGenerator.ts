@@ -18,7 +18,9 @@ export class ChunkGenerator {
   private completedChunks: number = 0;
   private chunkProgress: Map<number, number> = new Map();
   private lastProgressUpdate: number = 0;
-
+  positionAttr!: THREE.BufferAttribute | THREE.InterleavedBufferAttribute;
+  colorAttr!: THREE.BufferAttribute | THREE.InterleavedBufferAttribute;
+  indexAttr!: THREE.BufferAttribute | null;
   constructor() {}
 
   public async generateChunks(
@@ -31,6 +33,10 @@ export class ChunkGenerator {
     const start = performance.now();
     const chunks: GlobeChunk[][] = [];
     let chunkId = 0;
+
+    this.positionAttr = landGeometry.attributes.position;
+    this.colorAttr = landGeometry.attributes.color;
+    this.indexAttr = landGeometry.index;
 
     // Calculate total chunks
     const latChunks = Math.ceil(180 / chunkSize);
@@ -66,7 +72,7 @@ export class ChunkGenerator {
     const CHUNK_GROUP_SIZE = 4;
     while (tasks.length > 0) {
       const currentTasks = tasks.splice(0, CHUNK_GROUP_SIZE);
-      const promises = currentTasks.map((task) => this.processChunk(task, landGeometry, landMaterial, parentObject, chunkSize, chunks, onProgress));
+      const promises = currentTasks.map((task) => this.processChunk(task, landMaterial, parentObject, chunkSize, chunks, onProgress));
 
       await Promise.all(promises);
       // Allow UI to update
@@ -79,7 +85,6 @@ export class ChunkGenerator {
 
   private async processChunk(
     task: ChunkTask,
-    landGeometry: THREE.BufferGeometry,
     landMaterial: THREE.MeshPhongMaterial,
     parentObject: THREE.Object3D,
     chunkSize: number,
@@ -89,7 +94,7 @@ export class ChunkGenerator {
     this.chunkProgress.set(task.chunkId, 0);
 
     try {
-      const geometry = await this.extractChunkGeometry(landGeometry, task.lat, task.lon, chunkSize, (progress) => {
+      const geometry = await this.extractChunkGeometry(task.lat, task.lon, chunkSize, (progress) => {
         this.chunkProgress.set(task.chunkId, progress);
         this.updateProgress(onProgress);
       });
@@ -135,13 +140,7 @@ export class ChunkGenerator {
     debugManager.set("chunkProgress", `Chunks: ${this.completedChunks}/${this.totalChunks}`);
   }
 
-  private extractChunkGeometry(
-    source: THREE.BufferGeometry,
-    lat: number,
-    lon: number,
-    size: number,
-    onProgress: ProgressCallback
-  ): Promise<THREE.BufferGeometry | null> {
+  private extractChunkGeometry(lat: number, lon: number, size: number, onProgress: ProgressCallback): Promise<THREE.BufferGeometry | null> {
     return new Promise((resolve) => {
       const EPS = THREE.MathUtils.degToRad(1.0);
       const LAT_MIN = THREE.MathUtils.degToRad(lat) - EPS;
@@ -152,15 +151,12 @@ export class ChunkGenerator {
       const tempVec = vectorPool.getVector();
       const spherical = new THREE.Spherical();
 
-      const positionAttr = source.attributes.position;
-      const colorAttr = source.attributes.color;
-      const indexAttr = source.index;
-      const posArray = positionAttr.array as Float32Array;
-      const colArray = colorAttr.array as Float32Array;
+      const posArray = this.positionAttr.array as Float32Array;
+      const colArray = this.colorAttr.array as Float32Array;
 
-      const maxVertices = Math.ceil(positionAttr.count * (size / 360));
+      const maxVertices = Math.ceil(this.positionAttr.count * (size / 360));
       const interleavedData = new Float32Array(maxVertices * 6);
-      const vertexMap = new Int32Array(positionAttr.count).fill(-1);
+      const vertexMap = new Int32Array(this.positionAttr.count).fill(-1);
       let vertexCount = 0;
 
       const processVertex = (i: number): boolean => {
@@ -187,8 +183,8 @@ export class ChunkGenerator {
       const geometry = new THREE.BufferGeometry();
       let hasVertices = false;
 
-      if (indexAttr) {
-        const indexArray = indexAttr.array as Uint32Array;
+      if (this.indexAttr) {
+        const indexArray = this.indexAttr.array as Uint32Array;
         const filteredIndices = new Uint32Array(indexArray.length);
         let indexCount = 0;
 
@@ -231,7 +227,7 @@ export class ChunkGenerator {
         }
       } else {
         const processChunk = (startIdx: number, endIdx: number) => {
-          for (let i = startIdx; i < endIdx && i < positionAttr.count; i++) {
+          for (let i = startIdx; i < endIdx && i < this.positionAttr.count; i++) {
             if (processVertex(i)) {
               hasVertices = true;
               vertexMap[i] = vertexCount;
@@ -241,9 +237,9 @@ export class ChunkGenerator {
         };
 
         const CHUNK_SIZE = 100;
-        for (let i = 0; i < positionAttr.count; i += CHUNK_SIZE) {
+        for (let i = 0; i < this.positionAttr.count; i += CHUNK_SIZE) {
           processChunk(i, i + CHUNK_SIZE);
-          onProgress((i / positionAttr.count) * 100);
+          onProgress((i / this.positionAttr.count) * 100);
         }
       }
 
