@@ -49,15 +49,15 @@ export class ChunkGenerator {
     // Create task queue
     const tasks: ChunkTask[] = [];
     for (let latIndex = 0; latIndex < latChunks; latIndex++) {
-      const lat = -90 + (latIndex * chunkSize);
+      const lat = -90 + latIndex * chunkSize;
       for (let lonIndex = 0; lonIndex < lonChunks; lonIndex++) {
-        const lon = -180 + (lonIndex * chunkSize);
+        const lon = -180 + lonIndex * chunkSize;
         tasks.push({
           latIndex,
           lonIndex,
           lat,
           lon,
-          chunkId: chunkId++
+          chunkId: chunkId++,
         });
       }
     }
@@ -66,19 +66,11 @@ export class ChunkGenerator {
     const CHUNK_GROUP_SIZE = 4;
     while (tasks.length > 0) {
       const currentTasks = tasks.splice(0, CHUNK_GROUP_SIZE);
-      const promises = currentTasks.map(task => this.processChunk(
-        task,
-        landGeometry,
-        landMaterial,
-        parentObject,
-        chunkSize,
-        chunks,
-        onProgress
-      ));
+      const promises = currentTasks.map((task) => this.processChunk(task, landGeometry, landMaterial, parentObject, chunkSize, chunks, onProgress));
 
       await Promise.all(promises);
       // Allow UI to update
-      await new Promise(resolve => requestAnimationFrame(resolve));
+      await new Promise((resolve) => requestAnimationFrame(resolve));
     }
 
     console.log(`Total chunk generation time: ${performance.now() - start}ms`);
@@ -134,23 +126,13 @@ export class ChunkGenerator {
 
     if (this.chunkProgress.size === 0) return;
 
-    // Calculate weighted progress
-    const completedWeight = 0.6;
-    const inProgressWeight = 0.4;
-
     const completedProgress = (this.completedChunks / this.totalChunks) * 100;
-    const inProgressValues = Array.from(this.chunkProgress.values()).filter(p => p < 100);
-    const inProgressAvg = inProgressValues.length > 0
-      ? inProgressValues.reduce((sum, p) => sum + p, 0) / inProgressValues.length
-      : 0;
-
-    const totalProgress = (completedProgress * completedWeight) + (inProgressAvg * inProgressWeight);
 
     if (onProgress) {
-      onProgress(totalProgress);
+      onProgress(completedProgress);
     }
 
-    debugManager.set("chunkProgress", `Chunks: ${this.completedChunks}/${this.totalChunks} (${totalProgress.toFixed(1)}%)`);
+    debugManager.set("chunkProgress", `Chunks: ${this.completedChunks}/${this.totalChunks}`);
   }
 
   private extractChunkGeometry(
