@@ -84,14 +84,21 @@ export const BIOMES: BiomesMap = {
 };
 
 // Updated landBoundary to match new elevation ranges
-export const landBoundary = 0.45; // Matches the Beach min elevation
+export const landBoundary = 0.5;
 
 export function isLand(height: number) {
   return height > landBoundary;
 }
 
+const sortedBiomes = Object.values(BIOMES).sort((a, b) => a.elevationMin - b.elevationMin);
+
 export function getBiomeByElevation(elevation: number): Biome | undefined {
-  return Object.values(BIOMES).find((biome) => elevation >= biome.elevationMin && elevation < biome.elevationMax);
+  for (const biome of sortedBiomes) {
+    if (elevation >= biome.elevationMin && elevation < biome.elevationMax) {
+      return biome;
+    }
+  }
+  return undefined;
 }
 
 export function getTerrainColor(elevation: number, latitude: number): THREE.Color {

@@ -194,12 +194,16 @@ export class ObjectManager {
 
   private cacheLandVertices(): void {
     const positions = this.landGeometry.attributes.position;
+    const tempVector = new THREE.Vector3();
+    const tempNormal = new THREE.Vector3();
+
     for (let i = 0; i < positions.count; i++) {
-      this.tempVector.fromBufferAttribute(positions, i);
-      if (terrainHelper.isLand(this.tempVector)) {
+      tempVector.fromBufferAttribute(positions, i);
+      if (terrainHelper.isLand(tempVector)) {
+        tempNormal.copy(tempVector).normalize();
         const vertex = {
-          position: this.tempVector.clone(),
-          normal: this.tempVector.clone().normalize(),
+          position: tempVector.clone(),
+          normal: tempNormal.clone(),
           cellKey: "",
         };
         this.landVertices.push(vertex);

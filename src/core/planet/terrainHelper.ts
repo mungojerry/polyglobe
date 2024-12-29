@@ -27,10 +27,6 @@ export class TerrainHelper {
     return 0.7 + curve * 0.6;
   }
 
-  public isLandHeight(noiseValue: number): boolean {
-    return isLand(noiseValue);
-  }
-
   public getTerrainBoundary(): number {
     return landBoundary;
   }
@@ -42,7 +38,7 @@ export class TerrainHelper {
   public computeHeightAboveSurface(v: THREE.Vector3, radius: number, testUnderWater: boolean = false): number {
     const dir = vectorPool.getVector().copy(v).normalize();
     const noiseValue = this.computeSurfaceHeight(dir.x, dir.y, dir.z);
-    const validNoise = !testUnderWater && this.isLandHeight(noiseValue) ? noiseValue : this.getTerrainBoundary();
+    const validNoise = !testUnderWater && isLand(noiseValue) ? noiseValue : this.getTerrainBoundary();
     const elevation = this.computeElevationMultiplier(validNoise);
 
     dir.multiplyScalar(radius * elevation);
@@ -53,8 +49,8 @@ export class TerrainHelper {
 
   public isLand(position: THREE.Vector3): boolean {
     const dir = position.clone().normalize();
-    const noiseValue = this.computeSurfaceHeight(dir.x, dir.y, dir.z);
-    return this.isLandHeight(noiseValue);
+    const noise = this.computeSurfaceHeight(dir.x, dir.y, dir.z);
+    return isLand(noise);
   }
 
   public computeTerrainSlope(position: THREE.Vector3): number {
