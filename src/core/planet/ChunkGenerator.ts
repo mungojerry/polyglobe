@@ -18,9 +18,12 @@ export class ChunkGenerator {
   private completedChunks: number = 0;
   private chunkProgress: Map<number, number> = new Map();
   private lastProgressUpdate: number = 0;
-  positionAttr!: THREE.BufferAttribute | THREE.InterleavedBufferAttribute;
-  colorAttr!: THREE.BufferAttribute | THREE.InterleavedBufferAttribute;
-  indexAttr!: THREE.BufferAttribute | null;
+  private positionAttr!: THREE.BufferAttribute | THREE.InterleavedBufferAttribute;
+  private colorAttr!: THREE.BufferAttribute | THREE.InterleavedBufferAttribute;
+  private indexAttr!: THREE.BufferAttribute | null;
+  private indexArray!: Uint32Array;
+  private filteredIndices!: Uint32Array;
+  private readonly BATCH_SIZE = 4; // Adjust based on testing
   constructor() {}
 
   public async generateChunks(
@@ -37,6 +40,9 @@ export class ChunkGenerator {
     this.positionAttr = landGeometry.attributes.position;
     this.colorAttr = landGeometry.attributes.color;
     this.indexAttr = landGeometry.index;
+    if (!this.indexAttr) throw new Error("Geometry must have an index attribute");
+    this.indexArray = this.indexAttr.array as Uint32Array;
+    this.filteredIndices = new Uint32Array(this.indexArray.length);
 
     // Calculate total chunks
     const latChunks = Math.ceil(180 / chunkSize);
@@ -69,18 +75,27 @@ export class ChunkGenerator {
     }
 
     // Process tasks in small groups
-    const CHUNK_GROUP_SIZE = 4;
     while (tasks.length > 0) {
-      const currentTasks = tasks.splice(0, CHUNK_GROUP_SIZE);
-      const promises = currentTasks.map((task) => this.processChunk(task, landMaterial, parentObject, chunkSize, chunks, onProgress));
-
-      await Promise.all(promises);
+      const currentTasks = tasks.splice(0, this.BATCH_SIZE);
+      await this.processBatch(currentTasks, landMaterial, parentObject, chunkSize, chunks, onProgress);
       // Allow UI to update
       await new Promise((resolve) => requestAnimationFrame(resolve));
     }
 
     console.log(`Total chunk generation time: ${performance.now() - start}ms`);
     return chunks;
+  }
+
+  private async processBatch(
+    tasks: ChunkTask[],
+    landMaterial: THREE.MeshPhongMaterial,
+    parentObject: THREE.Object3D,
+    chunkSize: number,
+    chunks: GlobeChunk[][],
+    onProgress?: ProgressCallback
+  ): Promise<void> {
+    const batchPromises = tasks.map((task) => this.processChunk(task, landMaterial, parentObject, chunkSize, chunks, onProgress));
+    await Promise.all(batchPromises);
   }
 
   private async processChunk(
@@ -184,15 +199,13 @@ export class ChunkGenerator {
       let hasVertices = false;
 
       if (this.indexAttr) {
-        const indexArray = this.indexAttr.array as Uint32Array;
-        const filteredIndices = new Uint32Array(indexArray.length);
         let indexCount = 0;
 
         const processChunk = (startIdx: number, endIdx: number) => {
-          for (let i = startIdx; i < endIdx && i < indexArray.length; i += 3) {
-            const a = indexArray[i];
-            const b = indexArray[i + 1];
-            const c = indexArray[i + 2];
+          for (let i = startIdx; i < endIdx && i < this.indexArray.length; i += 3) {
+            const a = this.indexArray[i];
+            const b = this.indexArray[i + 1];
+            const c = this.indexArray[i + 2];
 
             if (processVertex(a) || processVertex(b) || processVertex(c)) {
               hasVertices = true;
@@ -209,21 +222,21 @@ export class ChunkGenerator {
                 copyVertex(c, vertexCount++);
               }
 
-              filteredIndices[indexCount++] = vertexMap[a];
-              filteredIndices[indexCount++] = vertexMap[b];
-              filteredIndices[indexCount++] = vertexMap[c];
+              this.filteredIndices[indexCount++] = vertexMap[a];
+              this.filteredIndices[indexCount++] = vertexMap[b];
+              this.filteredIndices[indexCount++] = vertexMap[c];
             }
           }
         };
 
         const CHUNK_SIZE = 300;
-        for (let i = 0; i < indexArray.length; i += CHUNK_SIZE) {
+        for (let i = 0; i < this.indexArray.length; i += CHUNK_SIZE) {
           processChunk(i, i + CHUNK_SIZE);
-          onProgress((i / indexArray.length) * 100);
+          onProgress((i / this.indexArray.length) * 100);
         }
 
         if (hasVertices) {
-          geometry.setIndex(new THREE.BufferAttribute(filteredIndices.slice(0, indexCount), 1));
+          geometry.setIndex(new THREE.BufferAttribute(this.filteredIndices.slice(0, indexCount), 1));
         }
       } else {
         const processChunk = (startIdx: number, endIdx: number) => {
