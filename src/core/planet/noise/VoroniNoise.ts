@@ -286,10 +286,6 @@ export class VoronoiNoise {
             const dy = this.points[idx + 1] - y;
             const dz = this.points[idx + 2] - z;
 
-            if (!isFinite(dx) || !isFinite(dy) || !isFinite(dz)) {
-              continue;
-            }
-
             const distSq = dx * dx + dy * dy + dz * dz;
             if (!isFinite(distSq)) continue;
 
@@ -429,22 +425,25 @@ export class VoronoiNoise {
     const cells: number[] = [];
     const centerIdx = this.getGridIndex(x, y, z);
 
-    // Calculate grid range to check based on radius
-    const gridRadius = Math.ceil(radius * this.gridSize);
+    // Return early if invalid index
+    if (centerIdx < 0) {
+      return cells;
+    }
 
-    // Check cubic volume around point
-    for (let dx = -gridRadius; dx <= gridRadius; dx++) {
-      for (let dy = -gridRadius; dy <= gridRadius; dy++) {
-        for (let dz = -gridRadius; dz <= gridRadius; dz++) {
-          const neighborIdx = centerIdx + dx + dy * this.gridSize + dz * this.gridSizeSquared;
+    const gridSize = this.gridSize;
+    const gridSizeSquared = this.gridSizeSquared;
+    const len = this.spatialGrid.length;
+    const gRadius = Math.ceil(radius * gridSize);
+    const gRadiusSq = gRadius * gRadius;
 
-          // Skip invalid indices
-          if (neighborIdx < 0 || neighborIdx >= this.spatialGrid.length) {
-            continue;
-          }
+    for (let dx = -gRadius; dx <= gRadius; dx++) {
+      for (let dy = -gRadius; dy <= gRadius; dy++) {
+        for (let dz = -gRadius; dz <= gRadius; dz++) {
+          const neighborIdx = centerIdx + dx + dy * gridSize + dz * gridSizeSquared;
+          if (neighborIdx < 0 || neighborIdx >= len) continue;
 
           const distSq = dx * dx + dy * dy + dz * dz;
-          if (distSq <= gridRadius * gridRadius) {
+          if (distSq <= gRadiusSq) {
             cells.push(neighborIdx);
           }
         }
