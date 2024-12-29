@@ -8,22 +8,24 @@ import { ProgressCallback } from "../utils/utils";
 import { ChunkGenerator } from "./ChunkGenerator";
 import { GlobeChunk } from "./GlobeChunk";
 import { Infection } from "./Infection";
-import { LandGeometryGenerator } from "./LangGeometryGenerator";
+import { LandGeometryGenerator } from "./LandGeometryGenerator";
 import { VoronoiNoise } from "./noise/VoroniNoise";
 
 const globeConfig = {
   showWall: false,
   showPoles: false,
+  radius: 200,
+  detail: 100,
+  chunkSize: 20,
 };
 
 export class Globe {
   private readonly object: THREE.Object3D;
-  public readonly RADIUS = 200;
-  public readonly DETAIL = 100;
+
   public runInfection: boolean = false;
   public onTerrainDeformed: ((position: THREE.Vector3, radius: number) => void) | null = null;
   private readonly chunks: GlobeChunk[][] = [];
-  private readonly CHUNK_SIZE = 20;
+
   private readonly frustum = new THREE.Frustum();
   private readonly cameraViewProjectionMatrix = new THREE.Matrix4();
   private readonly landMaterial: THREE.MeshPhongMaterial = new THREE.MeshPhongMaterial({
@@ -40,7 +42,6 @@ export class Globe {
   public noise: VoronoiNoise = new VoronoiNoise();
 
   private landGeometry!: THREE.BufferGeometry;
-  private tempLandMesh!: THREE.Mesh;
   private rigidBody!: RAPIER.RigidBody;
   private water!: Water;
 
@@ -50,7 +51,7 @@ export class Globe {
     window.addEventListener("click", (e) => {
       if (this.terrainClickAllowed) this.handleClickTerrain(e);
     });
-    this.waterLevel = this.RADIUS * 1.08;
+    this.waterLevel = globeConfig.radius * 1.08;
 
     // this.buildWater();
 
@@ -115,7 +116,7 @@ export class Globe {
     sphereGrids.forEach((cell, key) => {
       // Average position and color
       cell.pos.divideScalar(cell.count);
-      cell.pos.normalize().multiplyScalar(this.RADIUS);
+      cell.pos.normalize().multiplyScalar(globeConfig.radius);
       if (colors) {
         cell.color.divideScalar(cell.count);
       }
@@ -185,12 +186,12 @@ export class Globe {
   }
 
   private buildWater() {
-    this.water = new Water(this.waterLevel, Math.round(this.DETAIL / 3));
+    this.water = new Water(this.waterLevel, Math.round(globeConfig.detail / 3));
     this.object.add(this.water.getObject());
   }
 
   private buildEquatorWall() {
-    const sph = new THREE.CircleGeometry(this.RADIUS * 0.6, 50);
+    const sph = new THREE.CircleGeometry(globeConfig.radius * 0.6, 50);
     const spm = new THREE.MeshStandardMaterial({
       color: 0x00ff00,
       transparent: true,
@@ -205,15 +206,9 @@ export class Globe {
   /** Chunks */
   public async buildChunks(onProgress: ProgressCallback) {
     const chunkGenerator = new ChunkGenerator();
-    const newChunks = await chunkGenerator.generateChunks(this.landGeometry, this.landMaterial, this.object, this.CHUNK_SIZE, onProgress);
+    const newChunks = await chunkGenerator.generateChunks(this.landGeometry, this.landMaterial, this.object, globeConfig.chunkSize, onProgress);
 
     this.chunks.push(...newChunks);
-    this.discardTemporaryMesh();
-  }
-
-  private discardTemporaryMesh() {
-    this.object.remove(this.tempLandMesh);
-    this.tempLandMesh.geometry.dispose();
   }
 
   /** Physics */
@@ -231,11 +226,8 @@ export class Globe {
   /** Land generation */
   private async buildLandGeometry(onProgress: ProgressCallback) {
     const landWorker = new LandGeometryGenerator();
-    const geometry = await landWorker.generateLand(this.RADIUS, this.DETAIL, Math.random(), this.noise, onProgress);
-
+    const geometry = await landWorker.generateLand(globeConfig.radius, globeConfig.detail, Math.random(), this.noise, onProgress);
     this.landGeometry = geometry;
-    this.tempLandMesh = new THREE.Mesh(geometry, this.landMaterial);
-    this.object.add(this.tempLandMesh);
   }
 
   /** Terrain queries */
@@ -269,7 +261,7 @@ export class Globe {
 
   public getChunkByPosition(position: THREE.Vector3): GlobeChunk | null {
     const localPos = position.clone().applyMatrix4(new THREE.Matrix4().copy(this.object.matrixWorld).invert());
-    const surfacePos = localPos.clone().setLength(this.RADIUS);
+    const surfacePos = localPos.clone().setLength(globeConfig.radius);
     const { lat, lon } = this.xyzToLatLon(surfacePos);
 
     for (const row of this.chunks) {
@@ -293,7 +285,7 @@ export class Globe {
   }
 
   private xyzToLatLon(position: THREE.Vector3): { lat: number; lon: number } {
-    const radius = this.RADIUS;
+    const radius = globeConfig.radius;
     const lat = Math.asin(position.y / radius) * (180 / Math.PI);
     let lon = Math.atan2(position.x, position.z) * (180 / Math.PI);
     lon = ((lon + 180) % 360) - 180;
@@ -338,7 +330,7 @@ export class Globe {
   }
 
   public getRadius(): number {
-    return this.RADIUS;
+    return globeConfig.radius;
   }
 
   public getLandGeometry() {

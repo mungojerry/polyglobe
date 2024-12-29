@@ -48,7 +48,7 @@ export class TerrainHelper {
   }
 
   public isLand(position: THREE.Vector3): boolean {
-    const dir = position.clone().normalize();
+    const dir = position; //.clone();
     const noise = this.computeSurfaceHeight(dir.x, dir.y, dir.z);
     return isLand(noise);
   }

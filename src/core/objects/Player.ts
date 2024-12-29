@@ -2,6 +2,7 @@ import RAPIER from "@dimforge/rapier3d";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { debugManager } from "../managers/debugManager";
+import { terrainHelper } from "../planet/terrainHelper";
 import { BaseGameObject, IGameObject } from "./BaseGameObject";
 
 export class Player extends BaseGameObject implements IGameObject {
@@ -148,6 +149,10 @@ export class Player extends BaseGameObject implements IGameObject {
 
   update(camera: THREE.Camera) {
     super.update(camera);
+    const dir = this.getPosition();
+    const h = terrainHelper.computeSurfaceHeight(dir.x, dir.y, dir.z);
+    const e = terrainHelper.computeElevationMultiplier(h);
+    console.log(h);
     debugManager.set("activetrail", "trail sprites: " + this.activeSprites.length);
   }
 }
