@@ -66,7 +66,7 @@ export class LandGeometryGenerator {
 
       const progress = Math.min((end / totalVertices) * 100, 99);
 
-      this.updateTotalProgress(progress, onProgress);
+      await this.updateTotalProgress(progress, onProgress);
     }
 
     geometry.setAttribute("position", new THREE.BufferAttribute(vertices, 3));
@@ -79,11 +79,12 @@ export class LandGeometryGenerator {
     return geometry;
   }
 
-  private updateTotalProgress(progress: number, onProgress?: ProgressCallback): void {
+  private async updateTotalProgress(progress: number, onProgress?: ProgressCallback): Promise<void> {
     if (onProgress) {
       onProgress(progress);
     }
 
     debugManager.set("landProgress", `Land: ${progress.toFixed(1)}%)`);
+    await setTimeout(() => {}, 0);
   }
 }
