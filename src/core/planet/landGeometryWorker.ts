@@ -1,10 +1,12 @@
 import { BufferAttribute, BufferGeometry, IcosahedronGeometry } from "three";
 import { getTerrainColor } from "../utils/biomes";
-import { TerrainGenerator } from "./TerrainGenerator";
 import { VoronoiNoise } from "./noise/VoroniNoise";
+import { terrainHelper } from "./terrainHelper";
 
 self.onmessage = (event: MessageEvent) => {
   try {
+    // Create geometry
+    const geometry = new BufferGeometry();
     const { radius, detail, seed } = event.data as {
       radius: number;
       detail: number;
@@ -24,7 +26,7 @@ self.onmessage = (event: MessageEvent) => {
 
     const noise = new VoronoiNoise();
 
-    const terrainGenerator = new TerrainGenerator(noise);
+    terrainHelper.setDefaults(noise, geometry);
 
     // Process vertices in chunks to report progress
     const CHUNK_SIZE = 1000;
@@ -46,8 +48,8 @@ self.onmessage = (event: MessageEvent) => {
         const latitude = Math.asin(ny);
 
         // Use actual terrain generation logic
-        const height = terrainGenerator.computeSurfaceHeight(nx, ny, nz);
-        const elevation = terrainGenerator.computeElevationMultiplier(height);
+        const height = terrainHelper.computeSurfaceHeight(nx, ny, nz);
+        const elevation = terrainHelper.computeElevationMultiplier(height);
 
         vertices[idx] = x * elevation;
         vertices[idx + 1] = y * elevation;
@@ -66,8 +68,6 @@ self.onmessage = (event: MessageEvent) => {
       self.postMessage({ type: "progress", progress });
     }
 
-    // Create geometry
-    const geometry = new BufferGeometry();
     geometry.setAttribute("position", new BufferAttribute(vertices, 3));
     geometry.setAttribute("color", new BufferAttribute(colors, 3));
     geometry.setIndex(new BufferAttribute(indices, 1));

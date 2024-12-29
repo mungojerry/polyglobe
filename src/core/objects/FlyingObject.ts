@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { debugManager } from "../managers/debugManager";
 import { Globe } from "../planet/Globe";
+import { terrainHelper } from "../planet/terrainHelper";
 import { vectorPool } from "../utils/vectorPool";
 import { BaseGameObject, IGameObject } from "./BaseGameObject";
 import { Player } from "./Player";
@@ -239,8 +240,11 @@ export class FlyingObject extends BaseGameObject implements IGameObject {
     }
 
     // check slightly in front
-    const heightAboveSurface = this.globe.computeHeightAboveSurface(this.object.position.clone().add(this.getForwardDirection().multiplyScalar(2)));
-    const pointHeightAboveSurface = this.globe.computeHeightAboveSurface(p);
+    const heightAboveSurface = terrainHelper.computeHeightAboveSurface(
+      this.object.position.clone().add(this.getForwardDirection().multiplyScalar(2)),
+      this.globe.getRadius()
+    );
+    const pointHeightAboveSurface = terrainHelper.computeHeightAboveSurface(p, this.globe.getRadius());
 
     // Prevent crashing into the terrain
     if (heightAboveSurface < pointHeightAboveSurface || heightAboveSurface < 50) {
@@ -273,7 +277,7 @@ export class FlyingObject extends BaseGameObject implements IGameObject {
   }
 
   private hover(idealDistance: number) {
-    const distanceFromGround = this.globe.computeHeightAboveSurface(this.object.position);
+    const distanceFromGround = terrainHelper.computeHeightAboveSurface(this.object.position, this.globe.getRadius());
 
     if (distanceFromGround < idealDistance) {
       this.setThrusting(true);

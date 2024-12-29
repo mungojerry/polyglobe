@@ -82,60 +82,9 @@ export const BIOMES: BiomesMap = {
     moistureMax: 0.4,
   },
 };
-// Updated biomes to work with normalized height range [-1, 1]
-export const BIOMES_OLD: BiomesMap = {
-  [BiomeName.DeepOcean]: {
-    name: BiomeName.DeepOcean,
-    color: new THREE.Color(0x001133),
-    elevationMin: -1.0,
-    elevationMax: -0.5,
-    moistureMin: 0.0,
-    moistureMax: 1.0,
-  },
-  [BiomeName.Ocean]: {
-    name: BiomeName.Ocean,
-    color: new THREE.Color(0x0044aa),
-    elevationMin: -0.5,
-    elevationMax: -0.2,
-    moistureMin: 0.0,
-    moistureMax: 1.0,
-  },
-  [BiomeName.Beach]: {
-    name: BiomeName.Beach,
-    color: new THREE.Color(0xffdd99),
-    elevationMin: -0.2,
-    elevationMax: 0.0,
-    moistureMin: 0.0,
-    moistureMax: 0.6,
-  },
-  [BiomeName.Land]: {
-    name: BiomeName.Land,
-    color: new THREE.Color(0x33aa33),
-    elevationMin: 0.0,
-    elevationMax: 0.4,
-    moistureMin: 0.3,
-    moistureMax: 0.8,
-  },
-  [BiomeName.Mountain]: {
-    name: BiomeName.Mountain,
-    color: new THREE.Color(0x996633),
-    elevationMin: 0.4,
-    elevationMax: 0.7,
-    moistureMin: 0.1,
-    moistureMax: 0.5,
-  },
-  [BiomeName.Snow]: {
-    name: BiomeName.Snow,
-    color: new THREE.Color(0xffffff),
-    elevationMin: 0.7,
-    elevationMax: 1.0,
-    moistureMin: 0.0,
-    moistureMax: 0.4,
-  },
-};
 
 // Updated landBoundary to match new elevation ranges
-export const landBoundary = 0.4; // Matches the Beach min elevation
+export const landBoundary = 0.45; // Matches the Beach min elevation
 
 export function isLand(height: number) {
   return height > landBoundary;

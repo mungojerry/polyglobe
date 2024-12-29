@@ -17,6 +17,7 @@ import { Sun } from "../objects/Sun";
 import { Globe } from "../planet/Globe";
 import { MiniGlobe } from "../planet/MiniGlobe";
 import { VoronoiNoise, VoronoiNoiseConfig } from "../planet/noise/VoroniNoise";
+import { TerrainHelper } from "../planet/terrainHelper";
 import { LoadingScreen } from "../ui/LoadingScreen";
 import { generateRandomPosition } from "../utils/utils";
 import { vectorPool } from "../utils/vectorPool";
@@ -66,7 +67,7 @@ export class GameScene {
 
   private cameraAttachedTo: THREE.Object3D;
   private debugMesh: THREE.LineSegments;
-  private orbitCoontrols: boolean = true;
+  private orbitCoontrols: boolean = false;
   private currentGenerator: VoronoiNoise;
   private sun!: Sun;
   private moon!: Moon;
@@ -82,7 +83,7 @@ export class GameScene {
     this.world = new World(new Vector3(0, 0, 0));
     this.eventQueue = new EventQueue(false);
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
+    this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 4000);
     this.renderer = new THREE.WebGLRenderer();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.toneMapping = THREE.CineonToneMapping;
@@ -108,6 +109,7 @@ export class GameScene {
     this.scene.add(this.globe.getObject());
 
     this.currentGenerator = this.globe.noise;
+    TerrainHelper.getInstance().setDefaults(this.currentGenerator, this.globe.getLandGeometry());
     this.dynamicBodies = [];
     this.player = new Player(this.scene, this.world, generateRandomPosition(this.globe.getRadius() * 1.3));
     this.cameraAttachedTo = this.player.getObject();
@@ -346,6 +348,9 @@ export class GameScene {
 
     vectorPool.releaseVector(forward);
     vectorPool.releaseVector(right);
+    this.camera.updateMatrixWorld(true);
+
+    this.camera.updateProjectionMatrix();
   }
 
   private applyGravity(body: RigidBody): void {

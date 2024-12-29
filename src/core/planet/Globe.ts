@@ -5,12 +5,10 @@ import { Water } from "../effects/Water";
 import { debugManager } from "../managers/debugManager";
 import { pseudoRandom } from "../utils/PseudoRandom";
 import { ProgressCallback } from "../utils/utils";
-import { vectorPool } from "../utils/vectorPool";
 import { ChunkGenerator } from "./ChunkGenerator";
 import { GlobeChunk } from "./GlobeChunk";
 import { Infection } from "./Infection";
 import { LandGeometryGenerator } from "./LangGeometryGenerator";
-import { TerrainGenerator } from "./TerrainGenerator";
 import { VoronoiNoise } from "./noise/VoroniNoise";
 
 const globeConfig = {
@@ -45,7 +43,6 @@ export class Globe {
   private tempLandMesh!: THREE.Mesh;
   private rigidBody!: RAPIER.RigidBody;
   private water!: Water;
-  private terrainGenerator: TerrainGenerator = new TerrainGenerator(this.noise);
 
   constructor(private camera: THREE.Camera, private world: RAPIER.World) {
     this.object = new THREE.Object3D();
@@ -234,89 +231,14 @@ export class Globe {
   /** Land generation */
   private async buildLandGeometry(onProgress: ProgressCallback) {
     const landWorker = new LandGeometryGenerator();
-    const geometry = await landWorker.generateLand(this.RADIUS, this.DETAIL, Math.random(), this.noise, this.terrainGenerator, onProgress);
-    console.log("##############");
-    console.log(geometry);
+    const geometry = await landWorker.generateLand(this.RADIUS, this.DETAIL, Math.random(), this.noise, onProgress);
+
     this.landGeometry = geometry;
     this.tempLandMesh = new THREE.Mesh(geometry, this.landMaterial);
     this.object.add(this.tempLandMesh);
   }
 
-  /** Terrain data */
-  public computeSurfaceHeight(x: number, y: number, z: number): number {
-    return this.terrainGenerator.computeSurfaceHeight(x, y, z);
-  }
-
-  private computeElevationMultiplier(noise: number) {
-    return this.terrainGenerator.computeElevationMultiplier(noise);
-  }
-
   /** Terrain queries */
-  public getSurfaceNormal(position: THREE.Vector3): THREE.Vector3 {
-    const normalAttr = this.landGeometry.attributes.normal;
-    const closestIndex = this.getClosestVertexIndex(position);
-    const nx = normalAttr.array[closestIndex * 3];
-    const ny = normalAttr.array[closestIndex * 3 + 1];
-    const nz = normalAttr.array[closestIndex * 3 + 2];
-    return new THREE.Vector3(nx, ny, nz).normalize();
-  }
-
-  private getClosestVertexIndex(position: THREE.Vector3): number {
-    const vertices = this.landGeometry.attributes.position;
-    let minDist = Infinity;
-    let closestIndex = 0;
-
-    for (let i = 0; i < vertices.count; i++) {
-      const vx = vertices.array[i * 3];
-      const vy = vertices.array[i * 3 + 1];
-      const vz = vertices.array[i * 3 + 2];
-      const v = vectorPool.getVector(vx, vy, vz);
-      const dist = position.distanceToSquared(v);
-      if (dist < minDist) {
-        minDist = dist;
-        closestIndex = i;
-      }
-      vectorPool.releaseVector(v);
-    }
-    return closestIndex;
-  }
-
-  public isLand(position: THREE.Vector3): boolean {
-    const dir = position.clone().normalize();
-    const noiseValue = this.computeSurfaceHeight(dir.x, dir.y, dir.z);
-    return this.terrainGenerator.isLandHeight(noiseValue);
-  }
-
-  public computeTerrainSlope(position: THREE.Vector3): number {
-    const surfaceNormal = this.getSurfaceNormal(position);
-    const up = position.clone().normalize();
-    return 1 - surfaceNormal.dot(up);
-  }
-
-  public computePositionOnSurface(worldPos: THREE.Vector3): THREE.Vector3 | null {
-    const dir = worldPos.clone().normalize();
-    const noise = this.computeSurfaceHeight(dir.x, dir.y, dir.z);
-    const elevation = this.computeElevationMultiplier(noise);
-    return dir.multiplyScalar(this.RADIUS * elevation);
-  }
-
-  public computeHeightAboveSurface(v: THREE.Vector3, testUnderWater: boolean = false): number {
-    const dir = v.clone().normalize();
-    const noiseValue = this.terrainGenerator.computeSurfaceHeight(dir.x, dir.y, dir.z);
-    const validNoise = !testUnderWater && this.terrainGenerator.isLandHeight(noiseValue) ? noiseValue : this.terrainGenerator.getTerrainBoundary();
-
-    const elevation = this.computeElevationMultiplier(validNoise);
-    const surfacePos = dir.multiplyScalar(this.RADIUS * elevation);
-    return v.distanceTo(surfacePos);
-  }
-
-  public computeAbsoluteHeightOfSurface(v: THREE.Vector3): number {
-    const dir = v.clone().normalize();
-    const noise = this.computeSurfaceHeight(dir.x, dir.y, dir.z);
-    const elevation = this.computeElevationMultiplier(noise);
-    const surfacePos = dir.multiplyScalar(this.RADIUS * elevation);
-    return v.distanceTo(surfacePos);
-  }
 
   /** Basic interactions */
   public deformTerrain(deformPosition: THREE.Vector3, strength: number = 2.5, radius: number = 25) {
@@ -394,6 +316,7 @@ export class Globe {
   }
 
   private updateChunkVisibility(camera: THREE.Camera) {
+    camera.updateMatrixWorld();
     this.cameraViewProjectionMatrix.identity().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     this.frustum.setFromProjectionMatrix(this.cameraViewProjectionMatrix);
     let chunksVisible = 0;
@@ -406,7 +329,7 @@ export class Globe {
         numChunks++;
       });
     });
-    debugManager.set("chucnks", "Chunks: " + chunksVisible + "/" + numChunks);
+    debugManager.set("chunks", "Chunks: " + chunksVisible + "/" + numChunks);
   }
 
   /** Accessors */

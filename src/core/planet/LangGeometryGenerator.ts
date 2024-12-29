@@ -4,23 +4,15 @@ import { debugManager } from "../managers/debugManager";
 import { ProgressCallback } from "../utils/utils";
 import LandGeometryWorker from "./landgeometryWorker?worker";
 import { VoronoiNoise } from "./noise/VoroniNoise";
-import { TerrainGenerator } from "./TerrainGenerator";
 export class LandGeometryGenerator {
   constructor() {}
 
-  public async generateLand(
-    radius: number,
-    detail: number,
-    seed: number,
-    noise: VoronoiNoise,
-    terrainGenerator: TerrainGenerator,
-    onProgress?: ProgressCallback
-  ): Promise<BufferGeometry> {
+  public async generateLand(radius: number, detail: number, seed: number, noise: VoronoiNoise, onProgress?: ProgressCallback): Promise<BufferGeometry> {
     const start = performance.now();
     const workerPromises: Promise<void>[] = [];
 
     const worker = new LandGeometryWorker();
-    worker.postMessage({ radius, detail, seed, noise, terrainGenerator });
+    worker.postMessage({ radius, detail, seed, noise });
 
     let landGeometry;
 

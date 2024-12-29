@@ -1,6 +1,7 @@
 // Previous imports remain the same
 import * as THREE from "three";
 import { Globe } from "../planet/Globe";
+import { terrainHelper } from "../planet/terrainHelper";
 import { BiomeName } from "../utils/biomes";
 import { ProgressCallback } from "../utils/utils";
 import { ModelLoader } from "./ModelLoader";
@@ -153,7 +154,7 @@ export const modelGroups: ModelGroup[] = [
 export class ObjectManager {
   private modelLoader: ModelLoader;
   private globe: Globe;
-  private globeGeometry: THREE.BufferGeometry;
+  private landGeometry: THREE.BufferGeometry;
   private scene: THREE.Scene;
   private instancedMeshes: Map<string, THREE.InstancedMesh>;
   private instanceCounts: Map<string, number>;
@@ -170,7 +171,8 @@ export class ObjectManager {
   constructor(globe: Globe, scene: THREE.Scene) {
     this.modelLoader = new ModelLoader();
     this.globe = globe;
-    this.globeGeometry = this.globe.getLandGeometry();
+    this.landGeometry = this.globe.getLandGeometry();
+
     this.scene = scene;
     this.instancedMeshes = new Map();
     this.instanceCounts = new Map();
@@ -191,10 +193,10 @@ export class ObjectManager {
   }
 
   private cacheLandVertices(): void {
-    const positions = this.globeGeometry.attributes.position;
+    const positions = this.landGeometry.attributes.position;
     for (let i = 0; i < positions.count; i++) {
       this.tempVector.fromBufferAttribute(positions, i);
-      if (this.globe.isLand(this.tempVector)) {
+      if (terrainHelper.isLand(this.tempVector)) {
         const vertex = {
           position: this.tempVector.clone(),
           normal: this.tempVector.clone().normalize(),
@@ -231,10 +233,13 @@ export class ObjectManager {
       const modelKey = this.getModelKey(basePath, fileIndex);
       if (!this.instancedMeshes.has(modelKey)) {
         const modelData = await this.modelLoader.loadModelForInstancing(basePath, fileIndex);
+        modelData.geometry.computeBoundingBox();
+        modelData.geometry.computeBoundingSphere();
         const instancedMesh = new THREE.InstancedMesh(modelData.geometry, modelData.material, this.maxInstancesPerType);
         instancedMesh.castShadow = true;
         instancedMesh.receiveShadow = true;
         instancedMesh.count = 0;
+        instancedMesh.frustumCulled = false;
         this.instancedMeshes.set(modelKey, instancedMesh);
         this.instanceCounts.set(modelKey, 0);
         this.scene.add(instancedMesh);
