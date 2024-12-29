@@ -186,7 +186,7 @@ export class GameScene {
 
       // Initialize world
       this.loadingScreen.updateStage("Initializing World", 0);
-      this.miniGlobe = new MiniGlobe(this.globe.getLandGeometry(), this.camera, 200, 200);
+      this.miniGlobe = new MiniGlobe(this.globe.getMiniMapGeometry(), this.camera, 200, 200);
       this.sun = new Sun(this.globe, this.scene, this.globe.getRadius() * 2.4);
       this.moon = new Moon(this.scene, this.globe.getRadius() * 2.4);
       this.loadingScreen.updateStage("Initializing World", 50);

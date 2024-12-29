@@ -53,7 +53,7 @@ export class Globe {
     window.addEventListener("click", (e) => {
       if (this.terrainClickAllowed) this.handleClickTerrain(e);
     });
-    this.waterLevel = this.RADIUS * 1.09;
+    this.waterLevel = this.RADIUS * 1.08;
 
     this.buildWater();
 
@@ -61,6 +61,101 @@ export class Globe {
     this.object.castShadow = true;
     this.object.receiveShadow = true;
     this.infection = new Infection(this);
+  }
+
+  private simplifyGeometry(geometry: THREE.BufferGeometry, factor: number): THREE.BufferGeometry {
+    // Initialize new geometry
+    const simplifiedGeometry = new THREE.BufferGeometry();
+    const positions = geometry.attributes.position.array;
+    const colors = geometry.attributes.color?.array;
+    const indices = geometry.index?.array;
+
+    if (!indices) {
+      return geometry.clone();
+    }
+
+    // Calculate spherical coordinates grid
+    const gridSize = Math.ceil(Math.sqrt(positions.length / 3 / factor));
+    const sphereGrids: Map<
+      string,
+      {
+        pos: THREE.Vector3;
+        color: THREE.Vector3;
+        count: number;
+      }
+    > = new Map();
+
+    // Group vertices by spherical coordinates
+    for (let i = 0; i < positions.length; i += 3) {
+      const pos = new THREE.Vector3(positions[i], positions[i + 1], positions[i + 2]);
+      const spherical = new THREE.Spherical().setFromVector3(pos);
+
+      // Create grid cell key using rounded spherical coordinates
+      const key = `${Math.floor((spherical.phi * gridSize) / Math.PI)},${Math.floor((spherical.theta * gridSize) / (Math.PI * 2))}`;
+
+      if (!sphereGrids.has(key)) {
+        sphereGrids.set(key, {
+          pos: new THREE.Vector3(),
+          color: new THREE.Vector3(),
+          count: 0,
+        });
+      }
+
+      const cell = sphereGrids.get(key)!;
+      cell.pos.add(pos);
+      if (colors) {
+        cell.color.add(new THREE.Vector3(colors[i], colors[i + 1], colors[i + 2]));
+      }
+      cell.count++;
+    }
+
+    // Create new vertices and build triangles
+    const newPositions: number[] = [];
+    const newColors: number[] = [];
+    const newIndices: number[] = [];
+    const vertexMap = new Map<string, number>();
+
+    sphereGrids.forEach((cell, key) => {
+      // Average position and color
+      cell.pos.divideScalar(cell.count);
+      cell.pos.normalize().multiplyScalar(this.RADIUS);
+      if (colors) {
+        cell.color.divideScalar(cell.count);
+      }
+
+      // Add vertex
+      const idx = newPositions.length / 3;
+      vertexMap.set(key, idx);
+      newPositions.push(cell.pos.x, cell.pos.y, cell.pos.z);
+      if (colors) {
+        newColors.push(cell.color.x, cell.color.y, cell.color.z);
+      }
+    });
+
+    // Rebuild triangles using nearest vertices
+    for (let i = 0; i < indices.length; i += 3) {
+      const points = [];
+      for (let j = 0; j < 3; j++) {
+        const idx = indices[i + j];
+        const pos = new THREE.Vector3(positions[idx * 3], positions[idx * 3 + 1], positions[idx * 3 + 2]);
+        const spherical = new THREE.Spherical().setFromVector3(pos);
+        const key = `${Math.floor((spherical.phi * gridSize) / Math.PI)},${Math.floor((spherical.theta * gridSize) / (Math.PI * 2))}`;
+        points.push(vertexMap.get(key)!);
+      }
+      if (points[0] !== points[1] && points[1] !== points[2] && points[0] !== points[2]) {
+        newIndices.push(...points);
+      }
+    }
+
+    // Set attributes
+    simplifiedGeometry.setAttribute("position", new THREE.Float32BufferAttribute(newPositions, 3));
+    if (newColors.length > 0) {
+      simplifiedGeometry.setAttribute("color", new THREE.Float32BufferAttribute(newColors, 3));
+    }
+    simplifiedGeometry.setIndex(newIndices);
+    simplifiedGeometry.computeVertexNormals();
+
+    return simplifiedGeometry;
   }
 
   /** Initialization */
@@ -78,18 +173,18 @@ export class Globe {
 
     await this.buildLandGeometry(onProgress);
 
-    // const globeObject = this.getObject();
-    // globeObject.traverse((obj) => {
-    //   if (obj instanceof THREE.Mesh) {
-    //     obj.castShadow = true;
-    //     obj.receiveShadow = true;
-    //   }
-    // });
+    // Create simplified geometry for mini-map
+    this.miniMapGeometry = this.simplifyGeometry(this.landGeometry, 10); // Reduce detail by a factor of 10
 
     this.buildPhysicsObject();
 
     const end = performance.now();
     debugManager.set("perf", "Generation time: " + (end - start).toFixed(4) + "ms");
+  }
+
+  private miniMapGeometry!: THREE.BufferGeometry;
+  public getMiniMapGeometry(): THREE.BufferGeometry {
+    return this.miniMapGeometry;
   }
 
   private buildWater() {

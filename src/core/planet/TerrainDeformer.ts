@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { getTerrainColor } from "../utils/biomes";
-import { Noise } from "./Noise";
+import { VoronoiNoise } from "./noise/VoroniNoise";
 
 interface VertexData {
   vertex: THREE.Vector3;
@@ -13,7 +13,7 @@ class TerrainDeformer {
   private bounds: THREE.Box3;
   private readonly cellSize: number = 25; // Size based on typical deformation radius
 
-  constructor(private land: THREE.Mesh, private noise: Noise) {
+  constructor(private land: THREE.Mesh, private noise: VoronoiNoise) {
     this.spatialMap = new Map();
     this.bounds = new THREE.Box3();
   }
@@ -125,7 +125,7 @@ class TerrainDeformer {
 
       // Update color
       const normalizedPos = newPosition.clone().normalize();
-      const noiseValue = this.noise.layeredNoise(normalizedPos.x, normalizedPos.y, normalizedPos.z);
+      const noiseValue = this.noise.getValue(normalizedPos.x, normalizedPos.y, normalizedPos.z);
       const latitude = Math.asin(normalizedPos.y); // Calculate latitude from normalized position
       const color = getTerrainColor(noiseValue, latitude);
 
