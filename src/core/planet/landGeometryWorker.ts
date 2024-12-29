@@ -29,7 +29,6 @@ self.onmessage = (event: MessageEvent) => {
     // Process vertices in chunks to report progress
     const CHUNK_SIZE = 1000;
     const totalVertices = vertexCount;
-    console.log(terrainGenerator.computeSurfaceHeight);
 
     for (let i = 0; i < vertexCount; i += CHUNK_SIZE) {
       const end = Math.min(i + CHUNK_SIZE, vertexCount);
