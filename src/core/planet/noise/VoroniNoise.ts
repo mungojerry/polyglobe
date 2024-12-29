@@ -20,11 +20,11 @@ export interface VoronoiNoiseConfig {
 // Default configuration with safe values
 export const DEFAULT_CONFIG: VoronoiNoiseConfig = {
   name: "voronoi noise",
-  cellSize: 50,
+  cellSize: 10,
   jitter: 0.8,
   amplitude: 0.5,
   blendFactor: 0.5,
-  octaves: 4,
+  octaves: 6,
   persistence: 0.5,
   lacunarity: 1.6,
   warpStrength: 0.2,
