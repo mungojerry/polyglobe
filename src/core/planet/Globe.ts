@@ -10,8 +10,8 @@ import { ChunkGenerator } from "./ChunkGenerator";
 import { GlobeChunk } from "./GlobeChunk";
 import { Infection } from "./Infection";
 import { LandGeometryGenerator } from "./LangGeometryGenerator";
-import { VoronoiNoise } from "./noise/VoroniNoise";
 import { TerrainGenerator } from "./TerrainGenerator";
+import { VoronoiNoise } from "./noise/VoroniNoise";
 
 const globeConfig = {
   showWall: false,

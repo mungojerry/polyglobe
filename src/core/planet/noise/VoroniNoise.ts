@@ -22,7 +22,7 @@ export const DEFAULT_CONFIG: VoronoiNoiseConfig = {
   name: "voronoi noise",
   cellSize: 50,
   jitter: 0.8,
-  amplitude: 0.7,
+  amplitude: 0.5,
   blendFactor: 0.5,
   octaves: 4,
   persistence: 0.5,
