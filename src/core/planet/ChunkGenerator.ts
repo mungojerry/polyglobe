@@ -266,7 +266,6 @@ export class ChunkGenerator {
       const interleavedBuffer = new THREE.InterleavedBuffer(finalData, 6);
       geometry.setAttribute("position", new THREE.InterleavedBufferAttribute(interleavedBuffer, 3, 0));
       geometry.setAttribute("color", new THREE.InterleavedBufferAttribute(interleavedBuffer, 3, 3));
-
       geometry.computeVertexNormals();
       onProgress(100);
       vectorPool.releaseVector(tempVec);
