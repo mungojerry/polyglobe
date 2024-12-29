@@ -40,6 +40,8 @@ export class VoronoiNoise {
   private readonly simplexNoise: SimplexNoise;
   private readonly spatialGrid: Int32Array;
   private readonly gridSize: number;
+  private readonly gridSizeSquared: number;
+  private readonly halfGridSize: number;
 
   // Cache configuration
   private readonly valueCache: Float32Array;
@@ -60,6 +62,9 @@ export class VoronoiNoise {
 
     // Initialize grid with safe dimensions
     this.gridSize = this.calculateGridSize();
+    this.gridSizeSquared = this.gridSize * this.gridSize;
+    this.halfGridSize = this.gridSize / 2;
+
     const totalPoints = this.gridSize ** 3;
 
     // Initialize typed arrays with proper sizes
@@ -82,12 +87,13 @@ export class VoronoiNoise {
     const { cellSize, jitter } = this.config;
     const range = Math.ceil(2 * cellSize);
     const jitterAmount = jitter * cellSize;
+    const totalPoints = this.gridSize ** 3;
     let idx = 0;
 
-    for (let i = 0; i < this.gridSize ** 3; i++) {
+    for (let i = 0; i < totalPoints; i++) {
       const x = (i % this.gridSize) * cellSize - range;
       const y = (Math.floor(i / this.gridSize) % this.gridSize) * cellSize - range;
-      const z = Math.floor(i / (this.gridSize * this.gridSize)) * cellSize - range;
+      const z = Math.floor(i / this.gridSizeSquared) * cellSize - range;
 
       // Add jitter with bounds checking
       const jx = x + (Math.random() - 0.5) * jitterAmount;
@@ -137,15 +143,15 @@ export class VoronoiNoise {
   }
 
   private getGridIndex(x: number, y: number, z: number): number {
-    const gx = Math.floor(x / this.config.cellSize + this.gridSize / 2);
-    const gy = Math.floor(y / this.config.cellSize + this.gridSize / 2);
-    const gz = Math.floor(z / this.config.cellSize + this.gridSize / 2);
+    const gx = Math.floor(x / this.config.cellSize + this.halfGridSize);
+    const gy = Math.floor(y / this.config.cellSize + this.halfGridSize);
+    const gz = Math.floor(z / this.config.cellSize + this.halfGridSize);
 
     if (gx < 0 || gx >= this.gridSize || gy < 0 || gy >= this.gridSize || gz < 0 || gz >= this.gridSize) {
       return -1;
     }
 
-    return gz * this.gridSize * this.gridSize + gy * this.gridSize + gx;
+    return gz * this.gridSizeSquared + gy * this.gridSize + gx;
   }
 
   private getBaseTerrain(x: number, y: number, z: number): number {
@@ -265,7 +271,7 @@ export class VoronoiNoise {
     for (let dx = -1; dx <= 1; dx++) {
       for (let dy = -1; dy <= 1; dy++) {
         for (let dz = -1; dz <= 1; dz++) {
-          const neighborIdx = gridIdx + dx + dy * this.gridSize + dz * this.gridSize * this.gridSize;
+          const neighborIdx = gridIdx + dx + dy * this.gridSize + dz * this.gridSizeSquared;
 
           if (neighborIdx < 0 || neighborIdx >= this.spatialGrid.length) {
             continue;
@@ -430,7 +436,7 @@ export class VoronoiNoise {
     for (let dx = -gridRadius; dx <= gridRadius; dx++) {
       for (let dy = -gridRadius; dy <= gridRadius; dy++) {
         for (let dz = -gridRadius; dz <= gridRadius; dz++) {
-          const neighborIdx = centerIdx + dx + dy * this.gridSize + dz * this.gridSize * this.gridSize;
+          const neighborIdx = centerIdx + dx + dy * this.gridSize + dz * this.gridSizeSquared;
 
           // Skip invalid indices
           if (neighborIdx < 0 || neighborIdx >= this.spatialGrid.length) {
