@@ -53,7 +53,7 @@ export class Globe {
     });
     this.waterLevel = globeConfig.radius * 1.08;
 
-    // this.buildWater();
+    this.buildWater();
 
     if (globeConfig.showWall) this.buildEquatorWall();
     this.object.castShadow = true;

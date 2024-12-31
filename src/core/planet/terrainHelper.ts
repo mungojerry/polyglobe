@@ -18,7 +18,8 @@ export class TerrainHelper {
     return TerrainHelper.instance;
   }
   public computeSurfaceHeight(x: number, y: number, z: number): number {
-    return 0.4 + this.noise.getValue(x, y, z) * 0.7;
+    const surfaceHeight = 0.4 + this.noise.getValue(x, y, z) * 0.7;
+    return surfaceHeight;
   }
 
   public computeElevationMultiplier(noiseValue: number): number {
@@ -48,7 +49,7 @@ export class TerrainHelper {
   }
 
   public isLand(position: THREE.Vector3): boolean {
-    const dir = position; //.clone();
+    const dir = position.clone();
     const noise = this.computeSurfaceHeight(dir.x, dir.y, dir.z);
     return isLand(noise);
   }

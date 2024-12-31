@@ -149,10 +149,12 @@ export class Player extends BaseGameObject implements IGameObject {
 
   update(camera: THREE.Camera) {
     super.update(camera);
-    const dir = this.getPosition();
+    const pos = this.getPosition();
+    const dir = pos.clone().normalize(); // Normalize the position vector
     const h = terrainHelper.computeSurfaceHeight(dir.x, dir.y, dir.z);
-    const e = terrainHelper.computeElevationMultiplier(h);
+
     console.log(h);
+    // pos.copy(dir); // Clean up the temporary vector
     debugManager.set("activetrail", "trail sprites: " + this.activeSprites.length);
   }
 }

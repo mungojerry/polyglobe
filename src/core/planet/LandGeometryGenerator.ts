@@ -14,8 +14,6 @@ export class LandGeometryGenerator {
     // Create geometry
     const geometry = new BufferGeometry();
 
-    console.log(radius, detail, seed);
-
     // Create base icosahedron
     const icosahedron = new THREE.IcosahedronGeometry(radius + 0.2, detail);
     const positionAttr = icosahedron.attributes.position;
@@ -74,7 +72,7 @@ export class LandGeometryGenerator {
     geometry.setIndex(new THREE.BufferAttribute(indices, 1));
     geometry.computeVertexNormals();
     const end = performance.now();
-    debugManager.set("landGeometry", "landGeometry: " + (end - start).toFixed(4));
+    debugManager.set("landGeometry", "land geometry time: " + (end - start).toFixed(4));
     console.log("land geometry generator complete");
     return geometry;
   }
@@ -85,6 +83,8 @@ export class LandGeometryGenerator {
     }
 
     debugManager.set("landProgress", `Land: ${progress.toFixed(1)}%)`);
+
+    /// this does await the timeout!!!
     await setTimeout(() => {}, 0);
   }
 }

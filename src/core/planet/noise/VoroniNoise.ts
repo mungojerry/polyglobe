@@ -43,10 +43,14 @@ export class VoronoiNoise {
   private readonly gridSizeSquared: number;
   private readonly halfGridSize: number;
 
-  // Cache configuration
-  private readonly valueCache: Float32Array;
-  private readonly valueCacheKeys: Int32Array;
-  private readonly CACHE_SIZE = 8192; // Increased cache size, power of 2
+  // Improved cache implementation
+  private readonly CACHE_SIZE = 16384; // Increased for better coverage
+  private readonly CACHE_PRECISION = 1000; // Higher precision for coordinate storage
+  private readonly valueCache: Map<string, number> = new Map();
+  private readonly MAX_CACHE_AGE = 1000; // Number of lookups before cache entry expires
+  private readonly cacheAges: Map<string, number> = new Map();
+  private cacheHits = 0;
+  private cacheMisses = 0;
 
   // Configuration with validation
   public readonly config: VoronoiNoiseConfig;
@@ -70,8 +74,6 @@ export class VoronoiNoise {
     // Initialize typed arrays with proper sizes
     this.points = new Float32Array(totalPoints * 3);
     this.spatialGrid = new Int32Array(totalPoints);
-    this.valueCache = new Float32Array(this.CACHE_SIZE);
-    this.valueCacheKeys = new Int32Array(this.CACHE_SIZE * 3);
 
     // Generate and initialize
     this.pointCount = this.generatePoints();
@@ -183,44 +185,39 @@ export class VoronoiNoise {
   }
 
   public getValue(x: number, y: number, z: number): number {
-    // Input validation
     if (!isFinite(x) || !isFinite(y) || !isFinite(z)) {
       return 0;
     }
 
-    // Check cache
-    const cacheKey = this.getCacheKey(x, y, z);
-    const cachedValue = this.checkCache(cacheKey, x, y, z);
-    if (cachedValue !== undefined && isFinite(cachedValue)) {
+    // Check cache first
+    const cachedValue = this.checkCache(x, y, z);
+    if (cachedValue !== undefined) {
       return cachedValue;
     }
 
-    // Get base terrain with validation
+    // Calculate new value
     let value = this.getBaseTerrain(x, y, z);
     if (!isFinite(value)) value = 0;
 
-    // Apply erosion
+    // Apply modifications
     const erosion = this.calculateErosion(x, y, z);
     if (isFinite(erosion)) {
       value = Math.max(-1, Math.min(1, value - erosion));
     }
 
-    // Apply plateau effect with validation
-    if (isFinite(value) && value > this.config.plateauThreshold) {
+    // Apply plateau effect
+    if (value > this.config.plateauThreshold) {
       const t = (value - this.config.plateauThreshold) / (1 - this.config.plateauThreshold);
       if (isFinite(t)) {
-        const plateau = this.config.plateauThreshold + (1 - Math.pow(1 - t, 3)) * (1 - this.config.plateauThreshold);
-        value = isFinite(plateau) ? plateau : value;
+        value = this.config.plateauThreshold + (1 - Math.pow(1 - t, 3)) * (1 - this.config.plateauThreshold);
       }
     }
 
     // Ensure final value is within bounds
     value = Math.max(-1, Math.min(1, value));
 
-    // Cache valid results
-    if (isFinite(value)) {
-      this.cacheValue(cacheKey, value, x, y, z);
-    }
+    // Cache the result
+    this.cacheValue(x, y, z, value);
 
     return value;
   }
@@ -342,29 +339,52 @@ export class VoronoiNoise {
     const finalValue = value * this.config.amplitude;
     return isFinite(finalValue) ? Math.min(1, Math.max(-1, finalValue)) : 0;
   }
-
-  private getCacheKey(x: number, y: number, z: number): number {
-    return (Math.floor(x * 73856093) ^ Math.floor(y * 19349663) ^ Math.floor(z * 83492791)) & (this.CACHE_SIZE - 1);
+  private getCacheKey(x: number, y: number, z: number): string {
+    // Use string key with higher precision and proper rounding
+    const px = Math.round(x * this.CACHE_PRECISION);
+    const py = Math.round(y * this.CACHE_PRECISION);
+    const pz = Math.round(z * this.CACHE_PRECISION);
+    return `${px},${py},${pz}`;
   }
 
-  private checkCache(key: number, x: number, y: number, z: number): number | undefined {
-    const idx = key * 3;
-    if (
-      this.valueCacheKeys[idx] === Math.floor(x * 100) &&
-      this.valueCacheKeys[idx + 1] === Math.floor(y * 100) &&
-      this.valueCacheKeys[idx + 2] === Math.floor(z * 100)
-    ) {
-      return this.valueCache[key];
+  private checkCache(x: number, y: number, z: number): number | undefined {
+    const key = this.getCacheKey(x, y, z);
+    const value = this.valueCache.get(key);
+
+    if (value !== undefined) {
+      this.cacheHits++;
+      this.cacheAges.set(key, 0); // Reset age on hit
+      return value;
     }
+
+    this.cacheMisses++;
     return undefined;
   }
 
-  private cacheValue(key: number, value: number, x: number, y: number, z: number): void {
-    const idx = key * 3;
-    this.valueCacheKeys[idx] = Math.floor(x * 100);
-    this.valueCacheKeys[idx + 1] = Math.floor(y * 100);
-    this.valueCacheKeys[idx + 2] = Math.floor(z * 100);
-    this.valueCache[key] = value;
+  private cacheValue(x: number, y: number, z: number, value: number): void {
+    const key = this.getCacheKey(x, y, z);
+
+    // Maintain cache size limit
+    if (this.valueCache.size >= this.CACHE_SIZE) {
+      // Remove oldest entries
+      const oldestKey = Array.from(this.cacheAges.entries()).sort((a, b) => b[1] - a[1])[0][0];
+      this.valueCache.delete(oldestKey);
+      this.cacheAges.delete(oldestKey);
+    }
+
+    this.valueCache.set(key, value);
+    this.cacheAges.set(key, 0);
+
+    // Age all other entries
+    for (const [k, age] of this.cacheAges) {
+      if (k !== key) {
+        this.cacheAges.set(k, age + 1);
+        if (age > this.MAX_CACHE_AGE) {
+          this.valueCache.delete(k);
+          this.cacheAges.delete(k);
+        }
+      }
+    }
   }
 
   // Only check points in cells that could contain nearest neighbors

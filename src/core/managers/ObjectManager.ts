@@ -199,8 +199,8 @@ export class ObjectManager {
 
     for (let i = 0; i < positions.count; i++) {
       tempVector.fromBufferAttribute(positions, i);
-      if (terrainHelper.isLand(tempVector)) {
-        tempNormal.copy(tempVector).normalize();
+      tempNormal.copy(tempVector).normalize();
+      if (terrainHelper.isLand(tempNormal)) {
         const vertex = {
           position: tempVector.clone(),
           normal: tempNormal.clone(),
