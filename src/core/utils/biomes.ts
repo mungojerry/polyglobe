@@ -84,7 +84,7 @@ export const BIOMES: BiomesMap = {
 };
 
 // Updated landBoundary to match new elevation ranges
-export const landBoundary = 0.5;
+export const landBoundary = 0.45;
 
 export function isLand(height: number) {
   return height > landBoundary;

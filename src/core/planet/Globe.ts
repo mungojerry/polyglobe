@@ -302,7 +302,13 @@ export class Globe {
 
   /** Lifecycle */
   public update(camera: THREE.Camera, deltaTime: number) {
-    this.updateChunkVisibility(camera);
+    if (this.chunks.length > 0) {
+      this.updateChunkVisibility(camera);
+      this.chunks.flat().forEach((chunk) => {
+        const distanceToCamera = chunk.boundingSphere.center.distanceTo(camera.position);
+        chunk.updateLOD(distanceToCamera);
+      });
+    }
     if (this.water) this.water.animate();
     if (this.runInfection) this.infection.update(deltaTime);
   }
