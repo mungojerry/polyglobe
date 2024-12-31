@@ -161,8 +161,6 @@ export class ObjectManager {
   private maxInstancesPerType: number = 5000;
   private landVertices: CachedLandVertex[] = [];
   private spatialGrid: SpatialHashGrid;
-  private tempVector: THREE.Vector3;
-
   private upVector: THREE.Vector3;
   private matrixPool: THREE.Matrix4[];
   private quaternionPool: THREE.Quaternion[];
@@ -177,7 +175,6 @@ export class ObjectManager {
     this.instancedMeshes = new Map();
     this.instanceCounts = new Map();
 
-    this.tempVector = new THREE.Vector3();
     this.upVector = new THREE.Vector3(0, 1, 0);
 
     this.matrixPool = Array(10000)

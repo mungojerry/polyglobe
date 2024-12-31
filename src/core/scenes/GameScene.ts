@@ -6,7 +6,6 @@ import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 import { UnderWaterShader } from "../effects/UnderWaterShader";
-import { WaterDroplets } from "../effects/WaterDropletsShader";
 import { controlManager } from "../managers/controlManager";
 import { debugManager } from "../managers/debugManager";
 import { modelGroups } from "../managers/models";
@@ -83,7 +82,6 @@ export class GameScene {
   private debugEnabled: boolean = false;
   private readonly GRAVITY_FUDGE: number = 0.01;
   private readonly G = 9.81 * this.GRAVITY_FUDGE;
-  private waterDroplets: WaterDroplets; // Add a property for WaterDroplets
   constructor() {
     this.world = new World(new Vector3(0, 0, 0));
     this.eventQueue = new EventQueue(false);
@@ -94,7 +92,6 @@ export class GameScene {
     this.renderer.toneMapping = THREE.CineonToneMapping;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    this.waterDroplets = new WaterDroplets(this.scene);
     // Initialize EffectComposer
     this.composer = new EffectComposer(this.renderer);
     const renderPass = new RenderPass(this.scene, this.camera);
@@ -312,7 +309,6 @@ export class GameScene {
         this.miniGlobe.update();
       }
 
-      this.waterDroplets.update();
       this.composer.render();
       debugManager.set("polys", "Polys: " + this.renderer.info.render.triangles);
       requestAnimationFrame(step);
