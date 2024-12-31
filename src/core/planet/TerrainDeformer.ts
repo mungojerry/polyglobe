@@ -95,7 +95,12 @@ class TerrainDeformer {
     return nearbyVertices;
   }
 
-  deformTerrain(deformPosition: THREE.Vector3, strength: number = 2.5, radius: number = 25): void {
+  private applyDeformation(
+    deformPosition: THREE.Vector3,
+    strength: number,
+    radius: number,
+    falloffFunction: (distance: number, radius: number) => number
+  ): void {
     this.initializeVertexMap();
 
     const geometry = this.land.geometry;
@@ -111,7 +116,7 @@ class TerrainDeformer {
       const i = data.index;
 
       const distance = deformPosition.distanceTo(vertex);
-      const falloff = Math.pow(1 - distance / radius, 2);
+      const falloff = falloffFunction(distance, radius);
       const heightChange = strength * falloff;
 
       const normal = vertex.clone().normalize();
@@ -140,6 +145,26 @@ class TerrainDeformer {
     if (this.land.userData.onTerrainDeformed) {
       this.land.userData.onTerrainDeformed(deformPosition, radius);
     }
+  }
+
+  deformPoint(deformPosition: THREE.Vector3, strength: number): void {
+    this.applyDeformation(deformPosition, strength, 0, () => 1);
+  }
+
+  deformPointWithRadius(deformPosition: THREE.Vector3, strength: number, radius: number): void {
+    this.applyDeformation(deformPosition, strength, radius, (distance, radius) => (distance <= radius ? 1 : 0));
+  }
+
+  deformSmoothFalloff(deformPosition: THREE.Vector3, strength: number, radius: number): void {
+    this.applyDeformation(deformPosition, strength, radius, (distance, radius) => Math.pow(1 - distance / radius, 2));
+  }
+
+  flatten(deformPosition: THREE.Vector3, radius: number): void {
+    this.applyDeformation(deformPosition, 0, radius, (distance, radius) => (distance <= radius ? 1 : 0));
+  }
+
+  enlarge(deformPosition: THREE.Vector3, strength: number, radius: number): void {
+    this.applyDeformation(deformPosition, strength, radius, (distance, radius) => 1);
   }
 }
 

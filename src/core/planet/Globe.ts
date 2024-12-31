@@ -10,6 +10,7 @@ import { GlobeChunk } from "./GlobeChunk";
 import { Infection } from "./Infection";
 import { LandGeometryGenerator } from "./LandGeometryGenerator";
 import { VoronoiNoise } from "./noise/VoroniNoise";
+import TerrainDeformer from "./TerrainDeformer";
 
 const globeConfig = {
   showWall: false,
@@ -21,6 +22,7 @@ const globeConfig = {
 
 export class Globe {
   private readonly object: THREE.Object3D;
+  public terrainDeformer!: TerrainDeformer;
 
   public runInfection: boolean = false;
   public onTerrainDeformed: ((position: THREE.Vector3, radius: number) => void) | null = null;
@@ -232,12 +234,17 @@ export class Globe {
     const landWorker = new LandGeometryGenerator();
     const geometry = await landWorker.generateLand(globeConfig.radius, globeConfig.detail, Math.random(), this.noise, onProgress);
     this.landGeometry = geometry;
+
+    // Create terrain deformer after geometry is generated
+    const landMesh = new THREE.Mesh(this.landGeometry, this.landMaterial);
+    this.terrainDeformer = new TerrainDeformer(landMesh, this.noise);
   }
 
   /** Terrain queries */
-
-  /** Basic interactions */
   public deformTerrain(deformPosition: THREE.Vector3, strength: number = 2.5, radius: number = 25) {
+    if (this.terrainDeformer) {
+      this.terrainDeformer.flatten(deformPosition, radius);
+    }
     if (this.onTerrainDeformed) {
       this.onTerrainDeformed(deformPosition, radius);
     }

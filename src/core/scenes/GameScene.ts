@@ -46,6 +46,7 @@ const config = {
     brightness: 1.2,
     luminanceThreshold: 0.8,
   },
+  orbitCoontrols: true,
 };
 
 export class GameScene {
@@ -71,7 +72,7 @@ export class GameScene {
 
   private cameraAttachedTo: THREE.Object3D;
   private debugMesh: THREE.LineSegments;
-  private orbitCoontrols: boolean = false;
+
   private currentGenerator: VoronoiNoise;
   private sun!: Sun;
   private moon!: Moon;
@@ -286,7 +287,7 @@ export class GameScene {
         this.globe.update(this.camera, 1);
         this.player.update(this.camera);
         this.updateDayNightCycle();
-        if (this.orbitCoontrols) this.controls.update();
+        if (config.orbitCoontrols) this.controls.update();
         else this.updateCamera(this.cameraAttachedTo.position.clone(), this.cameraAttachedTo.quaternion.clone());
         BulletGenerator.getInstance(this.world).update(1);
         const camPos = this.camera.position;
@@ -420,9 +421,9 @@ export class GameScene {
     controlManager.addCheckbox(
       "orbit",
       "Orbit camera: ",
-      () => this.orbitCoontrols,
+      () => config.orbitCoontrols,
       (value) => {
-        this.orbitCoontrols = value as boolean;
+        config.orbitCoontrols = value as boolean;
       }
     );
 
@@ -502,15 +503,15 @@ export class GameScene {
     );
 
     // Add noise generator controls
-    const config = this.currentGenerator.config;
-    Object.keys(config).forEach((propKey) => {
-      if (typeof config[propKey as keyof VoronoiNoiseConfig] === "number") {
+    const voronoiConfig = this.currentGenerator.config;
+    Object.keys(voronoiConfig).forEach((propKey) => {
+      if (typeof voronoiConfig[propKey as keyof VoronoiNoiseConfig] === "number") {
         controlManager.addSlider(
           propKey,
           propKey,
-          () => config[propKey as keyof VoronoiNoiseConfig] as number,
+          () => voronoiConfig[propKey as keyof VoronoiNoiseConfig] as number,
           (value) => {
-            (config[propKey as keyof VoronoiNoiseConfig] as number) = Number(value);
+            (voronoiConfig[propKey as keyof VoronoiNoiseConfig] as number) = Number(value);
           },
           0,
           propKey === "octaves" ? 8 : 2,

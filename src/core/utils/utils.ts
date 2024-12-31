@@ -26,3 +26,7 @@ export function generateRandomPosition(minDistance: number): THREE.Vector3 {
 }
 
 export type ProgressCallback = (progress: number) => void;
+
+export function getModelKey(filename: string, fileIndex: number): string {
+  return `${filename}_${fileIndex}`;
+}
