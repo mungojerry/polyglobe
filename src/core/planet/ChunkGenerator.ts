@@ -23,7 +23,7 @@ export class ChunkGenerator {
   private indexAttr!: THREE.BufferAttribute | null;
   private indexArray!: Uint32Array;
   private filteredIndices!: Uint32Array;
-  private readonly BATCH_SIZE = 4; // Adjust based on testing
+  private readonly BATCH_SIZE = 8; // Adjust based on testing
   constructor() {}
 
   public async generateChunks(
@@ -249,7 +249,7 @@ export class ChunkGenerator {
           }
         };
 
-        const CHUNK_SIZE = 100;
+        const CHUNK_SIZE = 300;
         for (let i = 0; i < this.positionAttr.count; i += CHUNK_SIZE) {
           processChunk(i, i + CHUNK_SIZE);
           onProgress((i / this.positionAttr.count) * 100);

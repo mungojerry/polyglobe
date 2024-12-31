@@ -137,7 +137,7 @@ export class Water {
         moonPosition: { value: new THREE.Vector3(-1500, 500, -500) },
         moonColor: { value: new THREE.Color(0x77ccff).multiplyScalar(0.5) },
         ambientColor: { value: new THREE.Color(0x00ddff).multiplyScalar(0.5) },
-        opacity: { value: 0.75 },
+        opacity: { value: 0.8 },
         dayNightMix: { value: 1.0 },
         waterBump1: { value: this.waterBump1 },
         waterBump2: { value: this.waterBump2 },

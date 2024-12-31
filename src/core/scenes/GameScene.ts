@@ -4,6 +4,9 @@ import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from "three-
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
+import { UnderWaterShader } from "../effects/UnderWaterShader";
+import { WaterDroplets } from "../effects/WaterDropletsShader";
 import { controlManager } from "../managers/controlManager";
 import { debugManager } from "../managers/debugManager";
 import { modelGroups } from "../managers/models";
@@ -56,6 +59,8 @@ export class GameScene {
   private readonly composer: EffectComposer;
   private readonly controls: OrbitControls;
   private readonly globe: Globe;
+  private underWaterPass: ShaderPass;
+  private isUnderwater: boolean = false;
   private readonly player: Player;
   private readonly clouds: Cloud[] = [];
   private readonly stars: Stars;
@@ -78,7 +83,7 @@ export class GameScene {
   private debugEnabled: boolean = false;
   private readonly GRAVITY_FUDGE: number = 0.01;
   private readonly G = 9.81 * this.GRAVITY_FUDGE;
-
+  private waterDroplets: WaterDroplets; // Add a property for WaterDroplets
   constructor() {
     this.world = new World(new Vector3(0, 0, 0));
     this.eventQueue = new EventQueue(false);
@@ -89,11 +94,16 @@ export class GameScene {
     this.renderer.toneMapping = THREE.CineonToneMapping;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-
+    this.waterDroplets = new WaterDroplets(this.scene);
     // Initialize EffectComposer
     this.composer = new EffectComposer(this.renderer);
     const renderPass = new RenderPass(this.scene, this.camera);
     this.composer.addPass(renderPass);
+
+    // Initialize underwater effect
+    this.underWaterPass = new ShaderPass(UnderWaterShader);
+    this.underWaterPass.enabled = false;
+    this.composer.addPass(this.underWaterPass);
 
     document.body.appendChild(this.renderer.domElement);
 
@@ -246,6 +256,10 @@ export class GameScene {
     this.debugMesh.geometry.setAttribute("color", new THREE.BufferAttribute(colors, 4));
   }
 
+  private isPositionUnderwater(position: THREE.Vector3): boolean {
+    return position.length() < this.globe.getWaterLevel();
+  }
+
   private animate(): void {
     const step = () => {
       if (!this.isInitialized) {
@@ -253,6 +267,19 @@ export class GameScene {
         this.composer.render();
         requestAnimationFrame(step);
         return;
+      }
+
+      // Check if camera is underwater
+      const wasUnderwater = this.isUnderwater;
+      this.isUnderwater = this.isPositionUnderwater(this.camera.position);
+
+      // Update underwater effect
+      if (this.isUnderwater !== wasUnderwater) {
+        this.underWaterPass.enabled = this.isUnderwater;
+      }
+
+      if (this.isUnderwater) {
+        this.underWaterPass.uniforms.time.value += 0.016; // ~60fps
       }
 
       if (this.player.getObject()) {
@@ -285,6 +312,7 @@ export class GameScene {
         this.miniGlobe.update();
       }
 
+      this.waterDroplets.update();
       this.composer.render();
       debugManager.set("polys", "Polys: " + this.renderer.info.render.triangles);
       requestAnimationFrame(step);
@@ -430,6 +458,54 @@ export class GameScene {
       ["Player", ...this.flyingObjects.map((_, index) => "UFO #" + index)]
     );
 
+    // Add underwater effect controls
+    controlManager.addSlider(
+      "waterDistortion",
+      "Water Distortion: ",
+      () => this.underWaterPass.uniforms.distortionAmount.value,
+      (value) => {
+        this.underWaterPass.uniforms.distortionAmount.value = value as number;
+      },
+      0,
+      0.05,
+      0.001
+    );
+
+    controlManager.addSlider(
+      "waterBlur",
+      "Water Blur: ",
+      () => this.underWaterPass.uniforms.blurAmount.value,
+      (value) => {
+        this.underWaterPass.uniforms.blurAmount.value = value as number;
+      },
+      0,
+      0.01,
+      0.0001
+    );
+
+    controlManager.addSlider(
+      "caustics",
+      "Caustics Intensity: ",
+      () => this.underWaterPass.uniforms.causticsIntensity.value,
+      (value) => {
+        this.underWaterPass.uniforms.causticsIntensity.value = value as number;
+      },
+      0,
+      0.3,
+      0.01
+    );
+
+    // Add color picker for water color
+    controlManager.addColor(
+      "waterColor",
+      "Water Color: ",
+      () => "#" + this.underWaterPass.uniforms.waterColor.value.getHexString(),
+      (value) => {
+        this.underWaterPass.uniforms.waterColor.value = new THREE.Color(value);
+      }
+    );
+
+    // Add noise generator controls
     const config = this.currentGenerator.config;
     Object.keys(config).forEach((propKey) => {
       if (typeof config[propKey as keyof VoronoiNoiseConfig] === "number") {

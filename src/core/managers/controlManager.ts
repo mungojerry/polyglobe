@@ -2,7 +2,7 @@
 interface BaseControlElement {
   id: string;
   label: string;
-  type: "slider" | "checkbox" | "button" | "dropdown";
+  type: "slider" | "checkbox" | "button" | "dropdown" | "color";
 }
 
 // Specific control interfaces
@@ -34,8 +34,15 @@ interface DropdownElement extends BaseControlElement {
   options: string[];
 }
 
+// Add new color interface
+interface ColorElement extends BaseControlElement {
+  type: "color";
+  getValue: () => string;
+  setValue: (value: string) => void;
+}
+
 // Union type for all controls
-type ControlElement = SliderElement | CheckboxElement | ButtonElement | DropdownElement;
+type ControlElement = SliderElement | CheckboxElement | ButtonElement | DropdownElement | ColorElement;
 
 // Type guards
 function isSlider(control: ControlElement): control is SliderElement {
@@ -50,9 +57,13 @@ function isButton(control: ControlElement): control is ButtonElement {
   return control.type === "button";
 }
 
-// Add type guard
 function isDropdown(control: ControlElement): control is DropdownElement {
   return control.type === "dropdown";
+}
+
+// Add type guard
+function isColor(control: ControlElement): control is ColorElement {
+  return control.type === "color";
 }
 
 class ControlManager {
@@ -93,6 +104,7 @@ class ControlManager {
     this.controlElements.set(id, { id, label, getValue, setValue, type: "checkbox" });
     this.updateDisplay();
   }
+
   public addButton(id: string, label: string, callback: () => void): void {
     this.controlElements.set(id, { id, label, callback, type: "button" });
     this.updateDisplay();
@@ -107,6 +119,11 @@ class ControlManager {
       setValue,
       options,
     });
+    this.updateDisplay();
+  }
+
+  public addColor(id: string, label: string, getValue: () => string, setValue: (value: string) => void): void {
+    this.controlElements.set(id, { id, label, getValue, setValue, type: "color" });
     this.updateDisplay();
   }
 
@@ -209,6 +226,23 @@ class ControlManager {
     controlWrapper.appendChild(container);
   }
 
+  private createColorElement(element: ColorElement, controlWrapper: HTMLDivElement): void {
+    const container = document.createElement("div");
+
+    container.className = "control-container";
+
+    const colorInput = document.createElement("input");
+    colorInput.type = "color";
+    colorInput.value = element.getValue();
+    colorInput.addEventListener("input", (e) => {
+      const target = e.target as HTMLInputElement;
+      element.setValue(target.value);
+    });
+
+    container.appendChild(colorInput);
+    controlWrapper.appendChild(container);
+  }
+
   private clearContainer(componentsToUpdate?: string[]) {
     if (!this.containerElement) return;
 
@@ -261,6 +295,9 @@ class ControlManager {
           break;
         case "dropdown":
           this.createDropdownElement(element, controlWrapper);
+          break;
+        case "color":
+          this.createColorElement(element, controlWrapper);
           break;
       }
 

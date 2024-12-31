@@ -61,6 +61,10 @@ export class Globe {
     this.infection = new Infection(this);
   }
 
+  public getWaterLevel() {
+    return this.waterLevel;
+  }
+
   private simplifyGeometry(geometry: THREE.BufferGeometry, factor: number): THREE.BufferGeometry {
     // Initialize new geometry
     const simplifiedGeometry = new THREE.BufferGeometry();
