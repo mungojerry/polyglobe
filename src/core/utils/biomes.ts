@@ -15,8 +15,6 @@ export type Biome = {
   color: THREE.Color;
   elevationMin: number;
   elevationMax: number;
-  moistureMin: number;
-  moistureMax: number;
 };
 
 interface PolarTransition {
@@ -38,48 +36,36 @@ export const BIOMES: BiomesMap = {
     color: new THREE.Color(0x000000),
     elevationMin: 0,
     elevationMax: 0.1,
-    moistureMin: 0.0,
-    moistureMax: 1.0,
   },
   [BiomeName.Ocean]: {
     name: BiomeName.Ocean,
     color: new THREE.Color(0x0066aa),
     elevationMin: 0.1,
     elevationMax: 0.4,
-    moistureMin: 0.0,
-    moistureMax: 1.0,
   },
   [BiomeName.Beach]: {
     name: BiomeName.Beach,
     color: new THREE.Color(0xffdd99),
     elevationMin: 0.4,
     elevationMax: 0.45,
-    moistureMin: 0.0,
-    moistureMax: 0.6,
   },
   [BiomeName.Land]: {
     name: BiomeName.Land,
     color: new THREE.Color(0x44aa44),
     elevationMin: 0.45,
     elevationMax: 0.7,
-    moistureMin: 0.3,
-    moistureMax: 0.8,
   },
   [BiomeName.Mountain]: {
     name: BiomeName.Mountain,
     color: new THREE.Color(0x996633),
     elevationMin: 0.7,
     elevationMax: 0.8,
-    moistureMin: 0.1,
-    moistureMax: 0.5,
   },
   [BiomeName.Snow]: {
     name: BiomeName.Snow,
     color: new THREE.Color(0xffffff),
     elevationMin: 0.8,
     elevationMax: 1.0,
-    moistureMin: 0.0,
-    moistureMax: 0.4,
   },
 };
 
