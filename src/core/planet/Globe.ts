@@ -51,7 +51,7 @@ export class Globe {
     window.addEventListener("click", (e) => {
       if (this.terrainClickAllowed) this.handleClickTerrain(e);
     });
-    this.waterLevel = globeConfig.radius * 1.08;
+    this.waterLevel = globeConfig.radius * 1.068;
 
     this.buildWater();
 
