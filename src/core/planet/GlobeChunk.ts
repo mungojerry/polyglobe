@@ -88,4 +88,47 @@ export class GlobeChunk {
     });
     this.mesh.geometry.dispose();
   }
+
+  public updateGeometry(modifiedVertices: { position: THREE.Vector3; color: THREE.Color; index: number }[]): void {
+    const baseGeometry = this.geometryLevels[0];
+    const positions = baseGeometry.attributes.position;
+    const colors = baseGeometry.attributes.color;
+    let geometryModified = false;
+
+    // Update vertices that belong to this chunk
+    for (const vertexData of modifiedVertices) {
+      const position = vertexData.position;
+
+      // Check if the vertex is within this chunk's bounds
+      const { lat, lon } = this.calculateLatLon(position);
+      if (lat >= this.latStart && lat < this.latEnd && lon >= this.lonStart && lon < this.lonEnd) {
+        // Update position and color in the base geometry
+        positions.setXYZ(vertexData.index, position.x, position.y, position.z);
+        colors.setXYZ(vertexData.index, vertexData.color.r, vertexData.color.g, vertexData.color.b);
+        geometryModified = true;
+      }
+    }
+
+    if (geometryModified) {
+      // Update geometry attributes
+      positions.needsUpdate = true;
+      colors.needsUpdate = true;
+      baseGeometry.computeVertexNormals();
+
+      // Regenerate LOD levels
+      this.geometryLevels = this.generateLODLevels(baseGeometry);
+
+      // Update current mesh geometry while maintaining LOD
+      const currentLOD = this.currentLOD;
+      this.mesh.geometry = this.geometryLevels[currentLOD];
+    }
+  }
+
+  private calculateLatLon(position: THREE.Vector3): { lat: number; lon: number } {
+    const normalizedPos = position.clone().normalize();
+    const lat = Math.asin(normalizedPos.y) * (180 / Math.PI);
+    let lon = Math.atan2(normalizedPos.x, normalizedPos.z) * (180 / Math.PI);
+    lon = ((lon + 180) % 360) - 180;
+    return { lat, lon };
+  }
 }

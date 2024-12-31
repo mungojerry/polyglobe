@@ -100,7 +100,8 @@ class TerrainDeformer {
     strength: number,
     radius: number,
     falloffFunction: (distance: number, radius: number) => number
-  ): void {
+  ): { position: THREE.Vector3; color: THREE.Color; index: number }[] {
+    const modifiedVertices: { position: THREE.Vector3; color: THREE.Color; index: number }[] = [];
     this.initializeVertexMap();
 
     const geometry = this.land.geometry;
@@ -135,6 +136,13 @@ class TerrainDeformer {
       const color = getTerrainColor(noiseValue, latitude);
 
       colors.setXYZ(i, color.r, color.g, color.b);
+
+      // Store modified vertex data
+      modifiedVertices.push({
+        position: newPosition.clone(),
+        color: new THREE.Color(color.r, color.g, color.b),
+        index: i,
+      });
     }
 
     geometry.attributes.position.needsUpdate = true;
@@ -145,26 +153,114 @@ class TerrainDeformer {
     if (this.land.userData.onTerrainDeformed) {
       this.land.userData.onTerrainDeformed(deformPosition, radius);
     }
+
+    return modifiedVertices;
   }
 
-  deformPoint(deformPosition: THREE.Vector3, strength: number): void {
-    this.applyDeformation(deformPosition, strength, 0, () => 1);
+  deformPoint(deformPosition: THREE.Vector3, strength: number) {
+    return this.applyDeformation(deformPosition, strength, 0, () => 1);
   }
 
-  deformPointWithRadius(deformPosition: THREE.Vector3, strength: number, radius: number): void {
-    this.applyDeformation(deformPosition, strength, radius, (distance, radius) => (distance <= radius ? 1 : 0));
+  deformPointWithRadius(deformPosition: THREE.Vector3, strength: number, radius: number) {
+    return this.applyDeformation(deformPosition, strength, radius, (distance, radius) => (distance <= radius ? 1 : 0));
   }
 
-  deformSmoothFalloff(deformPosition: THREE.Vector3, strength: number, radius: number): void {
-    this.applyDeformation(deformPosition, strength, radius, (distance, radius) => Math.pow(1 - distance / radius, 2));
+  deformSmoothFalloff(deformPosition: THREE.Vector3, strength: number, radius: number) {
+    return this.applyDeformation(deformPosition, strength, radius, (distance, radius) => Math.pow(1 - distance / radius, 2));
   }
 
-  flatten(deformPosition: THREE.Vector3, radius: number): void {
-    this.applyDeformation(deformPosition, 0, radius, (distance, radius) => (distance <= radius ? 1 : 0));
+  flatten(deformPosition: THREE.Vector3, radius: number) {
+    const targetLength = deformPosition.length();
+    const targetNormal = deformPosition.clone().normalize();
+
+    // Custom deformation that ensures all vertices are at the same height
+    const modifiedVertices: { position: THREE.Vector3; color: THREE.Color; index: number }[] = [];
+    this.initializeVertexMap();
+
+    const geometry = this.land.geometry;
+    const positions = geometry.attributes.position;
+    const colors = geometry.attributes.color;
+
+    // Get vertices within deformation radius
+    const nearbyVertices = this.getVerticesInRange(deformPosition, radius);
+
+    // First, calculate average height of affected vertices
+    let totalHeight = 0;
+    let vertexCount = 0;
+    for (const data of nearbyVertices) {
+      const vertex = data.vertex;
+      const distance = deformPosition.distanceTo(vertex);
+      if (distance <= radius * 0.8) {
+        // Use inner 80% for average calculation
+        totalHeight += vertex.length();
+        vertexCount++;
+      }
+    }
+    const averageHeight = vertexCount > 0 ? totalHeight / vertexCount : targetLength;
+
+    // Process vertices
+    for (const data of nearbyVertices) {
+      const vertex = data.vertex;
+      const i = data.index;
+      const distance = deformPosition.distanceTo(vertex);
+
+      if (distance <= radius) {
+        // Calculate falloff for smooth transition at edges
+        const falloff = Math.pow(1 - distance / radius, 3); // Cubic falloff for sharper transition
+
+        // Calculate target height based on distance from center
+        let targetHeight = averageHeight;
+        if (distance < radius * 0.2) {
+          // Inner 20% is completely flat
+          targetHeight = averageHeight;
+        } else if (distance > radius * 0.8) {
+          // Outer 20% blends with surroundings
+          const t = (distance - radius * 0.8) / (radius * 0.2);
+          targetHeight = averageHeight * (1 - t) + vertex.length() * t;
+        }
+
+        // Move vertex to target height while maintaining its direction from center
+        const direction = vertex.clone().normalize();
+        const newPosition = direction.multiplyScalar(targetHeight);
+
+        // For very central vertices, ensure perfect flatness
+        if (distance < radius * 0.1) {
+          newPosition.copy(direction.multiplyScalar(averageHeight));
+        }
+
+        // Update position
+        positions.setXYZ(i, newPosition.x, newPosition.y, newPosition.z);
+        data.vertex.copy(newPosition);
+
+        // Update color
+        const normalizedPos = newPosition.clone().normalize();
+        const noiseValue = this.noise.getValue(normalizedPos.x, normalizedPos.y, normalizedPos.z);
+        const latitude = Math.asin(normalizedPos.y);
+        const color = getTerrainColor(noiseValue, latitude);
+
+        colors.setXYZ(i, color.r, color.g, color.b);
+
+        modifiedVertices.push({
+          position: newPosition.clone(),
+          color: new THREE.Color(color.r, color.g, color.b),
+          index: i,
+        });
+      }
+    }
+
+    geometry.attributes.position.needsUpdate = true;
+    geometry.attributes.color.needsUpdate = true;
+    geometry.computeVertexNormals();
+
+    if (this.land.userData.onTerrainDeformed) {
+      this.land.userData.onTerrainDeformed(deformPosition, radius);
+    }
+
+    return modifiedVertices;
   }
 
-  enlarge(deformPosition: THREE.Vector3, strength: number, radius: number): void {
-    this.applyDeformation(deformPosition, strength, radius, (distance, radius) => 1);
+  enlarge(deformPosition: THREE.Vector3, strength: number, radius: number) {
+    return this.applyDeformation(deformPosition, strength, radius, (distance, radius) => 1);
   }
 }
 

@@ -235,19 +235,79 @@ export class Globe {
     const geometry = await landWorker.generateLand(globeConfig.radius, globeConfig.detail, Math.random(), this.noise, onProgress);
     this.landGeometry = geometry;
 
-    // Create terrain deformer after geometry is generated
+    // Create terrain deformer using the actual landGeometry
     const landMesh = new THREE.Mesh(this.landGeometry, this.landMaterial);
     this.terrainDeformer = new TerrainDeformer(landMesh, this.noise);
   }
 
   /** Terrain queries */
   public deformTerrain(deformPosition: THREE.Vector3, strength: number = 2.5, radius: number = 25) {
-    if (this.terrainDeformer) {
-      this.terrainDeformer.flatten(deformPosition, radius);
+    if (!this.terrainDeformer) {
+      console.warn("TerrainDeformer not initialized");
+      return;
     }
+
+    // Apply deformation to the land geometry
+    const modifiedVertices = this.terrainDeformer.flatten(deformPosition, radius);
+
+    if (!modifiedVertices || modifiedVertices.length === 0) {
+      console.warn("No vertices were modified during deformation");
+      return;
+    }
+
+    // Update the land geometry
+    const positions = this.landGeometry.attributes.position;
+    const colors = this.landGeometry.attributes.color;
+
+    // Apply changes to the main geometry
+    for (const vertexData of modifiedVertices) {
+      const { position, color, index } = vertexData;
+      positions.setXYZ(index, position.x, position.y, position.z);
+      colors.setXYZ(index, color.r, color.g, color.b);
+    }
+
+    // Mark geometry attributes as needing update
+    positions.needsUpdate = true;
+    colors.needsUpdate = true;
+    this.landGeometry.computeVertexNormals();
+
+    // Find and update affected chunks
+    const affectedChunks = new Set<GlobeChunk>();
+    for (const vertexData of modifiedVertices) {
+      const chunk = this.getChunkByPosition(vertexData.position);
+      if (chunk) {
+        affectedChunks.add(chunk);
+      }
+    }
+
+    // Update each affected chunk
+    affectedChunks.forEach((chunk) => {
+      chunk.updateGeometry(modifiedVertices);
+    });
+
+    // Update physics
+    this.updatePhysicsCollider();
+
+    // Notify about deformation
     if (this.onTerrainDeformed) {
       this.onTerrainDeformed(deformPosition, radius);
     }
+  }
+
+  private updatePhysicsCollider(): void {
+    if (this.rigidBody) {
+      // Remove old collider
+      this.world.removeRigidBody(this.rigidBody);
+    }
+
+    // Create new rigid body with updated geometry
+    const rigidBodyDesc = RAPIER.RigidBodyDesc.fixed();
+    this.rigidBody = this.world.createRigidBody(rigidBodyDesc);
+
+    const vertices = this.landGeometry.attributes.position.array;
+    const indices = this.landGeometry.index ? this.landGeometry.index.array : undefined;
+    const colliderDesc = RAPIER.ColliderDesc.trimesh(vertices as Float32Array, indices as Uint32Array);
+    this.world.createCollider(colliderDesc, this.rigidBody);
   }
 
   private handleClickTerrain(event: MouseEvent) {

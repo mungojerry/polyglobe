@@ -120,9 +120,57 @@ export class VillagePlacement implements PlacementStrategy {
       .map(() => landVertices[Math.floor(Math.random() * landVertices.length)]);
 
     for (const center of clusterCenters) {
-      // Flatten the terrain first
+      // Create a completely flat area for village placement
       if (terrainDeformer) {
-        terrainDeformer.flatten(center.position, group.spacing! * 1.5);
+        // Calculate village parameters
+        const numHouses = group.models.find((m) => m.name === "House")?.numInstances || 0;
+        const houseRadius = group.spacing || 30;
+        // Make sure the flat area is large enough for all houses plus extra space
+        const villageRadius = Math.max(houseRadius * 4, numHouses * houseRadius * 0.8);
+
+        // Initial pass: Create a large depression
+        let modifiedVertices = terrainDeformer.deformSmoothFalloff(
+          center.position,
+          -20, // Very strong downward force
+          villageRadius * 2.5 // Much larger area for smooth transitions
+        );
+
+        if (!modifiedVertices || modifiedVertices.length === 0) {
+          console.warn("Village placement: Initial depression failed, skipping this location");
+          continue;
+        }
+
+        // Second pass: Initial flattening of the large area
+        modifiedVertices = terrainDeformer.deformSmoothFalloff(center.position, -10, villageRadius * 2);
+
+        if (!modifiedVertices || modifiedVertices.length === 0) {
+          console.warn("Village placement: Secondary depression failed, skipping this location");
+          continue;
+        }
+
+        // Third pass: Flatten the main area
+        modifiedVertices = terrainDeformer.flatten(center.position, villageRadius * 1.5);
+
+        if (!modifiedVertices || modifiedVertices.length === 0) {
+          console.warn("Village placement: Main flattening failed, skipping this location");
+          continue;
+        }
+
+        // Fourth pass: Ensure village area is perfectly flat
+        modifiedVertices = terrainDeformer.flatten(center.position, villageRadius);
+
+        if (!modifiedVertices || modifiedVertices.length === 0) {
+          console.warn("Village placement: Village area flattening failed");
+          continue;
+        }
+
+        // Final pass: Extra flattening for the central area
+        modifiedVertices = terrainDeformer.flatten(center.position, villageRadius * 0.5);
+
+        if (!modifiedVertices || modifiedVertices.length === 0) {
+          console.warn("Village placement: Central flattening failed");
+          continue;
+        }
       }
 
       const fireModel = group.models.find((m) => m.name === "Fire");

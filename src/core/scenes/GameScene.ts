@@ -375,6 +375,9 @@ export class GameScene {
     vectorPool.releaseVector(right);
     this.camera.updateMatrixWorld(true);
 
+    this.sun.update(1);
+    this.moon.update(1);
+
     this.camera.updateProjectionMatrix();
   }
 
