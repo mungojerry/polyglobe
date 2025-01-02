@@ -6,7 +6,7 @@ import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 import { UnderWaterShader } from "../effects/UnderWaterShader";
-import { controlManager, SliderElement } from "../managers/controlManager";
+import { ColorElement, controlManager, SliderElement } from "../managers/controlManager";
 import { debugManager } from "../managers/debugManager";
 import { modelGroups } from "../managers/models";
 import { ObjectManager } from "../managers/ObjectManager";
@@ -458,52 +458,62 @@ export class GameScene {
       ["Player", ...this.flyingObjects.map((_, index) => "UFO #" + index)]
     );
 
+    controlManager.addAccordion("waterControls", "Water Shader Controls");
     // Add underwater effect controls
-    controlManager.addSlider(
-      "waterDistortion",
-      "Water Distortion: ",
-      () => this.underWaterPass.uniforms.distortionAmount.value,
-      (value) => {
+    const waterDistrotion: SliderElement = {
+      id: "waterDistortion",
+      label: "Water Distortion: ",
+      type: "slider",
+      getValue: () => this.underWaterPass.uniforms.distortionAmount.value,
+      setValue: (value) => {
         this.underWaterPass.uniforms.distortionAmount.value = value as number;
       },
-      0,
-      0.05,
-      0.001
-    );
+      min: 0,
+      max: 0.05,
+      step: 0.001,
+    };
 
-    controlManager.addSlider(
-      "waterBlur",
-      "Water Blur: ",
-      () => this.underWaterPass.uniforms.blurAmount.value,
-      (value) => {
+    const waterBlur: SliderElement = {
+      id: "waterBlur",
+      label: "Water Blur: ",
+      type: "slider",
+      getValue: () => this.underWaterPass.uniforms.blurAmount.value,
+      setValue: (value) => {
         this.underWaterPass.uniforms.blurAmount.value = value as number;
       },
-      0,
-      0.01,
-      0.0001
-    );
+      min: 0,
+      max: 0.01,
+      step: 0.0001,
+    };
 
-    controlManager.addSlider(
-      "caustics",
-      "Caustics Intensity: ",
-      () => this.underWaterPass.uniforms.causticsIntensity.value,
-      (value) => {
+    const waterCaustics: SliderElement = {
+      id: "caustics",
+      label: "Caustics Intensity: ",
+      type: "slider",
+      getValue: () => this.underWaterPass.uniforms.causticsIntensity.value,
+      setValue: (value) => {
         this.underWaterPass.uniforms.causticsIntensity.value = value as number;
       },
-      0,
-      0.3,
-      0.01
-    );
+      min: 0,
+      max: 0.3,
+      step: 0.01,
+    };
 
     // Add color picker for water color
-    controlManager.addColor(
-      "waterColor",
-      "Water Color: ",
-      () => "#" + this.underWaterPass.uniforms.waterColor.value.getHexString(),
-      (value) => {
+    const waterColorPicker: ColorElement = {
+      id: "waterColor",
+      label: "Water Color: ",
+      type: "color",
+      getValue: () => "#" + this.underWaterPass.uniforms.waterColor.value.getHexString(),
+      setValue: (value) => {
         this.underWaterPass.uniforms.waterColor.value = new THREE.Color(value);
-      }
-    );
+      },
+    };
+
+    controlManager.addChildToAccordion("waterControls", waterDistrotion);
+    controlManager.addChildToAccordion("waterControls", waterBlur);
+    controlManager.addChildToAccordion("waterControls", waterCaustics);
+    controlManager.addChildToAccordion("waterControls", waterColorPicker);
 
     controlManager.addAccordion("noiseControls", "Noise Generator Controls");
 

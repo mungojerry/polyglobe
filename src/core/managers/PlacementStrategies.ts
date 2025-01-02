@@ -100,6 +100,7 @@ export interface PlacementStrategyParams {
 export class RandomPlacement implements PlacementStrategy {
   async place(params: PlacementStrategyParams): Promise<void> {
     const { group, landVertices, batchSize, onProgress, matrices } = params;
+    console.log("placeRandom " + group.type);
     const promises = [];
     let totalInstances = 0;
     let placedInstances = 0;
@@ -128,7 +129,7 @@ export class RandomPlacement implements PlacementStrategy {
 export class VillagePlacement implements PlacementStrategy {
   async place(params: PlacementStrategyParams): Promise<void> {
     const { group, landVertices, matrices, terrainDeformer, batchSize, spatialGrid, onProgress } = params;
-
+    console.log("placeVillage " + group.type);
     const totalInstances = group.models.reduce((sum, type) => sum + type.numInstances, 0);
     let placedInstances = 0;
     const numInCluster = group.numInCluster ?? 1;

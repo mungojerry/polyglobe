@@ -99,14 +99,15 @@ canvas {
   border-radius: 8px;
 }
 
-.accordian-wrapper {
+.accordion-wrapper {
   display: flex;
   flex-direction: column;
-  width: 1000px;
+  width: 100%;
+  margin-right: 5px;
 }
 .accordion-header {
   cursor: pointer;
-  padding: 10px;
+  padding: 5px;
   background: #333333;
   display: flex;
   justify-content: space-between;
@@ -123,7 +124,7 @@ canvas {
 .accordion-icon {
   font-size: 20px;
   font-weight: bold;
-
+  padding-right: 5px;
   pointer-events: none;
   user-select: none;
 }
