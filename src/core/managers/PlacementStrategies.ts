@@ -1,6 +1,8 @@
 import * as THREE from "three";
 import { Vector3 } from "three";
-import TerrainDeformer from "../planet/TerrainDeformer";
+import { TerrainDeformer } from "../planet/TerrainDeformer";
+import { terrainHelper } from "../planet/terrainHelper";
+import { BiomeName, getBiomeByElevation } from "../utils/biomes";
 import { ObjectPool } from "../utils/ObjectPool";
 import { getModelKey, ProgressCallback } from "../utils/utils";
 import { CachedLandVertex, MAX_INSTANCES_PER_TYPE, ModelGroup, ModelType, SpatialHashGrid } from "./models";
@@ -28,8 +30,27 @@ function selectModelTypesForBatch(modelTypes: ModelType[], batchCount: number): 
 
   return selectedTypes;
 }
+function filterVerticesByBiome(vertices: CachedLandVertex[], allowedBiomes?: BiomeName[]) {
+  if (!allowedBiomes) return vertices;
+  return vertices.filter((vertex) => {
+    const biome = getBiomeByElevation(terrainHelper.computeSurfaceHeight(vertex.normal.x, vertex.normal.y, vertex.normal.z));
+    return biome?.name ? allowedBiomes.includes(biome.name) : false;
+  });
+}
+function placeBatch(
+  modelType: ModelType,
+  vertices: CachedLandVertex[],
+  count: number,
+  matrices: Map<string, THREE.Matrix4[]>,
+  allowedBiomes?: BiomeName[]
+): Promise<void> {
+  // Filter vertices by biome
+  const validVertices = filterVerticesByBiome(vertices, allowedBiomes);
 
-function placeBatch(modelType: ModelType, vertices: CachedLandVertex[], count: number, matrices: Map<string, THREE.Matrix4[]>): Promise<void> {
+  if (validVertices.length === 0) {
+    console.warn(`No valid vertices found for biome(s): ${allowedBiomes?.join(", ")}`);
+    return Promise.resolve();
+  }
   const randomFileIndex = modelType.files[Math.floor(Math.random() * modelType.files.length)];
   const modelKey = getModelKey("assets/models/fbx/" + modelType.filename, randomFileIndex);
 
@@ -46,7 +67,7 @@ function placeBatch(modelType: ModelType, vertices: CachedLandVertex[], count: n
   }
 
   for (let i = 0; i < count; i++) {
-    const vertex = vertices[Math.floor(Math.random() * vertices.length)];
+    const vertex = validVertices[Math.floor(Math.random() * validVertices.length)];
     const matrix = matrixPool.acquire();
 
     matrix.setPosition(vertex.position);
@@ -94,7 +115,7 @@ export class RandomPlacement implements PlacementStrategy {
       for (let i = 0; i < modelType.numInstances; i += batchSize) {
         const batchCount = Math.min(batchSize, modelType.numInstances - i);
         promises.push(
-          placeBatch(modelType, landVertices, batchCount, matrices).then(() => {
+          placeBatch(modelType, landVertices, batchCount, matrices, group.biomes).then(() => {
             placedInstances += batchCount;
             if (onProgress) {
               onProgress((placedInstances / totalInstances) * 100);
@@ -228,7 +249,7 @@ export class VillagePlacement implements PlacementStrategy {
 
 export class ClusteredPlacement implements PlacementStrategy {
   async place(params: PlacementStrategyParams): Promise<void> {
-    const { group, landVertices, matrices, terrainDeformer, batchSize, spatialGrid, onProgress } = params;
+    const { group, landVertices, matrices, batchSize, spatialGrid, onProgress } = params;
     console.log("placeClusteredObjects " + group.type);
     const promises = [];
     const totalInstances = group.models.reduce((sum, type) => sum + type.numInstances, 0);
@@ -249,7 +270,7 @@ export class ClusteredPlacement implements PlacementStrategy {
 
         for (const [modelType, count] of selectedTypes) {
           promises.push(
-            placeBatch(modelType, nearbyVertices, count, matrices).then(() => {
+            placeBatch(modelType, nearbyVertices, count, matrices, group.biomes).then(() => {
               placedInstances += count;
               if (onProgress) {
                 onProgress((placedInstances / totalInstances) * 100);

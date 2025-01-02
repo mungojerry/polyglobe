@@ -41,6 +41,7 @@ canvas {
   font-family: Arial, sans-serif;
   margin: 5px 0;
 }
+
 #controlPanel {
   padding: 15px;
   color: white;
@@ -48,10 +49,13 @@ canvas {
   border-radius: 5px;
   font-family: Arial, sans-serif;
   margin: 5px 0;
+  width: 450px;
 }
 
 #controlPanel label {
   padding-right: 6px;
+  pointer-events: none;
+  user-select: none;
 }
 
 .control-wrapper {
@@ -78,14 +82,48 @@ canvas {
 .slider-value {
   min-width: 40px;
   text-align: right;
+  pointer-events: none;
+  user-select: none;
 }
 .slider-min,
 .slider-max {
   color: #666;
   font-size: 0.8em;
+  pointer-events: none;
+
+  user-select: none;
 }
 .button-container {
   padding: 6px;
   border: 1;
   border-radius: 8px;
+}
+
+.accordian-wrapper {
+  display: flex;
+  flex-direction: column;
+  width: 1000px;
+}
+.accordion-header {
+  cursor: pointer;
+  padding: 10px;
+  background: #333333;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+
+  user-select: none;
+}
+.accordion-content {
+  padding: 10px;
+  border-left: 2px solid #f0f0f0;
+  margin-left: 10px;
+}
+.accordion-icon {
+  font-size: 20px;
+  font-weight: bold;
+
+  pointer-events: none;
+  user-select: none;
 }

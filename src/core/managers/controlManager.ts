@@ -2,11 +2,11 @@
 interface BaseControlElement {
   id: string;
   label: string;
-  type: "slider" | "checkbox" | "button" | "dropdown" | "color";
+  type: "slider" | "checkbox" | "button" | "dropdown" | "color" | "accordion";
 }
 
 // Specific control interfaces
-interface SliderElement extends BaseControlElement {
+export interface SliderElement extends BaseControlElement {
   type: "slider";
   getValue: () => number;
   setValue: (value: number) => void;
@@ -15,19 +15,19 @@ interface SliderElement extends BaseControlElement {
   step: number;
 }
 
-interface CheckboxElement extends BaseControlElement {
+export interface CheckboxElement extends BaseControlElement {
   type: "checkbox";
   getValue: () => boolean;
   setValue: (value: boolean) => void;
 }
 
-interface ButtonElement extends BaseControlElement {
+export interface ButtonElement extends BaseControlElement {
   type: "button";
   callback: () => void;
 }
 
 // Add new dropdown interface
-interface DropdownElement extends BaseControlElement {
+export interface DropdownElement extends BaseControlElement {
   type: "dropdown";
   getValue: () => string;
   setValue: (value: string) => void;
@@ -35,14 +35,21 @@ interface DropdownElement extends BaseControlElement {
 }
 
 // Add new color interface
-interface ColorElement extends BaseControlElement {
+export interface ColorElement extends BaseControlElement {
   type: "color";
   getValue: () => string;
   setValue: (value: string) => void;
 }
 
+// Add to existing interfaces
+export interface AccordionElement extends BaseControlElement {
+  type: "accordion";
+  children: ControlElement[];
+  expanded: boolean;
+}
+
 // Union type for all controls
-type ControlElement = SliderElement | CheckboxElement | ButtonElement | DropdownElement | ColorElement;
+type ControlElement = SliderElement | CheckboxElement | ButtonElement | DropdownElement | ColorElement | AccordionElement;
 
 // Type guards
 function isSlider(control: ControlElement): control is SliderElement {
@@ -66,6 +73,11 @@ function isColor(control: ControlElement): control is ColorElement {
   return control.type === "color";
 }
 
+// Add type guard
+function isAccordion(control: ControlElement): control is AccordionElement {
+  return control.type === "accordion";
+}
+
 class ControlManager {
   private static instance: ControlManager;
   private controlElements: Map<string, ControlElement> = new Map();
@@ -79,13 +91,6 @@ class ControlManager {
       this.containerElement.id = "controlPanel";
       document.body.appendChild(this.containerElement);
     }
-
-    // Add this CSS
-    const style = document.createElement("style");
-    style.textContent = `
-    
-    `;
-    document.head.appendChild(style);
   }
 
   public static getInstance(): ControlManager {
@@ -125,6 +130,25 @@ class ControlManager {
   public addColor(id: string, label: string, getValue: () => string, setValue: (value: string) => void): void {
     this.controlElements.set(id, { id, label, getValue, setValue, type: "color" });
     this.updateDisplay();
+  }
+
+  public addAccordion(id: string, label: string): void {
+    this.controlElements.set(id, {
+      id,
+      label,
+      type: "accordion",
+      children: [],
+      expanded: false,
+    });
+    this.updateDisplay();
+  }
+
+  public addChildToAccordion(accordionId: string, childControl: ControlElement): void {
+    const accordion = this.controlElements.get(accordionId);
+    if (accordion && isAccordion(accordion)) {
+      accordion.children.push(childControl);
+      this.updateDisplay();
+    }
   }
 
   private createButton(element: ControlElement, controlWrapper: HTMLDivElement) {
@@ -243,6 +267,41 @@ class ControlManager {
     controlWrapper.appendChild(container);
   }
 
+  private createAccordionElement(element: AccordionElement, controlWrapper: HTMLDivElement): void {
+    const accordianWrapper = document.createElement("div");
+    accordianWrapper.className = "accordion-wrapper";
+    const header = document.createElement("div");
+    header.className = "accordion-header";
+    header.innerHTML = `
+      <span>${element.label}</span>
+      <span class="accordion-icon">${element.expanded ? "−" : "+"}</span>
+    `;
+
+    const content = document.createElement("div");
+    content.className = "accordion-content";
+    content.style.display = element.expanded ? "block" : "none";
+
+    header.onclick = () => {
+      element.expanded = !element.expanded;
+      header.innerHTML = `
+      <span>${element.label}</span>
+      <span class="accordion-icon">${element.expanded ? "−" : "+"}</span>
+    `;
+      content.style.display = element.expanded ? "block" : "none";
+    };
+
+    // Recursively render child controls
+    element.children.forEach((childElement) => {
+      const childWrapper = this.createControlWrapper(childElement);
+      this.renderControl(childElement, childWrapper);
+      content.appendChild(childWrapper);
+    });
+
+    accordianWrapper.appendChild(header);
+    accordianWrapper.appendChild(content);
+    controlWrapper.appendChild(accordianWrapper);
+  }
+
   private clearContainer(componentsToUpdate?: string[]) {
     if (!this.containerElement) return;
 
@@ -266,13 +325,36 @@ class ControlManager {
     const controlWrapper = document.createElement("div");
     controlWrapper.id = "#" + element.id;
     controlWrapper.className = "control-wrapper";
-    if (element.type !== "button") {
+    if (element.type !== "button" && element.type !== "accordion") {
       const label = document.createElement("label");
       label.id = "#" + element.id + "_label";
       label.innerText = element.label;
       controlWrapper.appendChild(label);
     }
     return controlWrapper;
+  }
+
+  private renderControl(element: ControlElement, wrapper: HTMLDivElement): void {
+    switch (element.type) {
+      case "slider":
+        this.createSlider(element, wrapper);
+        break;
+      case "checkbox":
+        this.createCheckbox(element, wrapper);
+        break;
+      case "button":
+        this.createButton(element, wrapper);
+        break;
+      case "dropdown":
+        this.createDropdownElement(element, wrapper);
+        break;
+      case "color":
+        this.createColorElement(element, wrapper);
+        break;
+      case "accordion":
+        this.createAccordionElement(element, wrapper);
+        break;
+    }
   }
 
   public updateDisplay(componentsToUpdate?: string[]): void {
@@ -283,24 +365,7 @@ class ControlManager {
     this.controlElements.forEach((element) => {
       if (componentsToUpdate && !componentsToUpdate.includes(element.id)) return;
       const controlWrapper = this.createControlWrapper(element);
-      switch (element.type) {
-        case "slider":
-          this.createSlider(element, controlWrapper);
-          break;
-        case "checkbox":
-          this.createCheckbox(element, controlWrapper);
-          break;
-        case "button":
-          this.createButton(element, controlWrapper);
-          break;
-        case "dropdown":
-          this.createDropdownElement(element, controlWrapper);
-          break;
-        case "color":
-          this.createColorElement(element, controlWrapper);
-          break;
-      }
-
+      this.renderControl(element, controlWrapper);
       this.containerElement?.appendChild(controlWrapper);
     });
   }

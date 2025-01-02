@@ -6,7 +6,7 @@ import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 import { UnderWaterShader } from "../effects/UnderWaterShader";
-import { controlManager } from "../managers/controlManager";
+import { controlManager, SliderElement } from "../managers/controlManager";
 import { debugManager } from "../managers/debugManager";
 import { modelGroups } from "../managers/models";
 import { ObjectManager } from "../managers/ObjectManager";
@@ -505,21 +505,26 @@ export class GameScene {
       }
     );
 
+    controlManager.addAccordion("noiseControls", "Noise Generator Controls");
+
     // Add noise generator controls
     const voronoiConfig = this.currentGenerator.config;
     Object.keys(voronoiConfig).forEach((propKey) => {
       if (typeof voronoiConfig[propKey as keyof VoronoiNoiseConfig] === "number") {
-        controlManager.addSlider(
-          propKey,
-          propKey,
-          () => voronoiConfig[propKey as keyof VoronoiNoiseConfig] as number,
-          (value) => {
+        const sliderControl: SliderElement = {
+          id: propKey,
+          label: propKey,
+          type: "slider",
+          getValue: () => voronoiConfig[propKey as keyof VoronoiNoiseConfig] as number,
+          setValue: (value) => {
             (voronoiConfig[propKey as keyof VoronoiNoiseConfig] as number) = Number(value);
           },
-          0,
-          propKey === "octaves" ? 8 : 2,
-          propKey === "octaves" ? 1 : 0.1
-        );
+          min: 0,
+          max: propKey === "octaves" ? 8 : 2,
+          step: propKey === "octaves" ? 1 : 0.1,
+        };
+
+        controlManager.addChildToAccordion("noiseControls", sliderControl);
       }
     });
   }

@@ -7,7 +7,7 @@ interface VertexData {
   index: number;
 }
 
-class TerrainDeformer {
+export class TerrainDeformer {
   private spatialMap: Map<string, VertexData[]>;
   private initialized: boolean = false;
   private bounds: THREE.Box3;
@@ -171,7 +171,6 @@ class TerrainDeformer {
 
   flatten(deformPosition: THREE.Vector3, radius: number) {
     const targetLength = deformPosition.length();
-    const targetNormal = deformPosition.clone().normalize();
 
     // Custom deformation that ensures all vertices are at the same height
     const modifiedVertices: { position: THREE.Vector3; color: THREE.Color; index: number }[] = [];
@@ -263,5 +262,3 @@ class TerrainDeformer {
     return this.applyDeformation(deformPosition, strength, radius, (distance, radius) => 1);
   }
 }
-
-export default TerrainDeformer;

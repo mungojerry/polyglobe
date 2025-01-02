@@ -53,18 +53,18 @@ export const BIOMES: BiomesMap = {
     name: BiomeName.Land,
     color: new THREE.Color(0x44aa44),
     elevationMin: 0.45,
-    elevationMax: 0.7,
+    elevationMax: 0.65,
   },
   [BiomeName.Mountain]: {
     name: BiomeName.Mountain,
     color: new THREE.Color(0x996633),
-    elevationMin: 0.7,
-    elevationMax: 0.8,
+    elevationMin: 0.65,
+    elevationMax: 0.75,
   },
   [BiomeName.Snow]: {
     name: BiomeName.Snow,
     color: new THREE.Color(0xffffff),
-    elevationMin: 0.8,
+    elevationMin: 0.75,
     elevationMax: 1.0,
   },
 };

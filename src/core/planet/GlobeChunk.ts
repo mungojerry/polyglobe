@@ -2,9 +2,10 @@ import * as THREE from "three";
 import { SimplifyModifier } from "three-stdlib";
 
 export class GlobeChunk {
-  mesh: THREE.Mesh;
-  public boundingSphere: THREE.Sphere;
-  public normalizedPositions: Float32Array;
+  public mesh!: THREE.Mesh;
+  public boundingSphere!: THREE.Sphere;
+  public normalizedPositions!: Float32Array;
+  // public elevations!: Float32Array;
   public latStart: number = 0;
   public latEnd: number = 0;
   public lonStart: number = 0;
@@ -28,9 +29,10 @@ export class GlobeChunk {
     this.boundingSphere = geometry.boundingSphere!.clone();
     this.boundingSphere.center.add(this.mesh.position);
 
-    // Calculate normalized positions
+    // Calculate normalized positions and store elevations
     const positions = geometry.getAttribute("position");
     this.normalizedPositions = new Float32Array(positions.count * 3);
+    // this.elevations = new Float32Array(positions.count);
     this.calculateNormalizedPositions(positions);
   }
 
@@ -41,9 +43,17 @@ export class GlobeChunk {
       const z = positions.getZ(i);
       const length = Math.sqrt(x * x + y * y + z * z);
 
+      // Store normalized positions
       this.normalizedPositions[i * 3] = x / length;
       this.normalizedPositions[i * 3 + 1] = y / length;
       this.normalizedPositions[i * 3 + 2] = z / length;
+
+      // Calculate and store elevation
+      // const nx = x / length;
+      // const ny = y / length;
+      // const nz = z / length;
+      // const height = terrainHelper.computeSurfaceHeight(nx, ny, nz);
+      // this.elevations[i] = height;
     }
   }
 
@@ -89,7 +99,7 @@ export class GlobeChunk {
     this.mesh.geometry.dispose();
   }
 
-  public updateGeometry(modifiedVertices: { position: THREE.Vector3; color: THREE.Color; index: number }[]): void {
+  public updateGeometry(modifiedVertices: { position: THREE.Vector3; color: THREE.Color; index: number; elevation?: number }[]): void {
     const baseGeometry = this.geometryLevels[0];
     const positions = baseGeometry.attributes.position;
     const colors = baseGeometry.attributes.color;
@@ -105,6 +115,11 @@ export class GlobeChunk {
         // Update position and color in the base geometry
         positions.setXYZ(vertexData.index, position.x, position.y, position.z);
         colors.setXYZ(vertexData.index, vertexData.color.r, vertexData.color.g, vertexData.color.b);
+
+        // Update elevation if provided
+        // if (vertexData.elevation !== undefined) {
+        //   this.elevations[vertexData.index] = vertexData.elevation;
+        // }
         geometryModified = true;
       }
     }
@@ -121,6 +136,9 @@ export class GlobeChunk {
       // Update current mesh geometry while maintaining LOD
       const currentLOD = this.currentLOD;
       this.mesh.geometry = this.geometryLevels[currentLOD];
+
+      // Recalculate normalized positions and elevations
+      this.calculateNormalizedPositions(positions);
     }
   }
 
