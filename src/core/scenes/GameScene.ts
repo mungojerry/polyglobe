@@ -6,7 +6,7 @@ import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 import { UnderWaterShader } from "../effects/UnderWaterShader";
-import { ColorElement, controlManager, SliderElement } from "../managers/controlManager";
+import { ButtonElement, ColorElement, controlManager, SliderElement } from "../managers/controlManager";
 import { debugManager } from "../managers/debugManager";
 import { modelGroups } from "../managers/models";
 import { ObjectManager } from "../managers/ObjectManager";
@@ -18,7 +18,7 @@ import { Stars } from "../objects/Stars";
 import { Sun } from "../objects/Sun";
 import { Globe } from "../planet/Globe";
 import { MiniGlobe } from "../planet/MiniGlobe";
-import { VoronoiNoise, VoronoiNoiseConfig } from "../planet/noise/VoroniNoise";
+import { BaseNoise } from "../planet/noise/BaseNoise";
 import { TerrainHelper } from "../planet/terrainHelper";
 import { LoadingScreen } from "../ui/LoadingScreen";
 import { generateRandomPosition } from "../utils/utils";
@@ -73,7 +73,7 @@ export class GameScene {
   private cameraAttachedTo: THREE.Object3D;
   private debugMesh: THREE.LineSegments;
 
-  private currentGenerator: VoronoiNoise;
+  private currentGenerator: BaseNoise;
   private sun!: Sun;
   private moon!: Moon;
   private flyingObjects: FlyingObject[] = [];
@@ -135,8 +135,15 @@ export class GameScene {
 
     this.loadingScreen = new LoadingScreen();
 
+    this.initializeFlyingObjects();
+
     // Start initialization
     this.initialize();
+
+    this.sun = new Sun(this.globe, this.scene, this.globe.getRadius() * 2.4);
+    this.moon = new Moon(this.scene, this.globe.getRadius() * 2.4);
+
+    this.setupControls();
 
     // Handle window resize
     window.addEventListener("resize", () => {
@@ -163,6 +170,7 @@ export class GameScene {
     }
 
     this.isInitializing = true;
+    this.isInitialized = false;
     this.loadingScreen.show();
     this.loadingScreen.reset();
 
@@ -196,19 +204,13 @@ export class GameScene {
 
       // Initialize world
       this.loadingScreen.updateStage("Initializing World", 0);
+      if (this.miniGlobe) this.miniGlobe.dispose();
       this.miniGlobe = new MiniGlobe(this.globe.getMiniMapGeometry(), this.camera, 200, 200);
-      this.sun = new Sun(this.globe, this.scene, this.globe.getRadius() * 2.4);
-      this.moon = new Moon(this.scene, this.globe.getRadius() * 2.4);
-      this.loadingScreen.updateStage("Initializing World", 50);
-
-      await this.initializeFlyingObjects();
-      this.loadingScreen.updateStage("Initializing World", 75);
-
       // Add markers to miniglobe
       this.miniGlobe.addMarkers([this.player], 0x00ff00);
       this.miniGlobe.addMarkers([...this.flyingObjects], 0xff0000);
 
-      this.setupControls();
+      this.loadingScreen.updateStage("Initializing World", 50);
       this.loadingScreen.setStageComplete("Initializing World");
 
       this.isInitialized = true;
@@ -280,38 +282,34 @@ export class GameScene {
         this.underWaterPass.uniforms.time.value += 0.016; // ~60fps
       }
 
-      if (this.player.getObject()) {
-        this.world.step(this.eventQueue);
-        this.applyGravityToObjects();
-        this.clouds.forEach((cloud) => cloud.animateCloud());
-        this.globe.update(this.camera, 1);
-        this.player.update(this.camera);
-        this.updateDayNightCycle();
-        if (config.orbitCoontrols) this.controls.update();
-        else this.updateCamera(this.cameraAttachedTo.position.clone(), this.cameraAttachedTo.quaternion.clone());
-        BulletGenerator.getInstance(this.world).update(1);
-        const camPos = this.camera.position;
+      this.world.step(this.eventQueue);
+      this.applyGravityToObjects();
+      this.clouds.forEach((cloud) => cloud.animateCloud());
+      this.globe.update(this.camera, 1);
+      this.player.update(this.camera);
+      this.updateDayNightCycle();
+      if (config.orbitCoontrols) this.controls.update();
+      else this.updateCamera(this.cameraAttachedTo.position.clone(), this.cameraAttachedTo.quaternion.clone());
+      BulletGenerator.getInstance(this.world).update(1);
+      const camPos = this.camera.position;
 
-        this.dynamicBodies.forEach(({ mesh, body }) => {
-          const position = body.translation();
-          mesh.position.set(position.x, position.y, position.z);
-          const rotation = body.rotation();
-          mesh.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
-        });
+      this.dynamicBodies.forEach(({ mesh, body }) => {
+        const position = body.translation();
+        mesh.position.set(position.x, position.y, position.z);
+        const rotation = body.rotation();
+        mesh.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
+      });
 
-        debugManager.set("camera", "Cam: " + camPos.x.toFixed(2) + "," + camPos.y.toFixed(2) + "," + camPos.z.toFixed(2));
-        if (this.debugMesh?.visible) {
-          this.updateDebugVisualization();
-        }
-        this.flyingObjects.forEach((flyingObject) => flyingObject.update(this.camera));
+      debugManager.set("camera", "Cam: " + camPos.x.toFixed(2) + "," + camPos.y.toFixed(2) + "," + camPos.z.toFixed(2));
+      if (this.debugMesh?.visible) {
+        this.updateDebugVisualization();
       }
-
+      this.flyingObjects.forEach((flyingObject) => flyingObject.update(this.camera));
       if (this.miniGlobe) {
         this.miniGlobe.update();
       }
-
-      this.composer.render();
       debugManager.set("polys", "Polys: " + this.renderer.info.render.triangles);
+      this.composer.render();
       requestAnimationFrame(step);
     };
     requestAnimationFrame(step);
@@ -518,19 +516,35 @@ export class GameScene {
     controlManager.addAccordion("noiseControls", "Noise Generator Controls");
 
     // Add noise generator controls
-    const voronoiConfig = this.currentGenerator.config;
-    Object.keys(voronoiConfig).forEach((propKey) => {
-      if (typeof voronoiConfig[propKey as keyof VoronoiNoiseConfig] === "number") {
+    const noiseConfig = this.currentGenerator.getConfig();
+    const rebuildButton: ButtonElement = {
+      id: "rebuildButton",
+      label: "Rebuild globe",
+      type: "button",
+      callback: () => this.initialize(),
+    };
+    controlManager.addChildToAccordion("noiseControls", rebuildButton);
+    const outputValues: ButtonElement = {
+      id: "outputValues",
+      label: "Output values",
+      type: "button",
+      callback: () => {
+        console.log(JSON.stringify(Object.fromEntries(Object.entries(noiseConfig).map(([key, value]) => [key, value])), null, 2));
+      },
+    };
+    controlManager.addChildToAccordion("noiseControls", outputValues);
+    Object.keys(noiseConfig).forEach((propKey) => {
+      if (typeof noiseConfig[propKey] === "number") {
         const sliderControl: SliderElement = {
           id: propKey,
           label: propKey,
           type: "slider",
-          getValue: () => voronoiConfig[propKey as keyof VoronoiNoiseConfig] as number,
+          getValue: () => noiseConfig[propKey] as number,
           setValue: (value) => {
-            (voronoiConfig[propKey as keyof VoronoiNoiseConfig] as number) = Number(value);
+            (noiseConfig[propKey] as number) = Number(value);
           },
-          min: 0,
-          max: propKey === "octaves" ? 8 : 2,
+          min: propKey === "octaves" ? 1 : 0,
+          max: propKey === "octaves" ? 10 : 2,
           step: propKey === "octaves" ? 1 : 0.1,
         };
 

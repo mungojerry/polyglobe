@@ -1,3 +1,4 @@
+import * as THREE from "three";
 import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise.js";
 import { pseudoRandom } from "../../utils/PseudoRandom";
 import { BaseNoise } from "./BaseNoise";
@@ -11,6 +12,7 @@ export type NoiseConfig = {
   amplitude: number;
   warpStrength: number;
   erosionStrength: number;
+  heightCurve: number;
 };
 
 export const DEFAULT_CONFIG = {
@@ -20,8 +22,9 @@ export const DEFAULT_CONFIG = {
   plateauStrength: 0.25, // Reduced to avoid artificial-looking flattening
   frequency: 1.5, // Increased for less rounded hills
   amplitude: 1.0, // Base amplitude for consistent range
-  warpStrength: 0.11, // Reduced to minimize spikiness
+  warpStrength: 1.7, // Reduced to minimize spikiness
   erosionStrength: 0.84, // Balanced erosion effect
+  heightCurve: 1.3,
 };
 
 // TODO problems with the cache, produces spikes
@@ -44,6 +47,18 @@ export class Noise implements BaseNoise {
   constructor(config: Partial<NoiseConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.cache = new Map();
+    this.init();
+  }
+
+  private octaveOffsets: THREE.Vector3[] = [];
+  public init() {
+    for (let i = 0; i < this.config.octaves; i++) {
+      this.octaveOffsets[i] = new THREE.Vector3(
+        pseudoRandom.randomInRange(-10000, 10000),
+        pseudoRandom.randomInRange(-10000, 10000),
+        pseudoRandom.randomInRange(-10000, 10000)
+      );
+    }
   }
 
   public getConfig(): NoiseConfig {
@@ -131,7 +146,11 @@ export class Noise implements BaseNoise {
     }
 
     for (let i = 0; i < this.config.octaves; i++) {
-      const n = Noise.baseNoiseGenerator.noise3d(x * frequency, y * frequency, z * frequency);
+      const n = Noise.baseNoiseGenerator.noise3d(
+        x * frequency + this.octaveOffsets[i].x,
+        y * frequency + this.octaveOffsets[i].y,
+        z * frequency + this.octaveOffsets[i].z
+      );
 
       // Progressive weight reduction for natural detail falloff
       const weight = 1.0 / (1 + i * 0.7);
@@ -191,6 +210,12 @@ export class Noise implements BaseNoise {
     this.cache.clear();
   }
 
+  private applyCurve(value: number): number {
+    const curve = this.config.heightCurve ?? 1.0;
+    const sign = Math.sign(value);
+    return sign * Math.pow(Math.abs(value), curve);
+  }
+
   /**
    * Computes final noise value at (x, y, z).
    */
@@ -203,13 +228,16 @@ export class Noise implements BaseNoise {
     }
 
     let value = this.layeredNoise(x, y, z);
+    value = this.applyCurve(value);
+    // Enhanced erosion with multiple samples
+    value = this.applyCurve(value);
 
     // Enhanced erosion with multiple samples
     if (this.config.erosionStrength > 0) {
       const samples = [
-        this.layeredNoise(x + 0.1, y + 0.1, z + 0.1),
-        this.layeredNoise(x - 0.1, y + 0.1, z - 0.1),
-        this.layeredNoise(x + 0.1, y - 0.1, z + 0.1),
+        this.applyCurve(this.layeredNoise(x + 0.1, y + 0.1, z + 0.1)),
+        this.applyCurve(this.layeredNoise(x - 0.1, y + 0.1, z - 0.1)),
+        this.applyCurve(this.layeredNoise(x + 0.1, y - 0.1, z + 0.1)),
       ];
 
       const erosionValue = samples.reduce((sum, v) => sum + v, 0) / samples.length;

@@ -17,20 +17,7 @@ export class LoadingScreen {
 
   constructor() {
     this.container = document.createElement("div");
-    this.container.style.position = "fixed";
-    this.container.style.top = "0";
-    this.container.style.left = "0";
-    this.container.style.width = "100%";
-    this.container.style.height = "100%";
-    this.container.style.backgroundColor = "rgba(0, 0, 0, 0.9)";
-    this.container.style.display = "flex";
-    this.container.style.flexDirection = "column";
-    this.container.style.justifyContent = "center";
-    this.container.style.alignItems = "center";
-    this.container.style.zIndex = "1000";
-    this.container.style.fontFamily = "Arial, sans-serif";
-    this.container.style.transition = "opacity 0.5s ease-in-out";
-    this.container.style.opacity = "0";
+    this.container.className = "loader";
 
     // Title
     const title = document.createElement("h1");

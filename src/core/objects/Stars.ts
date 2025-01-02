@@ -37,7 +37,7 @@ export class Stars {
 
     // Create material with emissive properties
     this.material = new THREE.PointsMaterial({
-      size: 3, // Increased base size from 1 to 2
+      size: 8, // Increased base size from 1 to 2
       transparent: false,
       vertexColors: true,
       blending: THREE.NormalBlending,

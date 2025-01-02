@@ -12,9 +12,10 @@ canvas {
   display: block;
 }
 #holder {
-  position: fixed;
   top: 10px;
   left: 10px;
+  position: absolute;
+  z-index: 999;
 }
 
 #instructions {
@@ -33,7 +34,24 @@ canvas {
   margin: 5px 0;
 }
 
-#debugText {
+.loader {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.9);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  z-index: 500;
+  font-family: Arial, sans-serif;
+  transition: opacity 0.5s ease-in-out;
+  opacity: 0;
+}
+
+#debug-text {
   padding: 15px;
   color: white;
   background-color: rgba(0, 0, 0, 0.7);

@@ -13,10 +13,10 @@ class DebugManager {
 
   private constructor() {
     // Create container element if it doesn't exist
-    this.containerElement = document.getElementById("debugText");
+    this.containerElement = document.getElementById("debug-text");
     if (!this.containerElement) {
       this.containerElement = document.createElement("div");
-      this.containerElement.id = "debugText";
+      this.containerElement.id = "debug-text";
       document.body.appendChild(this.containerElement);
     }
   }

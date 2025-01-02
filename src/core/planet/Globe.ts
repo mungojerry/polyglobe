@@ -26,7 +26,7 @@ export class Globe {
 
   public runInfection: boolean = false;
   public onTerrainDeformed: ((position: THREE.Vector3, radius: number) => void) | null = null;
-  private readonly chunks: GlobeChunk[][] = [];
+  private chunks: GlobeChunk[][] = [];
 
   private readonly frustum = new THREE.Frustum();
   private readonly cameraViewProjectionMatrix = new THREE.Matrix4();
@@ -53,7 +53,7 @@ export class Globe {
     window.addEventListener("click", (e) => {
       if (this.terrainClickAllowed) this.handleClickTerrain(e);
     });
-    this.waterLevel = globeConfig.radius * 1.066;
+    this.waterLevel = globeConfig.radius * 1.05;
 
     this.buildWater();
 
@@ -211,6 +211,8 @@ export class Globe {
 
   /** Chunks */
   public async buildChunks(onProgress: ProgressCallback) {
+    this.chunks.flat().forEach((chunk) => chunk.dispose());
+    this.chunks = [];
     const chunkGenerator = new ChunkGenerator();
     const newChunks = await chunkGenerator.generateChunks(this.landGeometry, this.landMaterial, this.object, globeConfig.chunkSize, onProgress);
 

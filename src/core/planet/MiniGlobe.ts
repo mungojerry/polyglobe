@@ -32,6 +32,30 @@ export class MiniGlobe {
     this.setupUI();
   }
 
+  dispose() {
+    // Remove and dispose of all markers
+    this.objectMarkers.forEach((marker) => {
+      this.scene.remove(marker.mesh);
+      marker.mesh.geometry.dispose();
+      (marker.mesh.material as THREE.Material).dispose();
+    });
+    this.objectMarkers = [];
+
+    // Remove and dispose of the globe
+    this.scene.remove(this.globe);
+    this.globe.geometry.dispose();
+    (this.globe.material as THREE.Material).dispose();
+
+    // Remove UI elements
+    const miniGlobe = document.getElementById("mini-globe");
+    const miniGlobeShadow = document.getElementById("mini-globe-shadow");
+    miniGlobe?.remove();
+    miniGlobeShadow?.remove();
+
+    // Dispose of renderer
+    if (this.renderer) this.renderer.dispose();
+  }
+
   private createGlobe(bufferGeometry: THREE.BufferGeometry): THREE.Mesh {
     const landGeometry = bufferGeometry.clone();
     const material = new THREE.MeshPhongMaterial({
