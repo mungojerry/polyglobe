@@ -9,7 +9,6 @@ export type NoiseConfig = {
   plateauStrength: number;
   frequency: number;
   amplitude: number;
-  detailScale: number; // Not currently used
   warpStrength: number;
   erosionStrength: number;
 };
@@ -21,18 +20,20 @@ export const DEFAULT_CONFIG = {
   plateauStrength: 0.25, // Reduced to avoid artificial-looking flattening
   frequency: 1.5, // Increased for less rounded hills
   amplitude: 1.0, // Base amplitude for consistent range
-  detailScale: 0.7, // Increased detail influence
   warpStrength: 0.11, // Reduced to minimize spikiness
   erosionStrength: 0.4, // Balanced erosion effect
 };
+
+// TODO problems with the cache, produces spikes
+const MAX_CACHE_SIZE = 1024;
+const CACHE_PRECISION = 10000;
+const USE_CACHE = false;
 
 export class Noise implements BaseNoise {
   private static baseNoiseGenerator = new SimplexNoise(pseudoRandom);
   private static warpNoiseGenerator = new SimplexNoise(pseudoRandom);
 
   private cache: Map<number, number>;
-  private readonly MAX_CACHE_SIZE = 1024;
-  private readonly CACHE_PRECISION = 100;
 
   // Warp parameters now exposed as constants, but can be adjusted
   private readonly WARP_FREQUENCY = 0.08; // Reduced for less aggressive warping
@@ -53,18 +54,21 @@ export class Noise implements BaseNoise {
    * Creates a hashed integer coordinate.
    */
   private static hashCoordinate(x: number, y: number, z: number): number {
-    return ((x * 73856093) ^ (y * 19349663) ^ (z * 83492791)) >>> 0;
+    const ix = Math.floor(x * CACHE_PRECISION);
+    const iy = Math.floor(y * CACHE_PRECISION);
+    const iz = Math.floor(z * CACHE_PRECISION);
+    return ((ix * 73856093) ^ (iy * 19349663) ^ (iz * 83492791)) >>> 0;
   }
 
   /**
    * Keeps cache from growing unbounded.
    */
   private cleanCache(): void {
-    if (this.cache.size > this.MAX_CACHE_SIZE) {
+    if (this.cache.size > MAX_CACHE_SIZE) {
       const entries = Array.from(this.cache.entries());
       // Sort by value for potential LRU or usage-based culling
       entries.sort((a, b) => b[1] - a[1]);
-      this.cache = new Map(entries.slice(0, this.MAX_CACHE_SIZE / 2));
+      this.cache = new Map(entries.slice(0, MAX_CACHE_SIZE / 2));
     }
   }
 
@@ -72,7 +76,7 @@ export class Noise implements BaseNoise {
    * Returns cached noise if available.
    */
   private getCachedNoise(x: number, y: number, z: number): number | undefined {
-    const key = Noise.hashCoordinate(Math.round(x * this.CACHE_PRECISION), Math.round(y * this.CACHE_PRECISION), Math.round(z * this.CACHE_PRECISION));
+    const key = Noise.hashCoordinate(Math.round(x * CACHE_PRECISION), Math.round(y * CACHE_PRECISION), Math.round(z * CACHE_PRECISION));
     return this.cache.get(key);
   }
 
@@ -80,7 +84,7 @@ export class Noise implements BaseNoise {
    * Stores noise value in cache.
    */
   private setCachedNoise(x: number, y: number, z: number, value: number): void {
-    const key = Noise.hashCoordinate(Math.round(x * this.CACHE_PRECISION), Math.round(y * this.CACHE_PRECISION), Math.round(z * this.CACHE_PRECISION));
+    const key = Noise.hashCoordinate(Math.round(x * CACHE_PRECISION), Math.round(y * CACHE_PRECISION), Math.round(z * CACHE_PRECISION));
     this.cache.set(key, value);
     this.cleanCache();
   }
@@ -192,9 +196,11 @@ export class Noise implements BaseNoise {
    * Computes final noise value at (x, y, z).
    */
   public getValue(x: number, y: number, z: number): number {
-    const cached = this.getCachedNoise(x, y, z);
-    if (cached !== undefined) {
-      return cached;
+    if (USE_CACHE) {
+      const cached = this.getCachedNoise(x, y, z);
+      if (cached !== undefined) {
+        return cached;
+      }
     }
 
     let value = this.layeredNoise(x, y, z);
@@ -213,8 +219,7 @@ export class Noise implements BaseNoise {
 
     // Keep value in -1 to 1 range for terrainHelper
     value = this.clamp(value, -1, 1);
-
-    this.setCachedNoise(x, y, z, value);
+    if (USE_CACHE) this.setCachedNoise(x, y, z, value);
     return value;
   }
 }
