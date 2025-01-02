@@ -15,13 +15,13 @@ export type NoiseConfig = {
 };
 
 export const DEFAULT_CONFIG: Readonly<NoiseConfig> = {
-  octaves: 5,
-  persistence: 0.55,
+  octaves: 7,
+  persistence: 0.7,
   lacunarity: 2.0,
   plateauStrength: 0.25,
   frequency: 1.5,
   amplitude: 1.0,
-  warpStrength: 1.7,
+  warpStrength: 2,
   erosionStrength: 0.84,
 };
 
@@ -83,8 +83,9 @@ export class Noise implements BaseNoise {
   private readonly octaveOffsets: readonly THREE.Vector3[];
   private readonly config: Readonly<NoiseConfig>;
   private readonly useCache: boolean;
+  private readonly erosionOffsets = new Float32Array([1, 1, 1, -1, 1, -1, 1, -1, 1]);
 
-  constructor(config: Partial<NoiseConfig> = {}, useCache = false) {
+  constructor(config: Partial<NoiseConfig> = {}, useCache = true) {
     this.config = Object.freeze({ ...DEFAULT_CONFIG, ...config });
     this.cache = new LRUCache(Noise.CACHE_SIZE);
     this.useCache = useCache;
@@ -169,23 +170,23 @@ export class Noise implements BaseNoise {
 
     if (this.config.erosionStrength > 0) {
       const d = Noise.EROSION_SAMPLE_DISTANCE;
-      const samples = [this.layeredNoise(x + d, y + d, z + d), this.layeredNoise(x - d, y + d, z - d), this.layeredNoise(x + d, y - d, z + d)];
+      let erosionSum = 0;
 
-      const erosionValue = samples.reduce((sum, v) => sum + v) / samples.length;
-      value = value * (1 - this.config.erosionStrength) + erosionValue * this.config.erosionStrength;
+      // Unrolled erosion sampling loop using pre-computed offsets
+      for (let i = 0; i < 3; i++) {
+        const idx = i * 3;
+        erosionSum += this.layeredNoise(x + this.erosionOffsets[idx] * d, y + this.erosionOffsets[idx + 1] * d, z + this.erosionOffsets[idx + 2] * d);
+      }
+
+      // Inline erosion blend calculation
+      const erosionValue = erosionSum * 0.333333; // 1/3 pre-computed
+      const blend = this.config.erosionStrength;
+      value = value * (1 - blend) + erosionValue * blend;
     }
 
     value = this.clamp(value);
     if (this.useCache) this.cache.set(Noise.hashCoordinate(x, y, z), value);
     return value;
-  }
-
-  public batchProcess(coordinates: ReadonlyArray<[number, number, number]>): Float32Array {
-    const results = new Float32Array(coordinates.length);
-    coordinates.forEach((coord, i) => {
-      results[i] = this.getValue(...coord);
-    });
-    return results;
   }
 
   public getConfig(): Readonly<NoiseConfig> {
