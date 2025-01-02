@@ -42,24 +42,24 @@ canvas {
   margin: 5px 0;
 }
 
-#controlPanel {
+#control-panel {
   padding: 15px;
   color: white;
   background-color: rgba(0, 0, 0, 0.7);
   border-radius: 5px;
   font-family: Arial, sans-serif;
-  margin: 5px 0;
   width: 450px;
+  overflow: hidden;
 }
 
-#controlPanel label {
+#control-panel label {
   padding-right: 6px;
   pointer-events: none;
   user-select: none;
 }
 
 .control-wrapper {
-  margin-top: 10px;
+  margin-bottom: 10px;
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -69,6 +69,10 @@ canvas {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+.dropdown-select {
+  padding: 5px;
+  border-radius: 6px;
 }
 
 .slider-container {
@@ -96,24 +100,26 @@ canvas {
 .button-container {
   padding: 6px;
   border: 1;
-  border-radius: 8px;
+  border-color: transparent;
+  border-radius: 6px;
 }
 
 .accordion-wrapper {
   display: flex;
   flex-direction: column;
   width: 100%;
-  margin-right: 5px;
+  margin-right: 10px;
 }
 .accordion-header {
   cursor: pointer;
   padding: 5px;
+  padding-left: 10px;
   background: #333333;
   display: flex;
   justify-content: space-between;
   align-items: center;
   width: 100%;
-
+  border-radius: 6px;
   user-select: none;
 }
 .accordion-content {

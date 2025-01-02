@@ -85,18 +85,33 @@ class ControlManager {
 
   private constructor() {
     // Create container element if it doesn't exist
-    this.containerElement = document.getElementById("controlPanel");
+    this.containerElement = document.getElementById("control-panel");
     if (!this.containerElement) {
       this.containerElement = document.createElement("div");
-      this.containerElement.id = "controlPanel";
+      this.containerElement.id = "control-panel";
       document.body.appendChild(this.containerElement);
     }
   }
+
+  public hidden: boolean = false;
 
   public static getInstance(): ControlManager {
     if (!ControlManager.instance) {
       ControlManager.instance = new ControlManager();
     }
+
+    ControlManager.instance.addButton("hideshow", ">", () => {
+      if (ControlManager.instance.containerElement) {
+        ControlManager.instance.hidden = !ControlManager.instance.hidden;
+        if (ControlManager.instance.hidden) {
+          ControlManager.instance.containerElement.style.width = "450px";
+          ControlManager.instance.containerElement.style.height = "auto";
+        } else {
+          ControlManager.instance.containerElement.style.width = "30px";
+          ControlManager.instance.containerElement.style.height = "30px";
+        }
+      }
+    });
     return ControlManager.instance;
   }
 
@@ -232,6 +247,7 @@ class ControlManager {
     container.className = "control-container";
 
     const select = document.createElement("select");
+    select.className = "dropdown-select";
 
     element.options.forEach((option) => {
       const optElement = document.createElement("option");
