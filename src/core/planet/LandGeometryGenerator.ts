@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { BufferGeometry } from "three";
 import { debugManager } from "../managers/debugManager";
 import { getTerrainColor } from "../utils/biomes";
-import { ProgressCallback } from "../utils/utils";
+import { ProgressCallback, yieldToMainThread } from "../utils/utils";
 import { BaseNoise } from "./noise/BaseNoise";
 import { terrainHelper } from "./terrainHelper";
 export class LandGeometryGenerator {
@@ -85,6 +85,6 @@ export class LandGeometryGenerator {
     debugManager.set("landProgress", `Land: ${progress.toFixed(1)}%)`);
 
     /// this does await the timeout!!!
-    await setTimeout(() => {}, 0);
+    await yieldToMainThread();
   }
 }

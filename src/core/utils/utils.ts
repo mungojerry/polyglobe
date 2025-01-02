@@ -30,3 +30,7 @@ export type ProgressCallback = (progress: number) => void;
 export function getModelKey(filename: string, fileIndex: number): string {
   return `${filename}_${fileIndex}`;
 }
+
+export async function yieldToMainThread(time: number = 0) {
+  await new Promise((resolve) => setTimeout(resolve, time));
+}
