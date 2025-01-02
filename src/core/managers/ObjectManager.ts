@@ -105,6 +105,7 @@ export class ObjectManager {
     const matrices: Map<string, THREE.Matrix4[]> = new Map();
     const batchSize = 100;
     let processedGroups = 0;
+    const totalGroups = modelGroups.length;
 
     for (const group of modelGroups) {
       console.log("attempting placement: " + group.type);
@@ -117,10 +118,14 @@ export class ObjectManager {
         spatialGrid: this.spatialGrid,
         onProgress,
       });
-
       processedGroups++;
+      const progress = 30 + (processedGroups / totalGroups) * 60;
+      console.log(progress);
+      if (onProgress) onProgress(progress);
     }
-
+    if (onProgress) {
+      onProgress(95);
+    }
     // Apply matrices
     matrices.forEach((matrixArray, modelKey) => {
       const instancedMesh = this.instancedMeshes.get(modelKey)!;
