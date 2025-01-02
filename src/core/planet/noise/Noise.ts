@@ -1,4 +1,3 @@
-import * as THREE from "three";
 import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise.js";
 import { pseudoRandom } from "../../utils/PseudoRandom";
 import { BaseNoise } from "./BaseNoise";
@@ -130,14 +129,7 @@ export class Noise implements BaseNoise {
     if (this.config.warpStrength > 0) {
       [x, y, z] = this.applyWarp(x, y, z);
     }
-    const octaveOffsets: THREE.Vector3[] = [];
-    for (let i = 0; i < this.config.octaves; i++) {
-      octaveOffsets[i] = new THREE.Vector3(
-        pseudoRandom.randomInRange(-10000, 10000),
-        pseudoRandom.randomInRange(-10000, 10000),
-        pseudoRandom.randomInRange(-10000, 10000)
-      );
-    }
+
     for (let i = 0; i < this.config.octaves; i++) {
       const n = Noise.baseNoiseGenerator.noise3d(x * frequency, y * frequency, z * frequency);
 
