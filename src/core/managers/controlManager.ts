@@ -103,7 +103,7 @@ class ControlManager {
     ControlManager.instance.addButton("hideshow", ">", () => {
       if (ControlManager.instance.containerElement) {
         ControlManager.instance.hidden = !ControlManager.instance.hidden;
-        if (ControlManager.instance.hidden) {
+        if (!ControlManager.instance.hidden) {
           ControlManager.instance.containerElement.style.width = "450px";
           ControlManager.instance.containerElement.style.height = "auto";
         } else {

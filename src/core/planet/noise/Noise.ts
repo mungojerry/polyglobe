@@ -21,7 +21,7 @@ export const DEFAULT_CONFIG = {
   frequency: 1.5, // Increased for less rounded hills
   amplitude: 1.0, // Base amplitude for consistent range
   warpStrength: 0.11, // Reduced to minimize spikiness
-  erosionStrength: 0.4, // Balanced erosion effect
+  erosionStrength: 0.84, // Balanced erosion effect
 };
 
 // TODO problems with the cache, produces spikes
