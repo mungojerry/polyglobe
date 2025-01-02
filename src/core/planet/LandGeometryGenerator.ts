@@ -27,7 +27,7 @@ export class LandGeometryGenerator {
     terrainHelper.setDefaults(noise, geometry);
 
     // Process vertices in chunks to report progress
-    const CHUNK_SIZE = 1000;
+    const CHUNK_SIZE = 2000;
     const totalVertices = vertexCount;
 
     for (let i = 0; i < vertexCount; i += CHUNK_SIZE) {
@@ -82,7 +82,7 @@ export class LandGeometryGenerator {
       onProgress(progress);
     }
 
-    debugManager.set("landProgress", `Land: ${progress.toFixed(1)}%)`);
+    debugManager.set("landProgress", `Land: ${progress.toFixed(1)}%`);
 
     /// this does await the timeout!!!
     await yieldToMainThread();
