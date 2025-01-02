@@ -9,7 +9,8 @@ import { ChunkGenerator } from "./ChunkGenerator";
 import { GlobeChunk } from "./GlobeChunk";
 import { Infection } from "./Infection";
 import { LandGeometryGenerator } from "./LandGeometryGenerator";
-import { VoronoiNoise } from "./noise/VoroniNoise";
+import { BaseNoise } from "./noise/BaseNoise";
+import { Noise } from "./noise/Noise";
 import { TerrainDeformer } from "./TerrainDeformer";
 const globeConfig = {
   showWall: false,
@@ -40,7 +41,7 @@ export class Globe {
 
   public waterLevel: number = 0;
   public terrainClickAllowed: boolean = false;
-  public noise: VoronoiNoise = new VoronoiNoise();
+  public noise: BaseNoise = new Noise();
 
   private landGeometry!: THREE.BufferGeometry;
   private rigidBody!: RAPIER.RigidBody;

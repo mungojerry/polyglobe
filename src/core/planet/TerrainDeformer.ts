@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { getTerrainColor } from "../utils/biomes";
-import { VoronoiNoise } from "./noise/VoroniNoise";
+import { BaseNoise } from "./noise/BaseNoise";
 
 interface VertexData {
   vertex: THREE.Vector3;
@@ -13,7 +13,7 @@ export class TerrainDeformer {
   private bounds: THREE.Box3;
   private readonly cellSize: number = 25; // Size based on typical deformation radius
 
-  constructor(private land: THREE.Mesh, private noise: VoronoiNoise) {
+  constructor(private land: THREE.Mesh, private noise: BaseNoise) {
     this.spatialMap = new Map();
     this.bounds = new THREE.Box3();
   }

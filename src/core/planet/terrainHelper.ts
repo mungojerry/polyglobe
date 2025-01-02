@@ -1,13 +1,13 @@
 import * as THREE from "three";
 import { getTerrainColor, isLand, landBoundary } from "../utils/biomes";
 import { vectorPool } from "../utils/vectorPool";
-import { VoronoiNoise } from "./noise/VoroniNoise";
+import { BaseNoise } from "./noise/BaseNoise";
 export class TerrainHelper {
   private static instance: TerrainHelper;
-  private noise!: VoronoiNoise;
+  private noise!: BaseNoise;
   private landGeometry!: THREE.BufferGeometry;
   constructor() {}
-  public setDefaults(noise: VoronoiNoise, landGeometry: THREE.BufferGeometry) {
+  public setDefaults(noise: BaseNoise, landGeometry: THREE.BufferGeometry) {
     this.noise = noise;
     this.landGeometry = landGeometry;
   }

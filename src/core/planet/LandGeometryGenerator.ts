@@ -3,12 +3,12 @@ import { BufferGeometry } from "three";
 import { debugManager } from "../managers/debugManager";
 import { getTerrainColor } from "../utils/biomes";
 import { ProgressCallback } from "../utils/utils";
-import { VoronoiNoise } from "./noise/VoroniNoise";
+import { BaseNoise } from "./noise/BaseNoise";
 import { terrainHelper } from "./terrainHelper";
 export class LandGeometryGenerator {
   constructor() {}
 
-  public async generateLand(radius: number, detail: number, seed: number, noise: VoronoiNoise, onProgress?: ProgressCallback): Promise<BufferGeometry> {
+  public async generateLand(radius: number, detail: number, seed: number, noise: BaseNoise, onProgress?: ProgressCallback): Promise<BufferGeometry> {
     const start = performance.now();
 
     // Create geometry

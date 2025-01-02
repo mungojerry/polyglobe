@@ -1,135 +1,178 @@
 import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise.js";
 import { pseudoRandom } from "../../utils/PseudoRandom";
+import { BaseNoise } from "./BaseNoise";
 
 export type NoiseConfig = {
   octaves: number;
   persistence: number;
   lacunarity: number;
-  baseRoughness: number;
-  ridgedOffset: number;
   plateauStrength: number;
-  valleyDepth: number;
   frequency: number;
   amplitude: number;
-  detailScale: number;
+  detailScale: number; // Not currently used
   warpStrength: number;
   erosionStrength: number;
 };
 
 export const DEFAULT_CONFIG = {
-  octaves: 6,
-  persistence: 0.6,
-  lacunarity: 1.8,
-  baseRoughness: 0.8,
-  ridgedOffset: 0.9,
-  plateauStrength: 0.3,
-  valleyDepth: 0.4,
-  frequency: 1.3,
-  amplitude: 1.3,
-  detailScale: 0.6,
-  warpStrength: 0.3,
-  erosionStrength: 0.2,
+  octaves: 5, // Reduced for better performance while maintaining detail
+  persistence: 0.55, // Balanced for natural height progression
+  lacunarity: 2.0, // Increased for better detail variation
+  plateauStrength: 0.25, // Reduced to avoid artificial-looking flattening
+  frequency: 1.5, // Increased for less rounded hills
+  amplitude: 1.0, // Base amplitude for consistent range
+  detailScale: 0.7, // Increased detail influence
+  warpStrength: 0.11, // Reduced to minimize spikiness
+  erosionStrength: 0.4, // Balanced erosion effect
 };
 
-export class Noise {
+export class Noise implements BaseNoise {
   private static baseNoiseGenerator = new SimplexNoise(pseudoRandom);
   private static warpNoiseGenerator = new SimplexNoise(pseudoRandom);
 
   private cache: Map<number, number>;
   private readonly MAX_CACHE_SIZE = 1024;
   private readonly CACHE_PRECISION = 100;
-  private readonly WARP_FREQUENCY = 0.4;
-  private readonly SECONDARY_WARP = 0.2;
 
-  public config: NoiseConfig;
+  // Warp parameters now exposed as constants, but can be adjusted
+  private readonly WARP_FREQUENCY = 0.08; // Reduced for less aggressive warping
+  private readonly SECONDARY_WARP = 0.15; // Reduced secondary influence
+
+  private config: NoiseConfig;
 
   constructor(config: Partial<NoiseConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.cache = new Map();
   }
+
+  public getConfig(): NoiseConfig {
+    return this.config;
+  }
+
+  /**
+   * Creates a hashed integer coordinate.
+   */
   private static hashCoordinate(x: number, y: number, z: number): number {
     return ((x * 73856093) ^ (y * 19349663) ^ (z * 83492791)) >>> 0;
   }
-  private cleanCache() {
+
+  /**
+   * Keeps cache from growing unbounded.
+   */
+  private cleanCache(): void {
     if (this.cache.size > this.MAX_CACHE_SIZE) {
       const entries = Array.from(this.cache.entries());
-      entries.sort((a, b) => b[1] - a[1]); // Sort by value
+      // Sort by value for potential LRU or usage-based culling
+      entries.sort((a, b) => b[1] - a[1]);
       this.cache = new Map(entries.slice(0, this.MAX_CACHE_SIZE / 2));
     }
   }
+
+  /**
+   * Returns cached noise if available.
+   */
   private getCachedNoise(x: number, y: number, z: number): number | undefined {
     const key = Noise.hashCoordinate(Math.round(x * this.CACHE_PRECISION), Math.round(y * this.CACHE_PRECISION), Math.round(z * this.CACHE_PRECISION));
     return this.cache.get(key);
   }
 
+  /**
+   * Stores noise value in cache.
+   */
   private setCachedNoise(x: number, y: number, z: number, value: number): void {
     const key = Noise.hashCoordinate(Math.round(x * this.CACHE_PRECISION), Math.round(y * this.CACHE_PRECISION), Math.round(z * this.CACHE_PRECISION));
     this.cache.set(key, value);
-    this.cleanCache(); // Call cleanup after setting new value
+    this.cleanCache();
   }
 
-  private fastDomainWarp(x: number, y: number, z: number): [number, number, number] {
-    const strength = Math.min(1, this.config.warpStrength);
+  /**
+   * Simple clamp utility.
+   */
+  private clamp(value: number, min: number, max: number): number {
+    return Math.max(min, Math.min(max, value));
+  }
+
+  /**
+   * Domain warp function with clamping to reduce large spikes.
+   */
+  private applyWarp(x: number, y: number, z: number): [number, number, number] {
+    const strength = this.clamp(this.config.warpStrength, 0, 1);
     const freq = this.WARP_FREQUENCY;
     const sec = this.SECONDARY_WARP;
 
-    // Smoother warping with frequency blending
+    // Sample warp noise
     const wx = Noise.warpNoiseGenerator.noise3d(x * freq + sec, y * freq, z * freq) * strength;
-
     const wy = Noise.warpNoiseGenerator.noise3d(y * freq + sec, z * freq, x * freq) * strength;
-
     const wz = Noise.warpNoiseGenerator.noise3d(z * freq + sec, x * freq, y * freq) * strength;
 
-    return [x + wx * (1 - Math.abs(x) * 0.2), y + wy * (1 - Math.abs(y) * 0.2), z + wz * (1 - Math.abs(z) * 0.2)];
+    // Clamping factors to reduce extreme displacements
+    const clampX = this.clamp(1 - Math.abs(x) * 0.2, 0, 1);
+    const clampY = this.clamp(1 - Math.abs(y) * 0.2, 0, 1);
+    const clampZ = this.clamp(1 - Math.abs(z) * 0.2, 0, 1);
+
+    return [x + wx * clampX, y + wy * clampY, z + wz * clampZ];
   }
 
+  /**
+   * Accumulates noise across O octaves, applying domain warping.
+   */
   private layeredNoise(x: number, y: number, z: number): number {
     let noiseValue = 0;
     let frequency = this.config.frequency;
     let amplitude = this.config.amplitude;
     let weightSum = 0;
 
-    // Apply smoother domain warping
+    // Domain warp if enabled
     if (this.config.warpStrength > 0) {
-      [x, y, z] = this.fastDomainWarp(x, y, z);
+      [x, y, z] = this.applyWarp(x, y, z);
     }
 
-    // Improved octave accumulation
     for (let i = 0; i < this.config.octaves; i++) {
-      const noise = Noise.baseNoiseGenerator.noise3d(x * frequency, y * frequency, z * frequency);
+      const n = Noise.baseNoiseGenerator.noise3d(x * frequency, y * frequency, z * frequency);
 
-      // Smooth noise blending
-      const weight = 1 / (1 + i);
-      noiseValue += noise * amplitude * weight;
+      // Progressive weight reduction for natural detail falloff
+      const weight = 1.0 / (1 + i * 0.7);
+
+      // Combine regular and ridged noise for varied terrain
+      const ridged = 1.0 - Math.abs(n);
+      const signal = i < 3 ? n : (n + ridged) * 0.5;
+
+      noiseValue += signal * amplitude * weight;
       weightSum += amplitude * weight;
 
       frequency *= this.config.lacunarity;
       amplitude *= this.config.persistence;
     }
 
-    // Proper normalization
-    noiseValue = noiseValue / weightSum;
+    // Normalize final value
+    noiseValue /= weightSum;
 
-    // Apply terrain features
+    // Apply enhanced plateau effect
     if (this.config.plateauStrength > 0) {
       noiseValue = this.applyPlateau(noiseValue);
     }
 
-    return Math.max(-1, Math.min(1, noiseValue));
+    return this.clamp(noiseValue, -1, 1);
   }
 
+  /**
+   * Flattens high values with a plateau effect.
+   */
   private applyPlateau(value: number): number {
     const strength = this.config.plateauStrength;
-    const threshold = 0.3;
+    const threshold = 0.35;
 
     if (value > threshold) {
       const t = (value - threshold) / (1 - threshold);
-      value = threshold + (1 - Math.pow(1 - t, 1 + strength)) * (1 - threshold);
+      const smooth = 1 - Math.pow(1 - t, 1 + strength);
+      return threshold + smooth * (1 - threshold);
     }
-
     return value;
   }
 
+  /**
+   * Optionally processes multiple coordinates at once.
+   */
   public batchProcess(coordinates: ReadonlyArray<[number, number, number]>): Float32Array {
     const results = new Float32Array(coordinates.length);
     for (let i = 0; i < coordinates.length; i++) {
@@ -138,21 +181,38 @@ export class Noise {
     return results;
   }
 
+  /**
+   * Clears the noise cache.
+   */
   public clearCache(): void {
     this.cache.clear();
   }
 
+  /**
+   * Computes final noise value at (x, y, z).
+   */
   public getValue(x: number, y: number, z: number): number {
     const cached = this.getCachedNoise(x, y, z);
-    if (cached !== undefined) return cached;
+    if (cached !== undefined) {
+      return cached;
+    }
 
     let value = this.layeredNoise(x, y, z);
 
-    // Apply erosion smoothing
+    // Enhanced erosion with multiple samples
     if (this.config.erosionStrength > 0) {
-      const eroded = this.layeredNoise(x + 0.1, y + 0.1, z + 0.1);
-      value = value * (1 - this.config.erosionStrength) + eroded * this.config.erosionStrength;
+      const samples = [
+        this.layeredNoise(x + 0.1, y + 0.1, z + 0.1),
+        this.layeredNoise(x - 0.1, y + 0.1, z - 0.1),
+        this.layeredNoise(x + 0.1, y - 0.1, z + 0.1),
+      ];
+
+      const erosionValue = samples.reduce((sum, v) => sum + v, 0) / samples.length;
+      value = value * (1 - this.config.erosionStrength) + erosionValue * this.config.erosionStrength;
     }
+
+    // Keep value in -1 to 1 range for terrainHelper
+    value = this.clamp(value, -1, 1);
 
     this.setCachedNoise(x, y, z, value);
     return value;
