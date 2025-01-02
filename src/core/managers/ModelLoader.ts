@@ -63,7 +63,7 @@ export class ModelLoader {
           if (object instanceof THREE.Group) {
             let geometry: THREE.BufferGeometry | undefined;
             let material: THREE.Material | undefined;
-
+            object.scale.set(0.4, 0.4, 0.4);
             object.traverse((child) => {
               if (child instanceof THREE.Mesh) {
                 child.castShadow = true;

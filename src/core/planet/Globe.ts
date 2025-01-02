@@ -15,7 +15,7 @@ const globeConfig = {
   showWall: false,
   showPoles: false,
   radius: 200,
-  detail: 100,
+  detail: 110,
   chunkSize: 20,
 };
 
