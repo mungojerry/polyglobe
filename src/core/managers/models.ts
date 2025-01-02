@@ -1,4 +1,4 @@
-import { BiomeName } from "../utils/biomes";
+import { Biome, BiomeName } from "../utils/biomes";
 import { ClusteredPlacement, PlacementStrategy, RandomPlacement, VillagePlacement } from "./PlacementStrategies";
 
 export const MAX_INSTANCES_PER_TYPE: number = 5000;
@@ -6,6 +6,7 @@ export interface CachedLandVertex {
   position: THREE.Vector3;
   normal: THREE.Vector3;
   cellKey: string;
+  biome: Biome | undefined;
 }
 
 export class SpatialHashGrid {

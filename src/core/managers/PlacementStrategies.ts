@@ -1,8 +1,7 @@
 import * as THREE from "three";
 import { Vector3 } from "three";
 import { TerrainDeformer } from "../planet/TerrainDeformer";
-import { terrainHelper } from "../planet/terrainHelper";
-import { BiomeName, getBiomeByElevation } from "../utils/biomes";
+import { BiomeName } from "../utils/biomes";
 import { ObjectPool } from "../utils/ObjectPool";
 import { getModelKey, ProgressCallback } from "../utils/utils";
 import { CachedLandVertex, MAX_INSTANCES_PER_TYPE, ModelGroup, ModelType, SpatialHashGrid } from "./models";
@@ -32,11 +31,9 @@ function selectModelTypesForBatch(modelTypes: ModelType[], batchCount: number): 
 }
 function filterVerticesByBiome(vertices: CachedLandVertex[], allowedBiomes?: BiomeName[]) {
   if (!allowedBiomes) return vertices;
-  return vertices.filter((vertex) => {
-    const biome = getBiomeByElevation(terrainHelper.computeSurfaceHeight(vertex.normal.x, vertex.normal.y, vertex.normal.z));
-    return biome?.name ? allowedBiomes.includes(biome.name) : false;
-  });
+  return vertices.filter((vertex) => vertex.biome && allowedBiomes.includes(vertex.biome.name));
 }
+
 function placeBatch(
   modelType: ModelType,
   vertices: CachedLandVertex[],

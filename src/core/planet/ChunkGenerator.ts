@@ -182,22 +182,10 @@ export class ChunkGenerator {
         const ix = i * 3;
         tempVec.set(posArray[ix], posArray[ix + 1], posArray[ix + 2]);
         spherical.setFromVector3(tempVec);
-        // // Calculate normalized position for elevation
-        // normalVec.copy(tempVec).normalize();
-        // const nx = normalVec.x;
-        // const ny = normalVec.y;
-        // const nz = normalVec.z;
-
-        // // Calculate elevation using terrainHelper
-        // const height = terrainHelper.computeSurfaceHeight(nx, ny, nz);
-        // const elevation = terrainHelper.computeElevationMultiplier(height);
 
         // Store elevation in vertex data
         const vertexLat = Math.PI / 2 - spherical.phi;
         const vertexLon = THREE.MathUtils.euclideanModulo(spherical.theta + Math.PI, Math.PI * 2) - Math.PI;
-
-        // Store elevation in the vertex data (we'll use it later when creating CachedLandVertex)
-        // (tempVec as any).elevation = height;
 
         return vertexLat >= LAT_MIN && vertexLat <= LAT_MAX && vertexLon >= LON_MIN && vertexLon <= LON_MAX;
       };

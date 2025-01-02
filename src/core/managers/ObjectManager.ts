@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { Globe } from "../planet/Globe";
 import { terrainHelper } from "../planet/terrainHelper";
+import { getBiomeByElevation } from "../utils/biomes";
 import { getModelKey, ProgressCallback } from "../utils/utils";
 import { ModelLoader } from "./ModelLoader";
 import { CachedLandVertex, MAX_INSTANCES_PER_TYPE, ModelGroup, ModelType, SpatialHashGrid } from "./models";
@@ -36,11 +37,13 @@ export class ObjectManager {
     for (let i = 0; i < positions.count; i++) {
       tempVector.fromBufferAttribute(positions, i);
       tempNormal.copy(tempVector).normalize();
+      const biome = getBiomeByElevation(terrainHelper.computeSurfaceHeight(tempNormal.x, tempNormal.y, tempNormal.z));
       if (terrainHelper.isLand(tempNormal)) {
-        const vertex = {
+        const vertex: CachedLandVertex = {
           position: tempVector.clone(),
           normal: tempNormal.clone(),
           cellKey: "",
+          biome,
         };
         this.landVertices.push(vertex);
         this.spatialGrid.add(vertex);
