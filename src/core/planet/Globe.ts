@@ -15,7 +15,7 @@ import { TerrainDeformer } from "./TerrainDeformer";
 const globeConfig = {
   showWall: false,
   showPoles: false,
-  radius: 200,
+  radius: 300,
   detail: 110,
   chunkSize: 20,
 };

@@ -97,7 +97,7 @@ export class MiniGlobe {
     this.mainCamera.getWorldPosition(mainCameraPos);
     const normalizedPos = mainCameraPos.clone().normalize();
 
-    const miniGlobeRadius = 500;
+    const miniGlobeRadius = 800;
     this.camera.position.copy(normalizedPos.multiplyScalar(miniGlobeRadius));
     this.camera.up.set(0, 1, 0);
     this.camera.lookAt(0, 0, 0);
