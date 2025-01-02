@@ -4,7 +4,7 @@ import { TerrainDeformer } from "../planet/TerrainDeformer";
 import { BiomeName } from "../utils/biomes";
 import { ObjectPool } from "../utils/ObjectPool";
 import { getModelKey, ProgressCallback } from "../utils/utils";
-import { CachedLandVertex, MAX_INSTANCES_PER_TYPE, ModelGroup, ModelType, SpatialHashGrid } from "./models";
+import { CachedLandVertex, ModelGroup, ModelType, SpatialHashGrid } from "./models";
 
 const vectorPool = new ObjectPool(() => new THREE.Vector3(), 10);
 const matrixPool = new ObjectPool(() => new THREE.Matrix4(), 10);
@@ -39,33 +39,24 @@ function placeBatch(
   vertices: CachedLandVertex[],
   count: number,
   matrices: Map<string, THREE.Matrix4[]>,
-  allowedBiomes?: BiomeName[]
+  allowedBiomes?: BiomeName[],
+  getRandomVariant?: (modelType: ModelType) => string
 ): Promise<void> {
-  // Filter vertices by biome
   const validVertices = filterVerticesByBiome(vertices, allowedBiomes);
 
   if (validVertices.length === 0) {
     console.warn(`No valid vertices found for biome(s): ${allowedBiomes?.join(", ")}`);
     return Promise.resolve();
   }
-  const randomFileIndex = modelType.files[Math.floor(Math.random() * modelType.files.length)];
-  const modelKey = getModelKey("assets/models/fbx/" + modelType.filename, randomFileIndex);
-
-  if (!matrices.has(modelKey)) {
-    matrices.set(modelKey, []);
-  }
-
-  const currentMatrices = matrices.get(modelKey)!;
-  const startIndex = currentMatrices.length;
-
-  if (startIndex + count > MAX_INSTANCES_PER_TYPE) {
-    console.warn(`Maximum instances reached for model ${modelKey}`);
-    return Promise.resolve();
-  }
 
   for (let i = 0; i < count; i++) {
     const vertex = validVertices[Math.floor(Math.random() * validVertices.length)];
     const matrix = matrixPool.acquire();
+    const modelKey = getRandomVariant ? getRandomVariant(modelType) : getModelKey("assets/models/fbx/" + modelType.filename, modelType.files[0]);
+
+    if (!matrices.has(modelKey)) {
+      matrices.set(modelKey, []);
+    }
 
     matrix.setPosition(vertex.position);
 
@@ -77,7 +68,7 @@ function placeBatch(
     const rotationMatrix = matrixPool.acquire().makeRotationFromQuaternion(quaternion);
     matrix.multiply(rotationMatrix);
 
-    currentMatrices.push(matrix.clone());
+    matrices.get(modelKey)!.push(matrix.clone());
   }
 
   return Promise.resolve();
@@ -95,6 +86,7 @@ export interface PlacementStrategyParams {
   terrainDeformer: TerrainDeformer;
   landVertices: CachedLandVertex[];
   onProgress?: ProgressCallback;
+  getRandomVariant: (modelType: ModelType) => string;
 }
 
 export class RandomPlacement implements PlacementStrategy {
@@ -113,7 +105,7 @@ export class RandomPlacement implements PlacementStrategy {
       for (let i = 0; i < modelType.numInstances; i += batchSize) {
         const batchCount = Math.min(batchSize, modelType.numInstances - i);
         promises.push(
-          placeBatch(modelType, landVertices, batchCount, matrices, group.biomes).then(() => {
+          placeBatch(modelType, landVertices, batchCount, matrices, group.biomes, params.getRandomVariant).then(() => {
             placedInstances += batchCount;
             if (onProgress) {
               onProgress((placedInstances / totalInstances) * 100);
@@ -203,7 +195,7 @@ export class VillagePlacement implements PlacementStrategy {
         const fireRotation = matrixPool.acquire().makeRotationFromQuaternion(fireQuaternion);
         fireMatrix.multiply(fireRotation);
 
-        const fireKey = getModelKey("assets/models/fbx/" + fireModel.filename, fireModel.files[0]);
+        const fireKey = params.getRandomVariant(fireModel);
         if (!matrices.has(fireKey)) matrices.set(fireKey, []);
         matrices.get(fireKey)!.push(fireMatrix.clone());
 
@@ -230,7 +222,7 @@ export class VillagePlacement implements PlacementStrategy {
           const rotationMatrix = matrixPool.acquire().makeRotationFromQuaternion(quaternion);
           matrix.multiply(rotationMatrix);
 
-          const houseKey = getModelKey("assets/models/fbx/" + houseModel.filename, houseModel.files[0]);
+          const houseKey = params.getRandomVariant(houseModel);
           if (!matrices.has(houseKey)) matrices.set(houseKey, []);
           matrices.get(houseKey)!.push(matrix.clone());
         }
@@ -268,7 +260,7 @@ export class ClusteredPlacement implements PlacementStrategy {
 
         for (const [modelType, count] of selectedTypes) {
           promises.push(
-            placeBatch(modelType, nearbyVertices, count, matrices, group.biomes).then(() => {
+            placeBatch(modelType, nearbyVertices, count, matrices, group.biomes, params.getRandomVariant).then(() => {
               placedInstances += count;
               if (onProgress) {
                 onProgress((placedInstances / totalInstances) * 100);

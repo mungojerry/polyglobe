@@ -80,6 +80,12 @@ export class ObjectManager {
     await Promise.all(promises);
   }
 
+  private getRandomModelVariant(modelType: ModelType): string {
+    const basePath = "assets/models/fbx/" + modelType.filename;
+    const randomIndex = Math.floor(Math.random() * modelType.files.length);
+    return getModelKey(basePath, modelType.files[randomIndex]);
+  }
+
   public async placeObjects(modelGroups: ModelGroup[], onProgress?: ProgressCallback): Promise<void> {
     let totalProgress = 0;
 
@@ -103,24 +109,36 @@ export class ObjectManager {
 
     // Phase 2: Place objects (70% of total progress)
     const matrices: Map<string, THREE.Matrix4[]> = new Map();
+    const modelVariants: Map<string, ModelType> = new Map();
     const batchSize = 100;
     let processedGroups = 0;
     const totalGroups = modelGroups.length;
 
     for (const group of modelGroups) {
       console.log("attempting placement: " + group.type);
+
+      // Initialize empty matrix arrays for all variants of each model
+      group.models.forEach((model) => {
+        model.files.forEach((fileIndex) => {
+          const key = getModelKey("assets/models/fbx/" + model.filename, fileIndex);
+          matrices.set(key, []);
+          modelVariants.set(key, model);
+        });
+      });
+
       group.placement.place({
         batchSize,
         group,
         landVertices: this.landVertices,
-        matrices: matrices,
+        matrices,
         terrainDeformer: this.globe.terrainDeformer,
         spatialGrid: this.spatialGrid,
         onProgress,
+        getRandomVariant: (modelType: ModelType) => this.getRandomModelVariant(modelType),
       });
+
       processedGroups++;
       const progress = 30 + (processedGroups / totalGroups) * 60;
-      console.log(progress);
       if (onProgress) onProgress(progress);
     }
     if (onProgress) {
