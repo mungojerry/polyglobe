@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader";
+import * as BufferGeometryUtils from "three/examples/jsm/utils/BufferGeometryUtils.js";
 
 interface ModelData {
   geometry: THREE.BufferGeometry;
@@ -49,56 +50,62 @@ export class ModelLoader {
       loader.load(
         filename,
         (object) => {
-          // if (object instanceof THREE.Group) {
-          let geometry: THREE.BufferGeometry | undefined;
-          let material: THREE.Material | undefined;
-
-          // First apply scale to the entire object
-          object.scale.set(scale, scale, scale);
+          // Collect all geometries and materials
+          const geometries: THREE.BufferGeometry[] = [];
+          const materials: THREE.Material[] = [];
 
           object.traverse((child) => {
             if (child instanceof THREE.Mesh) {
-              child.castShadow = true;
-              child.receiveShadow = true;
+              // Clone geometry to avoid sharing
+              const geom = child.geometry.clone();
 
-              // Apply material properties that work in FBXViewerScene
-              if (child.material) {
-                child.material.transparent = false;
-                child.material.opacity = 1;
-                child.material.shininess = 0;
-                child.material.vertexColors = false;
-                child.material.flatShading = true;
-                child.material.reflectivity = 0;
-                child.material.needsUpdate = true;
-              }
+              // Apply mesh's transform to geometry
+              geom.applyMatrix4(child.matrixWorld);
+              geometries.push(geom);
 
-              // Store the first mesh's geometry and material
-              if (!geometry && !material) {
-                geometry = child.geometry;
-                material = child.material;
+              // Store material
+              if (Array.isArray(child.material)) {
+                materials.push(...child.material);
+              } else {
+                materials.push(child.material);
               }
             }
           });
 
-          if (!geometry || !material) {
-            console.warn("No valid geometry/material found in model");
+          if (geometries.length === 0) {
+            reject(new Error("No meshes found in FBX"));
+            return;
           }
 
-          if (geometry && material) {
-            resolve({
-              geometry,
-              material,
-              object,
-              scale,
-            });
-          } else {
-            reject(new Error("No valid mesh found in FBX model"));
-          }
+          // Merge all geometries
+          const mergedGeometry = BufferGeometryUtils.mergeGeometries(geometries);
+
+          // Create material
+          const material = materials[0].clone() as THREE.MeshPhongMaterial;
+          // material.transparent = false;
+          material.opacity = 1;
+          material.shininess = 0;
+          material.flatShading = true;
+          material.reflectivity = 0;
+
+          material.vertexColors = false;
+          material.side = THREE.FrontSide;
+          material.needsUpdate = true;
+
+          // Create merged mesh
+          const mergedMesh = new THREE.Mesh(mergedGeometry, material);
+          mergedMesh.scale.setScalar(scale);
+          mergedMesh.updateMatrix();
+
+          resolve({
+            geometry: mergedGeometry,
+            material: material,
+            object: mergedMesh,
+            scale,
+          });
         },
         undefined,
-        (error) => {
-          reject(error);
-        }
+        reject
       );
     });
   }

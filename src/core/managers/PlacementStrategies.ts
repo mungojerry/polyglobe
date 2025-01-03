@@ -183,12 +183,6 @@ abstract class BasePlacementStrategy implements PlacementStrategy {
     for (let i = 0; i < count; i++) {
       const angle = angleStep * i;
       const position = PlacementUtils.getPositionInCircle(center.position, radius, angle);
-
-      if (faceCenter) {
-        const toCenter = vectorPool.acquire().subVectors(center.position, position).normalize();
-        const faceAngle = Math.atan2(toCenter.z, toCenter.x) + Math.PI;
-      }
-
       await this.placeModel(modelType, position, center.normal, matrices, getRandomVariant, !faceCenter);
     }
   }

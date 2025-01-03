@@ -148,12 +148,15 @@ export class ObjectManager {
     // Apply matrices
     matrices.forEach((matrixArray, modelKey) => {
       const instancedMesh = this.instancedMeshes.get(modelKey)!;
+      const modelType = modelVariants.get(modelKey)!;
+      const scale = modelType.scale || 1;
 
-      for (let i = 0; i < matrixArray.length; i += batchSize) {
-        const end = Math.min(i + batchSize, matrixArray.length);
-        for (let j = i; j < end; j++) {
-          instancedMesh.setMatrixAt(j, matrixArray[j]);
-        }
+      // Create scale matrix
+      const scaleMatrix = new THREE.Matrix4().makeScale(scale, scale, scale);
+
+      for (let i = 0; i < matrixArray.length; i++) {
+        const matrix = matrixArray[i].clone().multiply(scaleMatrix);
+        instancedMesh.setMatrixAt(i, matrix);
       }
       instancedMesh.count = matrixArray.length;
       instancedMesh.instanceMatrix.needsUpdate = true;

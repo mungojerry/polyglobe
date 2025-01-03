@@ -461,7 +461,7 @@ export class FBXViewerScene {
                 child.material.vertexColors = false;
                 child.material.flatShading = true;
                 child.material.reflectivity = 0;
-                // child.material.side = THREE.FrontSide;
+                child.material.side = THREE.FrontSide;
               }
               child.castShadow = true;
               child.receiveShadow = true;

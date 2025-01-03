@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { Biome, BiomeName } from "../utils/biomes";
-import { ClusteredPlacement, LandingPadPlacement, PlacementStrategy, RandomPlacement } from "./PlacementStrategies";
+import { ClusteredPlacement, LandingPadPlacement, PlacementStrategy } from "./PlacementStrategies";
 
 export const MAX_INSTANCES_PER_TYPE: number = 5000;
 export interface CachedLandVertex {
@@ -129,7 +129,7 @@ export const modelGroups: ModelGroup[] = [
         filename: "assets/models/nature/BirchTree_Snow",
         noLeadingZero: true,
         files: [1, 2, 3, 4, 5],
-        scale: 0.01,
+        scale: 0.05,
         numInstances: 200,
         weight: 0.3,
       },
@@ -139,7 +139,7 @@ export const modelGroups: ModelGroup[] = [
         noLeadingZero: true,
         files: [1, 2, 3, 4, 5],
         numInstances: 200,
-        scale: 0.01,
+        scale: 0.05,
         weight: 0.3,
       },
       {
@@ -148,7 +148,7 @@ export const modelGroups: ModelGroup[] = [
         noLeadingZero: true,
         files: [1, 2, 3, 4, 5],
         numInstances: 100,
-        scale: 0.01,
+        scale: 0.05,
         weight: 0.2,
       },
       {
@@ -157,7 +157,7 @@ export const modelGroups: ModelGroup[] = [
         noLeadingZero: true,
         files: [1, 2, 3, 4, 5],
         numInstances: 100,
-        scale: 0.01,
+        scale: 0.05,
         weight: 0.2,
       },
     ],
@@ -181,32 +181,32 @@ export const modelGroups: ModelGroup[] = [
     biomes: [BiomeName.Land],
     numInCluster: 30,
   },
-  {
-    type: StructureType.PineForest,
-    models: [
-      { name: "Pine", filename: "assets/models/fbx/Tree", files: [23, 24, 27, 28, 6, 7], numInstances: 300, weight: 0.4 },
-      { name: "Pine", filename: "assets/models/fbx/Tree", files: [18, 19, 20, 21, 22], numInstances: 300, weight: 0.4 },
-      { name: "DeadPine", filename: "assets/models/fbx/Tree", files: [25, 26], numInstances: 100, nearTypes: ["Pine"], weight: 0.2 },
-    ],
-    placement: new ClusteredPlacement(),
-    spacing: 50,
-    maxSlope: 1.2,
-    biomes: [BiomeName.Land],
-    numInCluster: 40,
-  },
-  {
-    type: StructureType.Wilderness,
-    models: [{ name: "Grass", filename: "assets/models/fbx/Grass", files: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], numInstances: 20000, weight: 1 }],
-    placement: new RandomPlacement(),
-  },
-  {
-    type: StructureType.Wilderness,
-    models: [
-      { name: "Rock", filename: "assets/models/fbx/Rock", files: [1, 2, 3, 4], numInstances: 2000, weight: 1 },
-      { name: "Rock", filename: "assets/models/fbx/Rock", files: [5, 6, 7, 8], numInstances: 2000, weight: 1 },
-      { name: "Rock", filename: "assets/models/fbx/Rock", files: [9, 10, 11, 12, 13], numInstances: 2000, weight: 1 },
-      { name: "Rock", filename: "assets/models/fbx/Rock", files: [14, 15, 16, 17, 18, 19], numInstances: 2000, weight: 1 },
-    ],
-    placement: new RandomPlacement(),
-  },
+  // {
+  //   type: StructureType.PineForest,
+  //   models: [
+  //     { name: "Pine", filename: "assets/models/fbx/Tree", files: [23, 24, 27, 28, 6, 7], numInstances: 300, weight: 0.4 },
+  //     { name: "Pine", filename: "assets/models/fbx/Tree", files: [18, 19, 20, 21, 22], numInstances: 300, weight: 0.4 },
+  //     { name: "DeadPine", filename: "assets/models/fbx/Tree", files: [25, 26], numInstances: 100, nearTypes: ["Pine"], weight: 0.2 },
+  //   ],
+  //   placement: new ClusteredPlacement(),
+  //   spacing: 50,
+  //   maxSlope: 1.2,
+  //   biomes: [BiomeName.Land],
+  //   numInCluster: 40,
+  // },
+  // {
+  //   type: StructureType.Wilderness,
+  //   models: [{ name: "Grass", filename: "assets/models/fbx/Grass", files: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], numInstances: 20000, weight: 1 }],
+  //   placement: new RandomPlacement(),
+  // },
+  // {
+  //   type: StructureType.Wilderness,
+  //   models: [
+  //     { name: "Rock", filename: "assets/models/fbx/Rock", files: [1, 2, 3, 4], numInstances: 2000, weight: 1 },
+  //     { name: "Rock", filename: "assets/models/fbx/Rock", files: [5, 6, 7, 8], numInstances: 2000, weight: 1 },
+  //     { name: "Rock", filename: "assets/models/fbx/Rock", files: [9, 10, 11, 12, 13], numInstances: 2000, weight: 1 },
+  //     { name: "Rock", filename: "assets/models/fbx/Rock", files: [14, 15, 16, 17, 18, 19], numInstances: 2000, weight: 1 },
+  //   ],
+  //   placement: new RandomPlacement(),
+  // },
 ];
