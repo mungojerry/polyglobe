@@ -52,14 +52,14 @@ export class ObjectManager {
   }
 
   private async preloadModelVariants(modelType: ModelType, onProgress?: ProgressCallback): Promise<void> {
-    const basePath = "assets/models/fbx/" + modelType.filename;
+    const basePath = modelType.filename;
     const totalFiles = modelType.files.length;
     let loadedFiles = 0;
 
     const promises = modelType.files.map(async (fileIndex) => {
       const modelKey = getModelKey(basePath, fileIndex);
       if (!this.instancedMeshes.has(modelKey)) {
-        const modelData = await this.modelLoader.loadModelForInstancing(basePath, fileIndex);
+        const modelData = await this.modelLoader.loadModelForInstancing(basePath, fileIndex, modelType.scale || 1, modelType.noLeadingZero);
         modelData.geometry.computeBoundingBox();
         modelData.geometry.computeBoundingSphere();
         const instancedMesh = new THREE.InstancedMesh(modelData.geometry, modelData.material, MAX_INSTANCES_PER_TYPE);
@@ -81,7 +81,7 @@ export class ObjectManager {
   }
 
   private getRandomModelVariant(modelType: ModelType): string {
-    const basePath = "assets/models/fbx/" + modelType.filename;
+    const basePath = modelType.filename;
     const randomIndex = Math.floor(Math.random() * modelType.files.length);
     return getModelKey(basePath, modelType.files[randomIndex]);
   }
@@ -120,8 +120,9 @@ export class ObjectManager {
       // Initialize empty matrix arrays for all variants of each model
       group.models.forEach((model) => {
         model.files.forEach((fileIndex) => {
-          const key = getModelKey("assets/models/fbx/" + model.filename, fileIndex);
+          const key = getModelKey(model.filename, fileIndex);
           matrices.set(key, []);
+
           modelVariants.set(key, model);
         });
       });
@@ -147,6 +148,7 @@ export class ObjectManager {
     // Apply matrices
     matrices.forEach((matrixArray, modelKey) => {
       const instancedMesh = this.instancedMeshes.get(modelKey)!;
+
       for (let i = 0; i < matrixArray.length; i += batchSize) {
         const end = Math.min(i + batchSize, matrixArray.length);
         for (let j = i; j < end; j++) {

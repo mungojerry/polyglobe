@@ -6,6 +6,9 @@ export enum BiomeName {
   "Ocean",
   "Beach",
   "Land",
+
+  "Forest", // New
+  "Jungle", // New
   "Mountain",
   "Snow",
 }
@@ -49,10 +52,23 @@ export const BIOMES: BiomesMap = {
     elevationMin: 0.4,
     elevationMax: 0.45,
   },
+
   [BiomeName.Land]: {
     name: BiomeName.Land,
     color: new THREE.Color(0x44aa44),
     elevationMin: 0.45,
+    elevationMax: 0.58,
+  },
+  [BiomeName.Forest]: {
+    name: BiomeName.Forest,
+    color: new THREE.Color(0x228822),
+    elevationMin: 0.58,
+    elevationMax: 0.62,
+  },
+  [BiomeName.Jungle]: {
+    name: BiomeName.Jungle,
+    color: new THREE.Color(0x116611),
+    elevationMin: 0.62,
     elevationMax: 0.65,
   },
   [BiomeName.Mountain]: {

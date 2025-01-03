@@ -64,7 +64,7 @@ export class FlyingObject extends BaseGameObject implements IGameObject {
       this.objectMesh = gltf.scene;
       this.object.add(this.objectMesh);
       this.object.position.copy(position);
-      this.object.frustumCulled = false;
+      this.object.frustumCulled = true;
       scene.add(this.object);
     });
 

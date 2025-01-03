@@ -15,6 +15,7 @@ import { TerrainDeformer } from "./TerrainDeformer";
 const globeConfig = {
   showWall: false,
   showPoles: false,
+  showWater: true,
   radius: 300,
   detail: 110,
   chunkSize: 20,
@@ -55,7 +56,7 @@ export class Globe {
     });
     this.waterLevel = globeConfig.radius * 1.055;
 
-    this.buildWater();
+    if (globeConfig.showWater) this.buildWater();
 
     if (globeConfig.showWall) this.buildEquatorWall();
     this.object.castShadow = true;

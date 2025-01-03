@@ -4,8 +4,8 @@ import { vectorPool } from "../utils/vectorPool";
 import { Bullet } from "../weapons/Bullet";
 import { BulletGenerator } from "../weapons/BulletGenerator";
 import { HealthBar } from "./HealthBar";
-import { Trail } from "./Trail";
-import { TrailPool } from "./TrailPool";
+import { RibbonTrail } from "./RibbonTrail";
+
 export interface IGameObject {
   update(camera: THREE.Camera): void;
   onHit(): void;
@@ -15,8 +15,10 @@ export interface IGameObject {
   applyDamage(amount: number): void;
   destroy(): void;
 }
+
 type MoveDirection = -1 | 0 | 1;
 type RotationDirection = -1 | 0 | 1;
+
 export class BaseGameObject implements IGameObject {
   protected object: THREE.Object3D;
   protected objectMesh!: THREE.Object3D;
@@ -28,15 +30,13 @@ export class BaseGameObject implements IGameObject {
   protected move: MoveDirection = 0;
   protected rotationDirection: RotationDirection = 0;
   protected thrusting: boolean = false;
-  private trailPool: TrailPool;
-  protected activeSprites: Trail[] = [];
+  private ribbonTrail: RibbonTrail;
   protected scene: THREE.Scene;
   protected bullets: Bullet[] = [];
   protected lastShotTime = 0;
   protected shootCooldown = 150;
   protected tilt: boolean = true;
   private healthBar: HealthBar;
-
   private tag: string;
   private health: number = 100;
 
@@ -46,68 +46,36 @@ export class BaseGameObject implements IGameObject {
     this.objectMesh = new THREE.Object3D();
     this.world = world;
     this.scene = scene;
-    this.trailPool = new TrailPool(scene);
+    this.ribbonTrail = new RibbonTrail(scene);
     const bodyDesc = RAPIER.RigidBodyDesc.dynamic().setTranslation(position.x, position.y, position.z);
     this.body = world.createRigidBody(bodyDesc);
-    // Initialize Health Bar
     this.healthBar = new HealthBar(this.object, this.health);
   }
-  /**
-   * Updates the health bar position to always face the camera.
-   * @param camera The camera to face towards.
-   */
+
   private updateHealthBar(camera: THREE.Camera): void {
     this.healthBar.setHealth(this.health);
     this.healthBar["healthBar"].lookAt(camera.position);
   }
+
   private updateTrail() {
-    const position = vectorPool.getVector(this.body.translation().x, this.body.translation().y, this.body.translation().z);
-    const prevPosition = this.object.position.clone();
-    // Compute left direction
-    const left = new THREE.Vector3();
-    this.object.getWorldDirection(left);
-    left.cross(new THREE.Vector3(0, 1, 0)).normalize(); // Assuming Y-up
+    const position = new THREE.Vector3(this.body.translation().x, this.body.translation().y, this.body.translation().z);
 
-    const offsetDistance = 1.0; // Adjust the distance as needed
+    const direction = new THREE.Vector3();
+    this.object.getWorldDirection(direction);
 
-    const numSprites = 10;
-    // Changed: Use smaller fraction of movement vector and interpolate
-    const spacing = 1.0 / (numSprites - 1); // Even distribution
-
-    for (let i = 0; i < numSprites; i++) {
-      // Lerp from current position back to previous
-      const t = i * spacing;
-      const basePos = vectorPool.getVector().lerpVectors(position, prevPosition, t);
-      const spawnPos = basePos.add(left.clone().multiplyScalar(offsetDistance));
-      const trail = this.trailPool.acquire(spawnPos, 0.1, 0x00ff00);
-      this.activeSprites.push(trail);
-      vectorPool.releaseVector(spawnPos);
-    }
-
-    // Rest of the code remains same
-    const expiredSprites = this.activeSprites.filter((sprite) => !this.scene.children.includes(sprite.sprite));
-    expiredSprites.forEach((sprite) => this.trailPool.release(sprite));
-
-    this.activeSprites = this.activeSprites.filter((sprite) => {
-      sprite.update();
-      return !sprite.isDisposed();
-    });
-    vectorPool.releaseVector(position);
+    this.ribbonTrail.update(position, direction);
   }
+
   private tiltMesh() {
-    // Calculate target rotations based on movement and rotation direction
     const targetRotationX = this.move * 0.4;
     const targetRotationZ = -this.rotationDirection * 0.4;
-
-    // Lerp the current rotations to the target rotations
-    const lerpFactor = 0.03; // Adjust this value to control the lerp speed
+    const lerpFactor = 0.03;
     this.objectMesh.rotation.x = THREE.MathUtils.lerp(this.objectMesh.rotation.x, targetRotationX, lerpFactor);
     this.objectMesh.rotation.z = THREE.MathUtils.lerp(this.objectMesh.rotation.z, targetRotationZ, lerpFactor);
   }
+
   update(camera: THREE.Camera) {
     const position = this.body.translation();
-
-    this.updateTrail();
 
     if (this.tilt) this.tiltMesh();
 
@@ -144,13 +112,10 @@ export class BaseGameObject implements IGameObject {
       true
     );
 
-    // Handle movement - using fresh vectors
+    // Handle movement
     if (this.move !== 0) {
-      // Calculate movement direction along surface
       const moveDir = vectorPool.getVector();
-      moveDir.add(currentForward.clone().multiplyScalar(this.move)); // Forward/backward
-
-      // Apply force
+      moveDir.add(currentForward.clone().multiplyScalar(this.move));
       const force = moveDir.normalize().multiplyScalar(this.movementForce);
       this.body.applyImpulse(
         {
@@ -161,6 +126,7 @@ export class BaseGameObject implements IGameObject {
         true
       );
     }
+
     this.thrust();
     this.updateTrail();
     this.updateHealthBar(camera);
@@ -173,23 +139,16 @@ export class BaseGameObject implements IGameObject {
   public getObject() {
     return this.object;
   }
-
+  public getUp(): THREE.Vector3 {
+    const position = this.getPosition();
+    return vectorPool.getVector(position.x, position.y, position.z).normalize();
+  }
   public getForwardDirection(): THREE.Vector3 {
-    // Get current position and normalize to get up vector
     const position = vectorPool.getVector(this.body.translation().x, this.body.translation().y, this.body.translation().z);
     const up = position.clone().normalize();
-
-    // Get the current orientation quaternion
     const orientation = this.object.quaternion;
-
-    // Start with world forward (0,0,1) and apply object's rotation
     const forward = vectorPool.getVector(0, 0, 1).applyQuaternion(orientation);
-
-    // Project forward vector onto tangent plane
-    // v′ = v - (v·n)n where n is the normal (up) vector
     const projection = forward.clone().sub(up.clone().multiplyScalar(forward.dot(up)));
-
-    // Normalize the result
     return projection.normalize();
   }
 
@@ -239,10 +198,6 @@ export class BaseGameObject implements IGameObject {
     return this.tag;
   }
 
-  /**
-   * Applies damage to the object and updates the health bar.
-   * @param amount Amount of damage to apply.
-   */
   public applyDamage(amount: number): void {
     this.health -= amount;
     if (this.health < 0) this.health = 0;
@@ -254,10 +209,8 @@ export class BaseGameObject implements IGameObject {
   }
 
   public destroy() {
-    // Dispose Health Bar
     this.healthBar.dispose();
-
-    // Dispose of other resources and remove the object from the scene
+    this.ribbonTrail.dispose();
     this.object.parent?.remove(this.object);
     this.world.removeRigidBody(this.body);
   }

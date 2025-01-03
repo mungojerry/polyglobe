@@ -93,7 +93,7 @@ class ControlManager {
     }
   }
 
-  public hidden: boolean = false;
+  public hidden: boolean = true;
 
   public static getInstance(): ControlManager {
     if (!ControlManager.instance) {

@@ -52,7 +52,7 @@ function placeBatch(
   for (let i = 0; i < count; i++) {
     const vertex = validVertices[Math.floor(Math.random() * validVertices.length)];
     const matrix = matrixPool.acquire();
-    const modelKey = getRandomVariant ? getRandomVariant(modelType) : getModelKey("assets/models/fbx/" + modelType.filename, modelType.files[0]);
+    const modelKey = getRandomVariant ? getRandomVariant(modelType) : getModelKey(modelType.filename, modelType.files[0]);
 
     if (!matrices.has(modelKey)) {
       matrices.set(modelKey, []);
@@ -68,6 +68,7 @@ function placeBatch(
     const rotationMatrix = matrixPool.acquire().makeRotationFromQuaternion(quaternion);
     matrix.multiply(rotationMatrix);
 
+    // Store the matrix without additional scaling (models are already scaled in ModelLoader)
     matrices.get(modelKey)!.push(matrix.clone());
   }
 
@@ -240,7 +241,7 @@ export class VillagePlacement implements PlacementStrategy {
 export class ClusteredPlacement implements PlacementStrategy {
   async place(params: PlacementStrategyParams): Promise<void> {
     const { group, landVertices, matrices, batchSize, spatialGrid, onProgress } = params;
-    console.log("placeClusteredObjects " + group.type);
+    console.log("ClusteredPlacement attempt " + group.type);
     const promises = [];
     const totalInstances = group.models.reduce((sum, type) => sum + type.numInstances, 0);
     let placedInstances = 0;
@@ -271,6 +272,8 @@ export class ClusteredPlacement implements PlacementStrategy {
       }
     }
     await Promise.all(promises);
+
+    console.log("ClusteredPlacement success " + group.type);
   }
 }
 

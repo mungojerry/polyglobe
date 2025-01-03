@@ -83,6 +83,13 @@ export class GameScene {
   private debugEnabled: boolean = false;
   private readonly GRAVITY_FUDGE: number = 0.01;
   private readonly G = 9.81 * this.GRAVITY_FUDGE;
+
+  private readonly BASE_FOV = 75; // Default FOV
+  private readonly MAX_FOV = 130; // Maximum FOV when moving fast
+  private readonly MIN_VELOCITY = 0; // Minimum velocity threshold
+  private readonly MAX_VELOCITY = 50; // Velocity at which max FOV is reached
+  private readonly FOV_LERP = 0.1; // How smoothly to adjust FOV
+
   constructor() {
     this.world = new World(new Vector3(0, 0, 0));
     this.eventQueue = new EventQueue(false);
@@ -309,6 +316,7 @@ export class GameScene {
         this.miniGlobe.update();
       }
       debugManager.set("polys", "Polys: " + this.renderer.info.render.triangles);
+      this.updateCameraFOV();
       this.composer.render();
       requestAnimationFrame(step);
     };
@@ -551,5 +559,28 @@ export class GameScene {
         controlManager.addChildToAccordion("noiseControls", sliderControl);
       }
     });
+  }
+
+  private updateCameraFOV(): void {
+    if (!this.player || !this.camera) return;
+
+    // Get forward velocity component
+    const velocity = this.player.getBody().linvel();
+    const playerForward = this.player.getForwardDirection();
+
+    // Project velocity onto forward direction
+    const velocityVec = new THREE.Vector3(velocity.x, velocity.y, velocity.z);
+    const forwardSpeed = velocityVec.dot(playerForward);
+
+    // Use absolute value since we care about speed not direction
+    const absForwardSpeed = Math.abs(forwardSpeed);
+
+    // Calculate target FOV based on forward speed
+    const speedFactor = THREE.MathUtils.clamp((absForwardSpeed - this.MIN_VELOCITY) / (this.MAX_VELOCITY - this.MIN_VELOCITY), 0, 1);
+    const targetFOV = THREE.MathUtils.lerp(this.BASE_FOV, this.MAX_FOV, speedFactor);
+
+    // Smoothly interpolate current FOV to target
+    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFOV, this.FOV_LERP);
+    this.camera.updateProjectionMatrix();
   }
 }

@@ -1,7 +1,6 @@
 import RAPIER from "@dimforge/rapier3d";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { debugManager } from "../managers/debugManager";
 import { BaseGameObject, IGameObject } from "./BaseGameObject";
 
 export class Player extends BaseGameObject implements IGameObject {
@@ -59,7 +58,7 @@ export class Player extends BaseGameObject implements IGameObject {
       this.object.position.set(initPos.x, initPos.y, initPos.z);
 
       scene.add(this.object);
-      this.object.frustumCulled = false;
+      this.object.frustumCulled = true;
     });
 
     // Setup object and add to scene
@@ -148,7 +147,5 @@ export class Player extends BaseGameObject implements IGameObject {
 
   update(camera: THREE.Camera) {
     super.update(camera);
-
-    debugManager.set("activetrail", "trail sprites: " + this.activeSprites.length);
   }
 }

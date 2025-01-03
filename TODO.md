@@ -1,21 +1,29 @@
-- less water
-- fix slow loading
-- plants when rain
-- make the ground a bit more realistic
-- water caustics
-- water splats on ground/splashes
-- lightning strikes
-- npc's on the planet surface
+- fix model loads in assets/models/nature
+- add more enemey type and models
+- allow object positioning at poles
+- proper shooting functionality
+- re-introduce trails
+- proper level design
+- UI design
 - villages
-- Asteroids/meteorite
-- When zap with lightning create a hole (fire?)
-- shiny moon and sun
 
 DONE
 
+- improve biomes
+- less water
+- fix slow loading
+- make the ground a bit more realistic
+- water caustics
+- lightning strikes
+- npc's on the planet surface
 - texture for moon and sun
 - terrain deformation
 
+NOT TO BE DONE
+- plants when rain
+- water splats on ground/splashes
+- Asteroids/meteorite
+- When zap with lightning create a hole (fire?)
 
 
 

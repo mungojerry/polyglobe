@@ -38,8 +38,6 @@ export class Infection {
     }
 
     const geometry = mesh.geometry as THREE.BufferGeometry;
-    const material = mesh.material as THREE.MeshStandardMaterial;
-
     const boundingSphere = geometry.boundingSphere;
     if (boundingSphere && position.distanceTo(boundingSphere.center) > boundingSphere.radius + this.infectionRadius) {
       return;
@@ -84,13 +82,13 @@ export class Infection {
             this.infectedVertices.add(vertexKey);
 
             // Set to pure red immediately
-            colorAttr.setXYZ(i, 1, 0, 0);
+            if (colorAttr) colorAttr?.setXYZ(i, 1, 0, 0);
           }
         }
       }
 
-      // Mark color attribute as needing update
-      colorAttr.needsUpdate = true;
+      // Mark color attribute as needing update#if (colorAttr
+      if (colorAttr) colorAttr.needsUpdate = true;
     }
     const end = performance.now();
     debugManager.set("infectiontime", "infect: " + (end - start).toFixed(4));
