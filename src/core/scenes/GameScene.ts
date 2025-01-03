@@ -605,7 +605,7 @@ export class GameScene {
     const speedFactor = THREE.MathUtils.clamp((absForwardSpeed - this.MIN_VELOCITY) / (this.MAX_VELOCITY - this.MIN_VELOCITY), 0, 1);
     const targetFOV = THREE.MathUtils.lerp(this.BASE_FOV, this.MAX_FOV, speedFactor);
 
-    const targetOffset = speedFactor > 0.1 ? this.baseOffset.clone().lerp(this.closeOffset, speedFactor) : this.baseOffset;
+    const targetOffset = speedFactor > 0.2 ? this.baseOffset.clone().lerp(this.closeOffset, speedFactor) : this.baseOffset;
 
     // Smooth transition to new offset
     this.offset.lerp(targetOffset, 0.2);
