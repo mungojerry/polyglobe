@@ -1,14 +1,16 @@
+- landing pad
 - fix model loads in assets/models/nature
 - add more enemey type and models
 - allow object positioning at poles
 - proper shooting functionality
-- re-introduce trails
 - proper level design
 - UI design
 - villages
 
 DONE
 
+- re-introduce trails
+- speed shader
 - improve biomes
 - less water
 - fix slow loading

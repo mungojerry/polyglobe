@@ -11,7 +11,7 @@ export class Sun {
 
   constructor(globe: Globe, scene: THREE.Scene, private radius: number = 500) {
     // Directional light (sun)
-    this.directionalLight = new THREE.DirectionalLight(0xffffff, 2);
+    this.directionalLight = new THREE.DirectionalLight(0xffffff, 3);
     this.directionalLight.position.set(this.radius, 0, 0);
     this.directionalLight.target = globe.getObject();
     // .position.set(0, 0, 0);

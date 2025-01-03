@@ -3,78 +3,139 @@ import { Vector3 } from "three";
 import { TerrainDeformer } from "../planet/TerrainDeformer";
 import { BiomeName } from "../utils/biomes";
 import { ObjectPool } from "../utils/ObjectPool";
-import { getModelKey, ProgressCallback } from "../utils/utils";
+import { ProgressCallback } from "../utils/utils";
 import { CachedLandVertex, ModelGroup, ModelType, SpatialHashGrid } from "./models";
 
+// Pools and constants
 const vectorPool = new ObjectPool(() => new THREE.Vector3(), 10);
 const matrixPool = new ObjectPool(() => new THREE.Matrix4(), 10);
 const quaternionPool = new ObjectPool(() => new THREE.Quaternion(), 10);
 const upVector = new THREE.Vector3(0, 1, 0);
-function selectModelTypesForBatch(modelTypes: ModelType[], batchCount: number): Map<ModelType, number> {
-  const selectedTypes = new Map<ModelType, number>();
-  const totalWeight = modelTypes.reduce((sum, type) => sum + type.weight, 0);
 
-  for (let i = 0; i < batchCount; i++) {
-    let random = Math.random() * totalWeight;
-    let weightSum = 0;
+// Types for specialized placement parameters
+interface TerrainModificationParams {
+  center: THREE.Vector3;
+  radius: number;
+  strength?: number;
+}
 
-    for (const modelType of modelTypes) {
-      weightSum += modelType.weight;
-      if (random <= weightSum) {
-        selectedTypes.set(modelType, (selectedTypes.get(modelType) || 0) + 1);
-        break;
+interface CircularPlacementParams {
+  center: CachedLandVertex;
+  radius: number;
+  count: number;
+  faceCenter?: boolean;
+}
+
+interface GridPlacementParams {
+  center: CachedLandVertex;
+  size: number;
+  spacing: number;
+}
+
+// Utility functions
+class PlacementUtils {
+  static selectModelTypesForBatch(modelTypes: ModelType[], batchCount: number): Map<ModelType, number> {
+    const selectedTypes = new Map<ModelType, number>();
+    const totalWeight = modelTypes.reduce((sum, type) => sum + type.weight, 0);
+
+    for (let i = 0; i < batchCount; i++) {
+      let random = Math.random() * totalWeight;
+      let weightSum = 0;
+
+      for (const modelType of modelTypes) {
+        weightSum += modelType.weight;
+        if (random <= weightSum) {
+          selectedTypes.set(modelType, (selectedTypes.get(modelType) || 0) + 1);
+          break;
+        }
       }
     }
+
+    return selectedTypes;
   }
 
-  return selectedTypes;
-}
-function filterVerticesByBiome(vertices: CachedLandVertex[], allowedBiomes?: BiomeName[]) {
-  if (!allowedBiomes) return vertices;
-  return vertices.filter((vertex) => vertex.biome && allowedBiomes.includes(vertex.biome.name));
-}
-
-function placeBatch(
-  modelType: ModelType,
-  vertices: CachedLandVertex[],
-  count: number,
-  matrices: Map<string, THREE.Matrix4[]>,
-  allowedBiomes?: BiomeName[],
-  getRandomVariant?: (modelType: ModelType) => string
-): Promise<void> {
-  const validVertices = filterVerticesByBiome(vertices, allowedBiomes);
-
-  if (validVertices.length === 0) {
-    console.warn(`No valid vertices found for biome(s): ${allowedBiomes?.join(", ")}`);
-    return Promise.resolve();
+  static filterVerticesByBiome(vertices: CachedLandVertex[], allowedBiomes?: BiomeName[]): CachedLandVertex[] {
+    if (!allowedBiomes) return vertices;
+    return vertices.filter((vertex) => vertex.biome && allowedBiomes.includes(vertex.biome.name));
   }
 
-  for (let i = 0; i < count; i++) {
-    const vertex = validVertices[Math.floor(Math.random() * validVertices.length)];
-    const matrix = matrixPool.acquire();
-    const modelKey = getRandomVariant ? getRandomVariant(modelType) : getModelKey(modelType.filename, modelType.files[0]);
+  static async distributeRemainingModels(
+    models: ModelType[],
+    excludeNames: string[],
+    center: CachedLandVertex,
+    radius: number,
+    matrices: Map<string, THREE.Matrix4[]>,
+    getRandomVariant: (modelType: ModelType) => string
+  ): Promise<number> {
+    const remainingModels = models.filter((model) => !excludeNames.includes(model.name));
+    let placedCount = 0;
 
-    if (!matrices.has(modelKey)) {
-      matrices.set(modelKey, []);
+    for (const model of remainingModels) {
+      console.log(`Distributing ${model.numInstances} instances of ${model.name}`);
+      const batchPromises: Promise<void>[] = [];
+
+      for (let i = 0; i < model.numInstances; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        // Use sqrt for better radial distribution
+        const distance = Math.sqrt(Math.random()) * radius;
+        const position = PlacementUtils.getPositionInCircle(center.position, distance, angle);
+
+        const matrix = PlacementUtils.createPlacementMatrix(position, center.normal, true);
+        const modelKey = getRandomVariant(model);
+
+        if (!matrices.has(modelKey)) {
+          matrices.set(modelKey, []);
+        }
+        matrices.get(modelKey)!.push(matrix.clone());
+        placedCount++;
+      }
+
+      await Promise.all(batchPromises);
     }
 
-    matrix.setPosition(vertex.position);
-
-    const quaternion = quaternionPool
-      .acquire()
-      .setFromUnitVectors(upVector, vertex.normal)
-      .multiply(quaternionPool.acquire().setFromAxisAngle(upVector, Math.random() * Math.PI * 2));
-
-    const rotationMatrix = matrixPool.acquire().makeRotationFromQuaternion(quaternion);
-    matrix.multiply(rotationMatrix);
-
-    // Store the matrix without additional scaling (models are already scaled in ModelLoader)
-    matrices.get(modelKey)!.push(matrix.clone());
+    return placedCount;
   }
 
-  return Promise.resolve();
+  static createPlacementMatrix(position: THREE.Vector3, normal: THREE.Vector3, randomRotation = true): THREE.Matrix4 {
+    const matrix = matrixPool.acquire();
+    matrix.setPosition(position);
+
+    const quaternion = quaternionPool.acquire().setFromUnitVectors(upVector, normal);
+
+    if (randomRotation) {
+      quaternion.multiply(quaternionPool.acquire().setFromAxisAngle(upVector, Math.random() * Math.PI * 2));
+    }
+
+    const rotationMatrix = matrixPool.acquire().makeRotationFromQuaternion(quaternion);
+    return matrix.multiply(rotationMatrix);
+  }
+
+  static flattenTerrainArea(terrainDeformer: TerrainDeformer, params: TerrainModificationParams): boolean {
+    const { center, radius, strength = -20 } = params;
+
+    // Initial depression for smooth transitions
+    let modifiedVertices = terrainDeformer.deformSmoothFalloff(center, strength, radius * 2.5);
+    if (!modifiedVertices?.length) return false;
+
+    // Secondary flattening
+    modifiedVertices = terrainDeformer.deformSmoothFalloff(center, strength / 2, radius * 2);
+    if (!modifiedVertices?.length) return false;
+
+    // Final precise flattening
+    modifiedVertices = terrainDeformer.flatten(center, radius * 1.5);
+    return modifiedVertices?.length > 0;
+  }
+
+  static getPositionInCircle(center: Vector3, radius: number, angle: number): Vector3 {
+    return new Vector3(center.x + Math.cos(angle) * radius, center.y, center.z + Math.sin(angle) * radius).normalize().multiplyScalar(center.length());
+  }
+
+  static getRandomVertex(vertices: CachedLandVertex[]): CachedLandVertex {
+    return vertices[Math.floor(Math.random() * vertices.length)];
+  }
 }
 
+// Base interfaces
 export interface PlacementStrategy {
   place(params: PlacementStrategyParams): Promise<void>;
 }
@@ -90,97 +151,160 @@ export interface PlacementStrategyParams {
   getRandomVariant: (modelType: ModelType) => string;
 }
 
-export class RandomPlacement implements PlacementStrategy {
+// Base placement strategy with common functionality
+abstract class BasePlacementStrategy implements PlacementStrategy {
+  protected async placeModel(
+    modelType: ModelType,
+    position: THREE.Vector3,
+    normal: THREE.Vector3,
+    matrices: Map<string, THREE.Matrix4[]>,
+    getRandomVariant: (modelType: ModelType) => string,
+    randomRotation = true
+  ): Promise<void> {
+    const matrix = PlacementUtils.createPlacementMatrix(position, normal, randomRotation);
+    const modelKey = getRandomVariant(modelType);
+
+    if (!matrices.has(modelKey)) {
+      matrices.set(modelKey, []);
+    }
+
+    matrices.get(modelKey)!.push(matrix.clone());
+  }
+
+  protected async placeModelsInCircle(
+    params: CircularPlacementParams,
+    modelType: ModelType,
+    matrices: Map<string, THREE.Matrix4[]>,
+    getRandomVariant: (modelType: ModelType) => string
+  ): Promise<void> {
+    const { center, radius, count, faceCenter = false } = params;
+    const angleStep = (Math.PI * 2) / count;
+
+    for (let i = 0; i < count; i++) {
+      const angle = angleStep * i;
+      const position = PlacementUtils.getPositionInCircle(center.position, radius, angle);
+
+      if (faceCenter) {
+        const toCenter = vectorPool.acquire().subVectors(center.position, position).normalize();
+        const faceAngle = Math.atan2(toCenter.z, toCenter.x) + Math.PI;
+      }
+
+      await this.placeModel(modelType, position, center.normal, matrices, getRandomVariant, !faceCenter);
+    }
+  }
+
+  protected async placeModelsInGrid(
+    params: GridPlacementParams,
+    modelType: ModelType,
+    matrices: Map<string, THREE.Matrix4[]>,
+    getRandomVariant: (modelType: ModelType) => string
+  ): Promise<void> {
+    const { center, size, spacing } = params;
+    const startOffset = -((size - 1) * spacing) / 2;
+
+    for (let row = 0; row < size; row++) {
+      for (let col = 0; col < size; col++) {
+        const position = new Vector3(center.position.x + startOffset + col * spacing, center.position.y, center.position.z + startOffset + row * spacing)
+          .normalize()
+          .multiplyScalar(center.position.length());
+
+        await this.placeModel(modelType, position, center.normal, matrices, getRandomVariant, false);
+      }
+    }
+  }
+
+  protected updateProgress(current: number, total: number, onProgress?: ProgressCallback) {
+    if (onProgress) {
+      onProgress((current / total) * 100);
+    }
+  }
+
+  abstract place(params: PlacementStrategyParams): Promise<void>;
+}
+
+export class RandomPlacement extends BasePlacementStrategy {
   async place(params: PlacementStrategyParams): Promise<void> {
-    const { group, landVertices, batchSize, onProgress, matrices } = params;
+    const { group, landVertices, batchSize, onProgress, matrices, getRandomVariant } = params;
     console.log("placeRandom " + group.type);
+
+    const validVertices = PlacementUtils.filterVerticesByBiome(landVertices, group.biomes);
+    if (validVertices.length === 0) {
+      console.warn(`No valid vertices found for biome(s): ${group.biomes?.join(", ")}`);
+      return;
+    }
+
     const promises = [];
-    let totalInstances = 0;
     let placedInstances = 0;
+    const totalInstances = group.models.reduce((sum, model) => sum + model.numInstances, 0);
+    console.log(`Placing ${totalInstances} instances for ${group.type}`);
 
-    group.models.forEach((model) => {
-      totalInstances += model.numInstances;
-    });
-
+    // Process each model type
     for (const modelType of group.models) {
-      for (let i = 0; i < modelType.numInstances; i += batchSize) {
-        const batchCount = Math.min(batchSize, modelType.numInstances - i);
+      console.log(`Placing ${modelType.numInstances} instances of ${modelType.name}`);
+      const remainingInstances = modelType.numInstances;
+      const numBatches = Math.ceil(remainingInstances / batchSize);
+
+      // Create batches for parallel processing
+      for (let batchIndex = 0; batchIndex < numBatches; batchIndex++) {
+        const startIdx = batchIndex * batchSize;
+        const batchCount = Math.min(batchSize, remainingInstances - startIdx);
+
         promises.push(
-          placeBatch(modelType, landVertices, batchCount, matrices, group.biomes, params.getRandomVariant).then(() => {
-            placedInstances += batchCount;
-            if (onProgress) {
-              onProgress((placedInstances / totalInstances) * 100);
+          (async () => {
+            const batchPromises = [];
+            for (let j = 0; j < batchCount; j++) {
+              const vertex = PlacementUtils.getRandomVertex(validVertices);
+              batchPromises.push(this.placeModel(modelType, vertex.position, vertex.normal, matrices, getRandomVariant));
             }
-          })
+            await Promise.all(batchPromises);
+            placedInstances += batchCount;
+            this.updateProgress(placedInstances, totalInstances, onProgress);
+          })()
         );
       }
     }
+
     await Promise.all(promises);
+    console.log(`Completed placing ${placedInstances}/${totalInstances} instances for ${group.type} in biome(s): ${group.biomes?.join(", ")}`);
   }
 }
 
-export class VillagePlacement implements PlacementStrategy {
+export class VillagePlacement extends BasePlacementStrategy {
   async place(params: PlacementStrategyParams): Promise<void> {
-    const { group, landVertices, matrices, terrainDeformer, batchSize, spatialGrid, onProgress } = params;
+    const { group, landVertices, matrices, terrainDeformer, getRandomVariant, onProgress } = params;
     console.log("placeVillage " + group.type);
+
+    // First filter vertices by biome
+    const validVertices = PlacementUtils.filterVerticesByBiome(landVertices, group.biomes);
+    if (validVertices.length === 0) {
+      console.warn(`No valid vertices found for biome(s): ${group.biomes?.join(", ")}`);
+      return;
+    }
+
+    console.log(`Found ${validVertices.length} valid vertices in biome(s): ${group.biomes?.join(", ")}`);
     const totalInstances = group.models.reduce((sum, type) => sum + type.numInstances, 0);
     let placedInstances = 0;
     const numInCluster = group.numInCluster ?? 1;
     const numClusters = Math.ceil(totalInstances / numInCluster);
+
     const clusterCenters = Array(numClusters)
       .fill(null)
-      .map(() => landVertices[Math.floor(Math.random() * landVertices.length)]);
+      .map(() => PlacementUtils.getRandomVertex(validVertices));
 
     for (const center of clusterCenters) {
-      // Create a completely flat area for village placement
       if (terrainDeformer) {
-        // Calculate village parameters
         const numHouses = group.models.find((m) => m.name === "House")?.numInstances || 0;
         const houseRadius = group.spacing || 30;
-        // Make sure the flat area is large enough for all houses plus extra space
         const villageRadius = Math.max(houseRadius * 4, numHouses * houseRadius * 0.8);
 
-        // Initial pass: Create a large depression
-        let modifiedVertices = terrainDeformer.deformSmoothFalloff(
-          center.position,
-          -20, // Very strong downward force
-          villageRadius * 2.5 // Much larger area for smooth transitions
-        );
-
-        if (!modifiedVertices || modifiedVertices.length === 0) {
-          console.warn("Village placement: Initial depression failed, skipping this location");
-          continue;
-        }
-
-        // Second pass: Initial flattening of the large area
-        modifiedVertices = terrainDeformer.deformSmoothFalloff(center.position, -10, villageRadius * 2);
-
-        if (!modifiedVertices || modifiedVertices.length === 0) {
-          console.warn("Village placement: Secondary depression failed, skipping this location");
-          continue;
-        }
-
-        // Third pass: Flatten the main area
-        modifiedVertices = terrainDeformer.flatten(center.position, villageRadius * 1.5);
-
-        if (!modifiedVertices || modifiedVertices.length === 0) {
-          console.warn("Village placement: Main flattening failed, skipping this location");
-          continue;
-        }
-
-        // Fourth pass: Ensure village area is perfectly flat
-        modifiedVertices = terrainDeformer.flatten(center.position, villageRadius);
-
-        if (!modifiedVertices || modifiedVertices.length === 0) {
-          console.warn("Village placement: Village area flattening failed");
-          continue;
-        }
-
-        // Final pass: Extra flattening for the central area
-        modifiedVertices = terrainDeformer.flatten(center.position, villageRadius * 0.5);
-
-        if (!modifiedVertices || modifiedVertices.length === 0) {
-          console.warn("Village placement: Central flattening failed");
+        if (
+          !PlacementUtils.flattenTerrainArea(terrainDeformer, {
+            center: center.position,
+            radius: villageRadius,
+            strength: -20,
+          })
+        ) {
+          console.warn("Village placement: Terrain flattening failed, skipping location");
           continue;
         }
       }
@@ -188,112 +312,186 @@ export class VillagePlacement implements PlacementStrategy {
       const fireModel = group.models.find((m) => m.name === "Fire");
       const houseModel = group.models.find((m) => m.name === "House");
 
-      if (fireModel && houseModel) {
-        // Place central fire
-        const fireMatrix = matrixPool.acquire();
-        fireMatrix.setPosition(center.position);
-        const fireQuaternion = quaternionPool.acquire().setFromUnitVectors(upVector, center.normal);
-        const fireRotation = matrixPool.acquire().makeRotationFromQuaternion(fireQuaternion);
-        fireMatrix.multiply(fireRotation);
-
-        const fireKey = params.getRandomVariant(fireModel);
-        if (!matrices.has(fireKey)) matrices.set(fireKey, []);
-        matrices.get(fireKey)!.push(fireMatrix.clone());
-
-        // Place houses in a circle
-        const numHouses = houseModel.numInstances;
-        const angleStep = (Math.PI * 2) / numHouses;
-        const radius = group.spacing || 30;
-
-        for (let i = 0; i < numHouses; i++) {
-          const angle = angleStep * i;
-          const position = new Vector3(center.position.x + Math.cos(angle) * radius, center.position.y, center.position.z + Math.sin(angle) * radius);
-          position.normalize().multiplyScalar(center.position.length());
-
-          const matrix = matrixPool.acquire();
-          matrix.setPosition(position);
-
-          // Make houses face the center
-          const toCenter = vectorPool.acquire().subVectors(center.position, position).normalize();
-          const quaternion = quaternionPool
-            .acquire()
-            .setFromUnitVectors(upVector, center.normal)
-            .multiply(quaternionPool.acquire().setFromAxisAngle(upVector, Math.atan2(toCenter.z, toCenter.x) + Math.PI));
-
-          const rotationMatrix = matrixPool.acquire().makeRotationFromQuaternion(quaternion);
-          matrix.multiply(rotationMatrix);
-
-          const houseKey = params.getRandomVariant(houseModel);
-          if (!matrices.has(houseKey)) matrices.set(houseKey, []);
-          matrices.get(houseKey)!.push(matrix.clone());
-        }
-
-        placedInstances += numHouses + 1;
-        if (onProgress) {
-          onProgress((placedInstances / totalInstances) * 100);
-        }
-        continue;
+      // Place central fire if exists
+      if (fireModel) {
+        await this.placeModel(fireModel, center.position, center.normal, matrices, getRandomVariant);
+        placedInstances++;
       }
+
+      // Place houses in a circle if exists
+      if (houseModel) {
+        await this.placeModelsInCircle(
+          {
+            center,
+            radius: group.spacing || 30,
+            count: houseModel.numInstances,
+            faceCenter: true,
+          },
+          houseModel,
+          matrices,
+          getRandomVariant
+        );
+        placedInstances += houseModel.numInstances;
+      }
+
+      // Distribute remaining models in a random pattern around the village
+      const additionalInstances = await PlacementUtils.distributeRemainingModels(
+        group.models,
+        ["Fire", "House"],
+        center,
+        (group.spacing || 30) * 1.5, // Slightly larger radius for other models
+        matrices,
+        getRandomVariant
+      );
+      placedInstances += additionalInstances;
+      this.updateProgress(placedInstances, totalInstances, onProgress);
     }
   }
 }
 
-export class ClusteredPlacement implements PlacementStrategy {
+export class ClusteredPlacement extends BasePlacementStrategy {
   async place(params: PlacementStrategyParams): Promise<void> {
-    const { group, landVertices, matrices, batchSize, spatialGrid, onProgress } = params;
+    const { group, landVertices, matrices, batchSize, spatialGrid, onProgress, getRandomVariant } = params;
     console.log("ClusteredPlacement attempt " + group.type);
-    const promises = [];
+
+    // First filter vertices by biome
+    const validVertices = PlacementUtils.filterVerticesByBiome(landVertices, group.biomes);
+    if (validVertices.length === 0) {
+      console.warn(`No valid vertices found for biome(s): ${group.biomes?.join(", ")}`);
+      return;
+    }
+
+    console.log(`Found ${validVertices.length} valid vertices in biome(s): ${group.biomes?.join(", ")}`);
     const totalInstances = group.models.reduce((sum, type) => sum + type.numInstances, 0);
     let placedInstances = 0;
     const numInCluster = group.numInCluster ?? 1;
-    const numClusters = Math.ceil(totalInstances / numInCluster);
-    const clusterCenters = Array(numClusters)
+
+    // Calculate how many clusters we need to place all instances
+    const totalClusters = Math.ceil(
+      group.models.reduce((max, model) => Math.max(max, Math.ceil(model.numInstances / (numInCluster / group.models.length))), 0)
+    );
+
+    console.log(`Creating ${totalClusters} clusters to place ${totalInstances} instances for ${group.type}`);
+
+    const clusterCenters = Array(totalClusters)
       .fill(null)
-      .map(() => landVertices[Math.floor(Math.random() * landVertices.length)]);
+      .map(() => PlacementUtils.getRandomVertex(validVertices));
 
+    const promises = [];
+
+    // Process each cluster
     for (const center of clusterCenters) {
-      const nearbyVertices = spatialGrid.getNearby(center.position, group.spacing || 5);
-      const numInThisCluster = Math.min(numInCluster, totalInstances);
+      // Get nearby vertices and filter by biome
+      const nearbyVertices = spatialGrid
+        .getNearby(center.position, group.spacing || 5)
+        .filter((vertex) => vertex.biome && (!group.biomes || group.biomes.includes(vertex.biome.name)));
 
-      for (let i = 0; i < numInThisCluster; i += batchSize) {
-        const batchCount = Math.min(batchSize, numInThisCluster - i);
-        const selectedTypes = selectModelTypesForBatch(group.models, batchCount);
+      if (nearbyVertices.length === 0) {
+        console.warn(`No valid vertices found near cluster center in biome(s): ${group.biomes?.join(", ")}`);
+        continue;
+      }
 
-        for (const [modelType, count] of selectedTypes) {
+      // Process each model type
+      for (const modelType of group.models) {
+        // Calculate instances per cluster for this model type
+        const instancesPerCluster = Math.ceil(modelType.numInstances / totalClusters);
+
+        // Create batches for this model in this cluster
+        for (let i = 0; i < instancesPerCluster; i += batchSize) {
+          const batchCount = Math.min(batchSize, instancesPerCluster - i);
+
           promises.push(
-            placeBatch(modelType, nearbyVertices, count, matrices, group.biomes, params.getRandomVariant).then(() => {
-              placedInstances += count;
-              if (onProgress) {
-                onProgress((placedInstances / totalInstances) * 100);
+            (async () => {
+              const batchPromises = [];
+              for (let j = 0; j < batchCount; j++) {
+                const vertex = PlacementUtils.getRandomVertex(nearbyVertices);
+                batchPromises.push(this.placeModel(modelType, vertex.position, vertex.normal, matrices, getRandomVariant));
               }
-            })
+              await Promise.all(batchPromises);
+              placedInstances += batchCount;
+              this.updateProgress(placedInstances, totalInstances, onProgress);
+            })()
           );
         }
       }
     }
-    await Promise.all(promises);
 
-    console.log("ClusteredPlacement success " + group.type);
+    await Promise.all(promises);
+    console.log(`Completed placing ${placedInstances}/${totalInstances} instances for ${group.type}`);
   }
 }
 
-export class NearWaterPlacement implements PlacementStrategy {
+export class LandingPadPlacement extends BasePlacementStrategy {
   async place(params: PlacementStrategyParams): Promise<void> {
-    // Implement near water placement logic
+    const { group, landVertices, matrices, terrainDeformer, onProgress, getRandomVariant } = params;
+    console.log("placeLandingPad " + group.type);
+
+    // First filter vertices by biome
+    const validVertices = PlacementUtils.filterVerticesByBiome(landVertices, group.biomes);
+    if (validVertices.length === 0) {
+      console.warn(`No valid vertices found for biome(s): ${group.biomes?.join(", ")}`);
+      return;
+    }
+
+    console.log(`Found ${validVertices.length} valid vertices in biome(s): ${group.biomes?.join(", ")}`);
+    const center = PlacementUtils.getRandomVertex(validVertices);
+    const padSize = 30;
+    const tileSpacing = group.spacing || 10;
+    const padRadius = (padSize * tileSpacing) / 2;
+    const totalTiles = padSize * padSize;
+    let placedTiles = 0;
+
+    if (
+      terrainDeformer &&
+      !PlacementUtils.flattenTerrainArea(terrainDeformer, {
+        center: center.position,
+        radius: padRadius,
+        strength: -20,
+      })
+    ) {
+      console.warn("Landing pad placement: Terrain flattening failed");
+      return;
+    }
+
+    const startOffset = -((padSize - 1) * tileSpacing) / 2;
+
+    for (let row = 0; row < padSize; row++) {
+      for (let col = 0; col < padSize; col++) {
+        const position = new Vector3(
+          center.position.x + startOffset + col * tileSpacing,
+          center.position.y,
+          center.position.z + startOffset + row * tileSpacing
+        )
+          .normalize()
+          .multiplyScalar(center.position.length());
+
+        // Randomly select a model from the group for each tile
+        const modelType = group.models[Math.floor(Math.random() * group.models.length)];
+        await this.placeModel(modelType, position, center.normal, matrices, getRandomVariant, false);
+
+        placedTiles++;
+        this.updateProgress(placedTiles, totalTiles, onProgress);
+      }
+    }
+    console.log(`Completed placing landing pad with ${placedTiles} tiles in biome(s): ${group.biomes?.join(", ")}`);
+  }
+}
+
+// Placeholder strategies
+export class NearWaterPlacement extends BasePlacementStrategy {
+  async place(params: PlacementStrategyParams): Promise<void> {
     console.log("Placing models near water");
   }
 }
 
-export class NearStructurePlacement implements PlacementStrategy {
+export class NearStructurePlacement extends BasePlacementStrategy {
   async place(params: PlacementStrategyParams): Promise<void> {
-    // Implement near structure placement logic
     console.log("Placing models near structures");
   }
 }
 
-export class InGroupPlacement implements PlacementStrategy {
+export class InGroupPlacement extends BasePlacementStrategy {
   async place(params: PlacementStrategyParams): Promise<void> {
-    // Implement in group placement logic
     console.log("Placing models in groups");
   }
 }

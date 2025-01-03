@@ -7,7 +7,7 @@ export class Moon {
 
   constructor(scene: THREE.Scene, private radius: number = 1700) {
     // Moon light (dimmer and bluer than the sun)
-    this.directionalLight = new THREE.DirectionalLight(0x87cefa, 0.7); // Light steel blue color
+    this.directionalLight = new THREE.DirectionalLight(0x87cefa, 1.4); // Light steel blue color
     this.directionalLight.position.set(-this.radius, 0, 0); // Start opposite to the sun
     this.directionalLight.castShadow = true;
 

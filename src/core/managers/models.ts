@@ -1,5 +1,6 @@
+import * as THREE from "three";
 import { Biome, BiomeName } from "../utils/biomes";
-import { ClusteredPlacement, PlacementStrategy, RandomPlacement } from "./PlacementStrategies";
+import { ClusteredPlacement, LandingPadPlacement, PlacementStrategy, RandomPlacement } from "./PlacementStrategies";
 
 export const MAX_INSTANCES_PER_TYPE: number = 5000;
 export interface CachedLandVertex {
@@ -62,6 +63,7 @@ export enum StructureType {
   Wilderness = "Wilderness",
   Meadow = "Meadow",
   Swamp = "swamp",
+  LandingPad = "LandingPad",
 }
 
 export interface ModelType {
@@ -89,6 +91,24 @@ export interface ModelGroup {
 }
 
 export const modelGroups: ModelGroup[] = [
+  {
+    type: StructureType.LandingPad,
+    models: [
+      {
+        name: "Tile",
+        filename: "assets/models/fbx/Tile",
+        files: [1, 2, 3, 4, 5, 6, 7, 8],
+        numInstances: 9, // 3x3 grid
+        weight: 1,
+        maxSlope: 0.3, // Relatively flat terrain required
+        scale: 100, // Adjust if needed based on tile size
+      },
+    ],
+    placement: new LandingPadPlacement(),
+    spacing: 10, // Space between tiles
+    maxSlope: 0.3, // Flat terrain required for landing pad
+    biomes: [BiomeName.Land],
+  },
   // {
   //   type: StructureType.Village,
   //   models: [

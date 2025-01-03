@@ -116,7 +116,7 @@ export class GameScene {
 
     // Initialise speed effect
     this.speedPass = new ShaderPass(SpeedShader);
-    this.composer.addPass(this.speedPass);
+    // this.composer.addPass(this.speedPass);
 
     document.body.appendChild(this.renderer.domElement);
 
@@ -444,6 +444,18 @@ export class GameScene {
       }
     );
 
+    controlManager.addCheckbox(
+      "speedpass",
+      "Speed pass: ",
+      () => this.composer.passes.includes(this.speedPass),
+      (value) => {
+        if (value) {
+          this.composer.addPass(this.speedPass);
+        } else {
+          this.composer.removePass(this.speedPass);
+        }
+      }
+    );
     controlManager.addCheckbox(
       "infextion",
       "Run infection: ",
