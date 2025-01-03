@@ -5,6 +5,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
+import { SpeedShader } from "../effects/SpeedShader";
 import { UnderWaterShader } from "../effects/UnderWaterShader";
 import { ButtonElement, ColorElement, controlManager, SliderElement } from "../managers/controlManager";
 import { debugManager } from "../managers/debugManager";
@@ -60,6 +61,7 @@ export class GameScene {
   private readonly controls: OrbitControls;
   private readonly globe: Globe;
   private underWaterPass: ShaderPass;
+  private speedPass: ShaderPass;
   private isUnderwater: boolean = false;
   private readonly player: Player;
   private readonly clouds: Cloud[] = [];
@@ -80,12 +82,14 @@ export class GameScene {
   private currentLookAt = new THREE.Vector3();
   private currentPosition = new THREE.Vector3();
   private offset = new THREE.Vector3(0, 2, -3);
+  private baseOffset = new THREE.Vector3(0, 2, -3);
+  private closeOffset = new THREE.Vector3(0, 1, -2);
   private debugEnabled: boolean = false;
   private readonly GRAVITY_FUDGE: number = 0.01;
   private readonly G = 9.81 * this.GRAVITY_FUDGE;
 
   private readonly BASE_FOV = 75; // Default FOV
-  private readonly MAX_FOV = 130; // Maximum FOV when moving fast
+  private readonly MAX_FOV = 190; // Maximum FOV when moving fast
   private readonly MIN_VELOCITY = 0; // Minimum velocity threshold
   private readonly MAX_VELOCITY = 50; // Velocity at which max FOV is reached
   private readonly FOV_LERP = 0.1; // How smoothly to adjust FOV
@@ -109,6 +113,10 @@ export class GameScene {
     this.underWaterPass = new ShaderPass(UnderWaterShader);
     this.underWaterPass.enabled = false;
     this.composer.addPass(this.underWaterPass);
+
+    // Initialise speed effect
+    this.speedPass = new ShaderPass(SpeedShader);
+    this.composer.addPass(this.speedPass);
 
     document.body.appendChild(this.renderer.domElement);
 
@@ -521,6 +529,24 @@ export class GameScene {
     controlManager.addChildToAccordion("waterControls", waterCaustics);
     controlManager.addChildToAccordion("waterControls", waterColorPicker);
 
+    // Add speed effect controls
+    controlManager.addAccordion("speedControls", "Speed Effect Controls");
+
+    const speedIntensity: SliderElement = {
+      id: "speedIntensity",
+      label: "Speed Effect Intensity: ",
+      type: "slider",
+      getValue: () => this.speedPass.uniforms.speed.value,
+      setValue: (value) => {
+        this.speedPass.uniforms.speed.value = value as number;
+      },
+      min: 0,
+      max: 2,
+      step: 0.1,
+    };
+
+    controlManager.addChildToAccordion("speedControls", speedIntensity);
+
     controlManager.addAccordion("noiseControls", "Noise Generator Controls");
 
     // Add noise generator controls
@@ -579,6 +605,14 @@ export class GameScene {
     const speedFactor = THREE.MathUtils.clamp((absForwardSpeed - this.MIN_VELOCITY) / (this.MAX_VELOCITY - this.MIN_VELOCITY), 0, 1);
     const targetFOV = THREE.MathUtils.lerp(this.BASE_FOV, this.MAX_FOV, speedFactor);
 
+    const targetOffset = speedFactor > 0.1 ? this.baseOffset.clone().lerp(this.closeOffset, speedFactor) : this.baseOffset;
+
+    // Smooth transition to new offset
+    this.offset.lerp(targetOffset, 0.2);
+
+    this.speedPass.uniforms.time.value += 0.016;
+    // Update speed effect intensity
+    this.speedPass.uniforms.speed.value = speedFactor;
     // Smoothly interpolate current FOV to target
     this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFOV, this.FOV_LERP);
     this.camera.updateProjectionMatrix();

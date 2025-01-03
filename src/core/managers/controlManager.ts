@@ -91,6 +91,13 @@ class ControlManager {
       this.containerElement.id = "control-panel";
       document.body.appendChild(this.containerElement);
     }
+    if (!this.hidden) {
+      this.containerElement.style.width = "450px";
+      this.containerElement.style.height = "auto";
+    } else {
+      this.containerElement.style.width = "30px";
+      this.containerElement.style.height = "30px";
+    }
   }
 
   public hidden: boolean = true;
