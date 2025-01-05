@@ -6,12 +6,17 @@ import { getModelKey, ProgressCallback } from "../utils/utils";
 import { ModelLoader } from "./ModelLoader";
 import { CachedLandVertex, MAX_INSTANCES_PER_TYPE, ModelGroup, ModelType, SpatialHashGrid } from "./models";
 
+interface InstancedModelGroup {
+  group: THREE.Group;
+  meshes: THREE.InstancedMesh[];
+}
+
 export class ObjectManager {
   private modelLoader: ModelLoader;
   private globe: Globe;
   private landGeometry: THREE.BufferGeometry;
   private scene: THREE.Scene;
-  private instancedMeshes: Map<string, THREE.InstancedMesh>;
+  private instancedMeshes: Map<string, InstancedModelGroup>;
   private instanceCounts: Map<string, number>;
 
   private landVertices: CachedLandVertex[] = [];
@@ -22,8 +27,8 @@ export class ObjectManager {
     this.globe = globe;
     this.landGeometry = this.globe.getLandGeometry();
     this.scene = scene;
-    this.instancedMeshes = new Map();
-    this.instanceCounts = new Map();
+    this.instancedMeshes = new Map<string, InstancedModelGroup>();
+    this.instanceCounts = new Map<string, number>();
 
     this.spatialGrid = new SpatialHashGrid(25);
     this.cacheLandVertices();
@@ -50,7 +55,6 @@ export class ObjectManager {
       }
     }
   }
-
   private async preloadModelVariants(modelType: ModelType, onProgress?: ProgressCallback): Promise<void> {
     const basePath = modelType.filename;
     const totalFiles = modelType.files.length;
@@ -60,16 +64,31 @@ export class ObjectManager {
       const modelKey = getModelKey(basePath, fileIndex);
       if (!this.instancedMeshes.has(modelKey)) {
         const modelData = await this.modelLoader.loadModelForInstancing(basePath, fileIndex, modelType.scale || 1, modelType.noLeadingZero);
-        modelData.geometry.computeBoundingBox();
-        modelData.geometry.computeBoundingSphere();
-        const instancedMesh = new THREE.InstancedMesh(modelData.geometry, modelData.material, MAX_INSTANCES_PER_TYPE);
-        instancedMesh.castShadow = true;
-        instancedMesh.receiveShadow = true;
-        instancedMesh.count = 0;
-        instancedMesh.frustumCulled = false;
-        this.instancedMeshes.set(modelKey, instancedMesh);
+
+        const instanceGroup = new THREE.Group();
+        const instancedMeshes: THREE.InstancedMesh[] = [];
+
+        modelData.meshes.forEach((meshData, index) => {
+          meshData.geometry.computeBoundingBox();
+          meshData.geometry.computeBoundingSphere();
+
+          const instancedMesh = new THREE.InstancedMesh(meshData.geometry, meshData.material, MAX_INSTANCES_PER_TYPE);
+
+          instancedMesh.castShadow = true;
+          instancedMesh.receiveShadow = true;
+          instancedMesh.count = 0;
+          instancedMesh.frustumCulled = false;
+
+          instancedMesh.matrix.copy(meshData.worldMatrix);
+          instancedMesh.matrix.decompose(instancedMesh.position, instancedMesh.quaternion, instancedMesh.scale);
+
+          instanceGroup.add(instancedMesh);
+          instancedMeshes.push(instancedMesh);
+        });
+
+        this.instancedMeshes.set(modelKey, { group: instanceGroup, meshes: instancedMeshes });
         this.instanceCounts.set(modelKey, 0);
-        this.scene.add(instancedMesh);
+        this.scene.add(instanceGroup);
 
         loadedFiles++;
         if (onProgress) {
@@ -147,7 +166,7 @@ export class ObjectManager {
     }
     // Apply matrices
     matrices.forEach((matrixArray, modelKey) => {
-      const instancedMesh = this.instancedMeshes.get(modelKey)!;
+      const instancedModelGroup = this.instancedMeshes.get(modelKey)!;
       const modelType = modelVariants.get(modelKey)!;
       const scale = modelType.scale || 1;
 
@@ -156,10 +175,14 @@ export class ObjectManager {
 
       for (let i = 0; i < matrixArray.length; i++) {
         const matrix = matrixArray[i].clone().multiply(scaleMatrix);
-        instancedMesh.setMatrixAt(i, matrix);
+        instancedModelGroup.meshes.forEach((instancedMesh) => {
+          instancedMesh.setMatrixAt(i, matrix);
+        });
       }
-      instancedMesh.count = matrixArray.length;
-      instancedMesh.instanceMatrix.needsUpdate = true;
+      instancedModelGroup.meshes.forEach((instancedMesh) => {
+        instancedMesh.count = matrixArray.length;
+        instancedMesh.instanceMatrix.needsUpdate = true;
+      });
     });
 
     if (onProgress) {
