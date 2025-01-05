@@ -355,7 +355,7 @@ export class FBXViewerScene {
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
     this.scene.add(ambientLight);
 
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 10);
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
     directionalLight.castShadow = true;
     directionalLight.shadow.mapSize.width = 4096;
     directionalLight.shadow.mapSize.height = 4096;
@@ -378,7 +378,7 @@ export class FBXViewerScene {
     this.scene.add(shadowHelper);
 
     this.loader = new FBXLoader();
-    this.loadModels();
+    this.loadModels(this.modelFiles2, this.modelsPath2, 0.01);
 
     const gridHelper = new THREE.GridHelper(100, 100);
     this.scene.add(gridHelper);
@@ -437,13 +437,13 @@ export class FBXViewerScene {
     }
   };
 
-  private loadModels() {
-    const columns = Math.ceil(Math.sqrt(this.modelFiles2.length));
+  private loadModels(modelFiles: string[], modelsPath: string, scale: number) {
+    const columns = Math.ceil(Math.sqrt(modelFiles.length));
     const spacing = this.gridSize * 5;
 
-    this.modelFiles2.forEach((file, index) => {
+    modelFiles.forEach((file, index) => {
       this.loader.load(
-        `${this.modelsPath2}${file}`,
+        `${modelsPath}${file}`,
         (object) => {
           const row = Math.floor(index / columns);
           const col = index % columns;
@@ -451,7 +451,7 @@ export class FBXViewerScene {
           this.scene.add(object);
           object.castShadow = true;
           object.receiveShadow = true;
-          object.scale.set(0.01, 0.01, 0.01);
+          object.scale.setScalar(scale);
           object.traverse((child) => {
             if (child instanceof THREE.Mesh) {
               if (child.material) {
@@ -465,6 +465,17 @@ export class FBXViewerScene {
               }
               child.castShadow = true;
               child.receiveShadow = true;
+
+              console.log("Mesh:", child);
+              console.log("Geometry:", child.geometry);
+              console.log("Material:", child.material);
+
+              // Check for UVs
+              if (child.geometry.attributes.uv) {
+                console.log("UVs:", child.geometry.attributes.uv);
+              } else {
+                console.warn("No UVs found for mesh:", child.name);
+              }
             }
           });
 

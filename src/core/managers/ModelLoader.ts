@@ -1,33 +1,32 @@
 import * as THREE from "three";
 import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils";
 
 interface ModelData {
   meshes: Array<{
     geometry: THREE.BufferGeometry;
-    material: THREE.Material;
+    material: THREE.MeshPhongMaterial;
     worldMatrix: THREE.Matrix4;
   }>;
-  object: THREE.Object3D;
   scale: number;
 }
 
 export class ModelLoader {
-  private meshCache: Map<string, Array<{ geometry: THREE.BufferGeometry; material: THREE.Material; worldMatrix: THREE.Matrix4 }>>;
-  private objectCache: Map<string, THREE.Object3D>;
+  private meshCache: Map<string, Array<{ geometry: THREE.BufferGeometry; material: THREE.MeshPhongMaterial; worldMatrix: THREE.Matrix4 }>>;
 
   constructor() {
     this.meshCache = new Map();
-    this.objectCache = new Map();
   }
 
   public async loadModelForInstancing(filename: string, fileIndex: number, scale: number, noLeadingZero: boolean = false): Promise<ModelData> {
-    const fullFilename = `${filename}_${!noLeadingZero ? ("" + fileIndex).padStart(2, "0") : fileIndex}.fbx`;
+    const fullFilename = `${filename}_${!noLeadingZero ? String(fileIndex).padStart(2, "0") : fileIndex}.fbx`;
     const cacheKey = fullFilename;
 
-    if (this.meshCache.has(cacheKey) && this.objectCache.has(cacheKey)) {
+    console.log(`Attempting to load model: ${fullFilename}`);
+
+    if (this.meshCache.has(cacheKey)) {
       return {
         meshes: this.meshCache.get(cacheKey)!,
-        object: this.objectCache.get(cacheKey)!,
         scale,
       };
     }
@@ -39,120 +38,108 @@ export class ModelLoader {
 
   private cacheModelData(cacheKey: string, modelData: ModelData): void {
     this.meshCache.set(cacheKey, modelData.meshes);
-    this.objectCache.set(cacheKey, modelData.object);
   }
-
-  // private async fetchModel(filename: string, scale: number): Promise<ModelData> {
-  //   return new Promise((resolve, reject) => {
-  //     const loader = new FBXLoader();
-  //     loader.load(
-  //       filename,
-  //       (object) => {
-  //         // Collect all geometries and materials
-  //         const geometries: THREE.BufferGeometry[] = [];
-  //         const materials: THREE.Material[] = [];
-
-  //         object.traverse((child) => {
-  //           if (child instanceof THREE.Mesh) {
-  //             // Clone geometry to avoid sharing
-  //             const geom = child.geometry.clone();
-
-  //             // Apply mesh's transform to geometry
-  //             geom.applyMatrix4(child.matrixWorld);
-  //             geometries.push(geom);
-
-  //             // Store material
-  //             if (Array.isArray(child.material)) {
-  //               materials.push(...child.material);
-  //             } else {
-  //               materials.push(child.material);
-  //             }
-  //           }
-  //         });
-
-  //         if (geometries.length === 0) {
-  //           reject(new Error("No meshes found in FBX"));
-  //           return;
-  //         }
-
-  //         // Merge all geometries
-  //         const mergedGeometry = BufferGeometryUtils.mergeGeometries(geometries);
-
-  //         // Create material
-  //         const material = materials[0].clone() as THREE.MeshPhongMaterial;
-  //         // material.transparent = false;
-  //         material.opacity = 1;
-  //         material.shininess = 0;
-  //         material.flatShading = true;
-  //         material.reflectivity = 0;
-
-  //         material.vertexColors = false;
-  //         material.side = THREE.DoubleSide;
-  //         material.needsUpdate = true;
-
-  //         // Create merged mesh
-  //         const mergedMesh = new THREE.Mesh(mergedGeometry, material);
-  //         mergedMesh.scale.setScalar(scale);
-  //         mergedMesh.updateMatrix();
-
-  //         resolve({
-  //           geometry: mergedGeometry,
-  //           material: material,
-  //           object: mergedMesh,
-  //           scale,
-  //         });
-  //       },
-  //       undefined,
-  //       reject
-  //     );
-  //   });
-  // }
 
   private async fetchModel(filename: string, scale: number): Promise<ModelData> {
     return new Promise((resolve, reject) => {
       const loader = new FBXLoader();
+
+      const onProgress = (event: ProgressEvent) => {
+        if (event.lengthComputable) {
+          const percentComplete = (event.loaded / event.total) * 100;
+          console.log(`Loading progress: ${Math.round(percentComplete)}%`);
+        }
+      };
+
       loader.load(
         filename,
         (object) => {
-          const meshData: Array<{
-            geometry: THREE.BufferGeometry;
-            material: THREE.Material;
-            worldMatrix: THREE.Matrix4;
-          }> = [];
+          console.log(`Loading model: ${filename}`, {
+            children: object.children.length,
+            meshes: object.children.filter((c) => c instanceof THREE.Mesh).length,
+          });
+          const geometries: THREE.BufferGeometry[] = [];
+          const combinedGeometry = new THREE.BufferGeometry();
+          const materials: THREE.Material[] = [];
+
+          // Normalize the model scale first
+          const normalizeScale = 1 / Math.max(...object.scale.toArray(), Number.EPSILON); // Prevent division by zero
+          object.scale.setScalar(normalizeScale * scale); // Apply the requested scale
+          object.updateMatrixWorld(true);
 
           object.traverse((child) => {
             if (child instanceof THREE.Mesh) {
-              const geometry = child.geometry.clone();
-              const material = child.material instanceof Array ? child.material[0].clone() : child.material.clone();
+              const geometry = new THREE.BufferGeometry().copy(child.geometry);
+              geometry.applyMatrix4(child.matrixWorld);
 
-              material.transparent = false;
-              material.opacity = 1;
-              material.side = THREE.DoubleSide;
-              material.needsUpdate = true;
+              // Check for UVs
+              const hasUV = geometry.attributes.uv !== undefined;
+              console.log(`Mesh "${child.name}" has UVs: ${hasUV}`);
 
-              child.updateWorldMatrix(true, false);
-              const worldMatrix = child.matrixWorld.clone();
+              // Handle multiple materials
+              const childMaterials = Array.isArray(child.material) ? child.material.map((m) => m.clone()) : [child.material.clone()];
 
-              meshData.push({
-                geometry,
-                material,
-                worldMatrix,
+              childMaterials.forEach((material) => {
+                // Ensure the material is MeshPhongMaterial
+                const phongMaterial = new THREE.MeshPhongMaterial();
+                phongMaterial.copy(material as THREE.MeshPhongMaterial);
+
+                // Preserve maps only if UVs are present
+                if (hasUV) {
+                  if ((child.material as THREE.MeshPhongMaterial).map) {
+                    phongMaterial.map = (child.material as THREE.MeshPhongMaterial).map;
+                  }
+                  if ((child.material as THREE.MeshPhongMaterial).normalMap) {
+                    phongMaterial.normalMap = (child.material as THREE.MeshPhongMaterial).normalMap;
+                  }
+                } else {
+                  // Remove maps if UVs are missing to prevent shader errors
+                  phongMaterial.map = null;
+                  phongMaterial.normalMap = null;
+                  phongMaterial.emissiveMap = null;
+                  phongMaterial.bumpMap = null;
+                  phongMaterial.envMap = null;
+                  phongMaterial.lightMap = null;
+                  phongMaterial.alphaMap = null;
+                  phongMaterial.displacementMap = null;
+
+                  console.warn(`UVs missing: Skipping texture assignments for material "${material.name}".`);
+                }
+
+                phongMaterial.reflectivity = 0;
+                phongMaterial.side = THREE.FrontSide;
+                phongMaterial.needsUpdate = true;
+                materials.push(phongMaterial);
               });
+              geometries.push(geometry);
             }
           });
 
-          object.scale.setScalar(scale);
-          object.updateMatrixWorld(true);
+          const bufferGeometry = mergeGeometries(geometries);
+          bufferGeometry.scale(scale, scale, scale);
 
           resolve({
-            meshes: meshData,
-            object: object,
+            meshes: [{ geometry: bufferGeometry, material: materials[0] as THREE.MeshPhongMaterial, worldMatrix: new THREE.Matrix4() }],
             scale,
           });
         },
-        undefined,
-        reject
+        onProgress,
+        (error: any) => {
+          console.error(`Error loading model ${filename}:`, error);
+          reject(new Error(`Failed to load model ${filename}: ${error.message}`));
+        }
       );
     });
+  }
+
+  public dispose(): void {
+    // Clean up resources
+    this.meshCache.forEach((meshes) => {
+      meshes.forEach((mesh) => {
+        mesh.geometry.dispose();
+        mesh.material.dispose();
+      });
+    });
+    this.meshCache.clear();
   }
 }

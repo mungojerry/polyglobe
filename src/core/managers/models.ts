@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { Biome, BiomeName } from "../utils/biomes";
-import { ClusteredPlacement, LandingPadPlacement, PlacementStrategy } from "./PlacementStrategies";
+import { ClusteredPlacement, PlacementStrategy } from "./PlacementStrategies";
 
 export const MAX_INSTANCES_PER_TYPE: number = 5000;
 export interface CachedLandVertex {
@@ -91,33 +91,33 @@ export interface ModelGroup {
 }
 
 export const modelGroups: ModelGroup[] = [
-  {
-    type: StructureType.LandingPad,
-    models: [
-      {
-        name: "Tile",
-        filename: "assets/models/fbx/Tile",
-        files: [1, 2, 3, 4, 5, 6, 7, 8],
-        numInstances: 9, // 3x3 grid
-        weight: 1,
-        maxSlope: 0.3, // Relatively flat terrain required
-        scale: 100, // Adjust if needed based on tile size
-      },
-    ],
-    placement: new LandingPadPlacement(),
-    spacing: 10, // Space between tiles
-    maxSlope: 0.3, // Flat terrain required for landing pad
-    biomes: [BiomeName.Land],
-  },
+  // {
+  //   type: StructureType.LandingPad,
+  //   models: [
+  //     {
+  //       name: "Tile",
+  //       filename: "assets/models/fbx/Tile",
+  //       files: [1, 2, 3, 4, 5, 6, 7, 8],
+  //       numInstances: 9, // 3x3 grid
+  //       weight: 1,
+  //       maxSlope: 0.3, // Relatively flat terrain required
+  //       scale: 100, // Adjust if needed based on tile size
+  //     },
+  //   ],
+  //   placement: new LandingPadPlacement(),
+  //   spacing: 10, // Space between tiles
+  //   maxSlope: 0.3, // Flat terrain required for landing pad
+  //   biomes: [BiomeName.Land],
+  // },
   // {
   //   type: StructureType.Village,
   //   models: [
-  //     { name: "House", filename: "assets/models/fbx/House", files: [1], numInstances: 6, weight: 0.8, maxSlope: 0.5 },
+  //     { name: "House", filename: "assets/models/fbx/House", files: [1], numInstances: 6, weight: 0.8, maxSlope:0.25 },
   //     { name: "Fire", filename: "assets/models/fbx/Fire", files: [1, 2], numInstances: 1, weight: 0.2, maxSlope: 0.3 },
   //   ],
   //   placement: new VillagePlacement(),
   //   spacing: 30, // Space between buildings
-  //   maxSlope: 0.5, // Relatively flat terrain required
+  //   maxSlope:0.25, // Relatively flat terrain required
   //   biomes: [BiomeName.Land],
   //   numInCluster: 7, // 6 houses + 1 central fire
   // },
@@ -129,7 +129,7 @@ export const modelGroups: ModelGroup[] = [
         filename: "assets/models/nature/BirchTree_Snow",
         noLeadingZero: true,
         files: [1, 2, 3, 4, 5],
-        scale: 0.05,
+        scale: 0.35,
         numInstances: 200,
         weight: 0.3,
       },
@@ -139,7 +139,7 @@ export const modelGroups: ModelGroup[] = [
         noLeadingZero: true,
         files: [1, 2, 3, 4, 5],
         numInstances: 200,
-        scale: 0.05,
+        scale: 0.35,
         weight: 0.3,
       },
       {
@@ -148,7 +148,7 @@ export const modelGroups: ModelGroup[] = [
         noLeadingZero: true,
         files: [1, 2, 3, 4, 5],
         numInstances: 100,
-        scale: 0.05,
+        scale: 0.35,
         weight: 0.2,
       },
       {
@@ -157,7 +157,7 @@ export const modelGroups: ModelGroup[] = [
         noLeadingZero: true,
         files: [1, 2, 3, 4, 5],
         numInstances: 100,
-        scale: 0.05,
+        scale: 0.35,
         weight: 0.2,
       },
     ],
@@ -170,10 +170,10 @@ export const modelGroups: ModelGroup[] = [
   {
     type: StructureType.Forest,
     models: [
-      { name: "Tree", filename: "assets/models/fbx/Tree", files: [1, 2], numInstances: 200, weight: 0.3 },
-      { name: "Tree", filename: "assets/models/fbx/Tree", files: [3, 4, 5], numInstances: 200, weight: 0.3 },
-      { name: "Tree", filename: "assets/models/fbx/Tree", files: [5], numInstances: 100, weight: 0.2 },
-      { name: "DeadTree", filename: "assets/models/fbx/Tree", files: [15, 16, 17], numInstances: 100, nearTypes: ["Tree"], weight: 0.2 },
+      { name: "Tree", filename: "assets/models/fbx/Tree", scale: 1, files: [1, 2], numInstances: 200, weight: 0.3 },
+      { name: "Tree", filename: "assets/models/fbx/Tree", scale: 1, files: [3, 4, 5], numInstances: 200, weight: 0.3 },
+      { name: "Tree", filename: "assets/models/fbx/Tree", scale: 1, files: [5], numInstances: 100, weight: 0.2 },
+      { name: "DeadTree", filename: "assets/models/fbx/Tree", scale: 1, files: [15, 16, 17], numInstances: 100, nearTypes: ["Tree"], weight: 0.2 },
     ],
     placement: new ClusteredPlacement(),
     spacing: 50,

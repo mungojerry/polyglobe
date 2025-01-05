@@ -324,7 +324,7 @@ export class GameScene {
         this.miniGlobe.update();
       }
       debugManager.set("polys", "Polys: " + this.renderer.info.render.triangles);
-      this.updateCameraFOV();
+      if (this.cameraAttachedTo === this.player.getObject() && !config.orbitCoontrols) this.updateCameraFOV();
       this.composer.render();
       requestAnimationFrame(step);
     };

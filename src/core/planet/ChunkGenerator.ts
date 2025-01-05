@@ -135,7 +135,6 @@ export class ChunkGenerator {
       };
 
       const positionAttr = landGeometry.attributes.position;
-      const colorAttr = landGeometry.attributes.color;
       const indexAttr = landGeometry.index!;
 
       const vertices = new Float32Array(positionAttr.count * 6);
