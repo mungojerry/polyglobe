@@ -1,23 +1,17 @@
 import * as THREE from "three";
 import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader";
-
-export interface ModelMeshData {
-  geometry: THREE.BufferGeometry;
-  material: THREE.MeshPhongMaterial;
-  worldMatrix: THREE.Matrix4;
-  parentMatrix?: THREE.Matrix4;
-}
-
+import { InstancedMeshData } from "./ObjectManager";
 export interface ModelData {
-  meshes: ModelMeshData[];
+  meshes: InstancedMeshData[];
   scale: number;
 }
-
 export class ModelLoader {
-  private meshCache: Map<string, ModelMeshData[]>;
+  private meshCache: Map<string, InstancedMeshData[]>;
+  private maxInstances: number;
 
-  constructor() {
+  constructor(maxInstances: number = 1000) {
     this.meshCache = new Map();
+    this.maxInstances = maxInstances;
   }
 
   public async loadModelForInstancing(filename: string, fileIndex: number, scale: number, noLeadingZero: boolean = false): Promise<ModelData> {
@@ -33,161 +27,205 @@ export class ModelLoader {
 
     const loader = new FBXLoader();
     const fbx = await loader.loadAsync(`${fullFilename}`);
-    const meshDatas: ModelMeshData[] = [];
+    const instancedMeshes: InstancedMeshData[] = [];
 
-    // Update all world matrices
     fbx.updateWorldMatrix(true, true);
 
     fbx.traverse((child) => {
-      if (child instanceof THREE.Mesh) {
-        const mesh = child as THREE.Mesh;
-        const geometry = mesh.geometry;
+      if (!(child instanceof THREE.Mesh)) return;
 
-        // make sure geoemtry is indexed and not non indexed
-        if (!geometry.index) {
-          const indices = [];
-          for (let i = 0; i < geometry.attributes.position.count; i++) {
-            indices.push(i);
-          }
-          geometry.setIndex(indices);
-        }
-        mesh.updateWorldMatrix(true, true);
+      const mesh = child as THREE.Mesh;
+      mesh.updateMatrix();
+      mesh.updateWorldMatrix(true, true);
 
-        console.log("Processing mesh:", {
-          name: child.name,
-          hasMaterials: Array.isArray(mesh.material),
-          materialsCount: Array.isArray(mesh.material) ? mesh.material.length : 1,
-          geometryGroups: geometry.groups,
-          geometryIndex: geometry.index ? geometry.index.count : 0,
-          geometryVertices: geometry.attributes.position.count,
-        });
+      const geometry = this.ensureIndexedGeometry(mesh.geometry);
 
-        if (Array.isArray(mesh.material)) {
-          const materials = mesh.material as THREE.MeshPhongMaterial[];
-          const groups = geometry.groups;
-          const indexAttr = geometry.index;
-          const posAttr = geometry.attributes.position;
-          const normAttr = geometry.attributes.normal;
-          const uvAttr = geometry.attributes.uv;
-
-          materials.forEach((material, matIndex) => {
-            const group = groups.find((g) => g.materialIndex === matIndex);
-            if (!group) {
-              console.warn(`Can\'t find material index ${matIndex} for ${material.name}`);
-              return;
-            }
-
-            // Create new geometry for this material
-            const partGeometry = new THREE.BufferGeometry();
-
-            // Get indices for this group
-            const indices = [];
-            if (indexAttr) {
-              for (let i = group.start; i < group.start + group.count; i++) {
-                indices.push(indexAttr.getX(i));
-              }
-            } else {
-              console.warn(`Geometry is non indexed: ${material.name}`);
-            }
-
-            // Track unique vertices and create mapping
-            const uniqueVertices = new Map();
-            const newIndices: number[] = [];
-            const vertices: number[] = [];
-            const normals: number[] = [];
-            const uvs: number[] = [];
-
-            // Process each index
-            indices.forEach((oldIndex) => {
-              if (!uniqueVertices.has(oldIndex)) {
-                // Add new vertex
-                const vertexIndex = vertices.length / 3;
-                uniqueVertices.set(oldIndex, vertexIndex);
-
-                // Copy position
-                vertices.push(posAttr.getX(oldIndex), posAttr.getY(oldIndex), posAttr.getZ(oldIndex));
-
-                // Copy normal if exists
-                if (normAttr) {
-                  normals.push(normAttr.getX(oldIndex), normAttr.getY(oldIndex), normAttr.getZ(oldIndex));
-                }
-
-                // Copy UV if exists
-                if (uvAttr) {
-                  uvs.push(uvAttr.getX(oldIndex), uvAttr.getY(oldIndex));
-                }
-              }
-
-              // Add index to new buffer
-              newIndices.push(uniqueVertices.get(oldIndex));
-            });
-
-            // Set attributes
-            partGeometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
-            if (normals.length > 0) {
-              partGeometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
-            }
-            if (uvs.length > 0) {
-              partGeometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
-            }
-            partGeometry.setIndex(newIndices);
-            partGeometry.computeVertexNormals();
-
-            partGeometry.computeBoundingSphere();
-            console.log(partGeometry.boundingSphere);
-            console.log(partGeometry.attributes.position.count);
-            partGeometry.scale(scale, scale, scale);
-            const newMaterial = material.clone() as THREE.MeshPhongMaterial;
-            newMaterial.flatShading = true;
-            newMaterial.reflectivity = 0;
-            newMaterial.shininess = 0;
-            newMaterial.side = THREE.DoubleSide;
-            newMaterial.transparent = false;
-            newMaterial.needsUpdate = true;
-            meshDatas.push({
-              geometry: partGeometry,
-              material: newMaterial,
-              worldMatrix: mesh.matrixWorld.clone(),
-              parentMatrix: mesh.parent?.matrixWorld.clone(),
-            });
-          });
-        } else {
-          console.log("single material");
-          const newMaterial = mesh.material.clone() as THREE.MeshPhongMaterial;
-          newMaterial.flatShading = true;
-          newMaterial.reflectivity = 0;
-          newMaterial.shininess = 0;
-          newMaterial.transparent = false;
-          newMaterial.side = THREE.DoubleSide;
-          newMaterial.needsUpdate = true;
-
-          const newGeometry = geometry.clone();
-          newGeometry.computeVertexNormals();
-          newGeometry.scale(scale, scale, scale);
-          // Single material case
-          meshDatas.push({
-            geometry: newGeometry,
-            material: newMaterial,
-            worldMatrix: mesh.matrix.clone(),
-            parentMatrix: mesh.parent?.matrixWorld.clone(),
-          });
-        }
+      if (Array.isArray(mesh.material)) {
+        this.processMultiMaterialMesh(mesh, geometry, scale, instancedMeshes);
+      } else {
+        this.processSingleMaterialMesh(mesh, geometry, scale, instancedMeshes);
       }
     });
 
-    this.meshCache.set(cacheKey, meshDatas);
+    this.meshCache.set(cacheKey, instancedMeshes);
 
     return {
-      meshes: meshDatas,
+      meshes: instancedMeshes,
       scale,
     };
+  }
+
+  private createInstancedMesh(
+    geometry: THREE.BufferGeometry,
+    material: THREE.Material,
+    worldMatrix: THREE.Matrix4,
+    parentMatrix?: THREE.Matrix4
+  ): InstancedMeshData {
+    const instancedMesh = new THREE.InstancedMesh(geometry, material, this.maxInstances);
+    instancedMesh.count = 0; // Start with 0 instances
+    instancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+
+    return {
+      instancedMesh,
+      originalWorldMatrix: worldMatrix,
+      parentMatrix,
+    };
+  }
+  private ensureIndexedGeometry(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
+    if (!geometry.index) {
+      const indices = Array.from({ length: geometry.attributes.position.count }, (_, i) => i);
+      geometry.setIndex(indices);
+    }
+    return geometry;
+  }
+
+  private createStandardMaterial(originalMaterial: THREE.Material): THREE.MeshPhongMaterial {
+    const material = originalMaterial.clone() as THREE.MeshPhongMaterial;
+    material.flatShading = true;
+    material.reflectivity = 0;
+    material.shininess = 0;
+    material.side = THREE.DoubleSide;
+    material.transparent = false;
+    material.needsUpdate = true;
+    return material;
+  }
+
+  private processMultiMaterialMesh(mesh: THREE.Mesh, geometry: THREE.BufferGeometry, scale: number, instancedMeshes: InstancedMeshData[]) {
+    const materials = mesh.material as THREE.MeshPhongMaterial[];
+    const groups = geometry.groups;
+
+    if (groups.length === 0 && materials.length > 0) {
+      const verticesPerMaterial = Math.floor(geometry.attributes.position.count / materials.length);
+      materials.forEach((_, index) => {
+        const start = index * verticesPerMaterial;
+        const count = index === materials.length - 1 ? geometry.attributes.position.count - start : verticesPerMaterial;
+
+        geometry.addGroup(start, count, index);
+      });
+    }
+
+    geometry.groups.forEach((group) => {
+      const materialIndex = group.materialIndex ?? 0;
+      if (materialIndex >= materials.length) {
+        console.warn(`Invalid material index ${materialIndex} for mesh ${mesh.name}`);
+        return;
+      }
+
+      const material = materials[materialIndex];
+      const partGeometry = this.processPartGeometry(geometry, scale, group);
+
+      if (partGeometry.attributes.position.count === 0) {
+        console.warn(`Empty geometry created for material ${material.name} in mesh ${mesh.name}`);
+        return;
+      }
+
+      instancedMeshes.push(
+        this.createInstancedMesh(partGeometry, this.createStandardMaterial(material), mesh.matrixWorld.clone(), mesh.parent?.matrixWorld.clone())
+      );
+    });
+  }
+
+  private processSingleMaterialMesh(mesh: THREE.Mesh, geometry: THREE.BufferGeometry, scale: number, instancedMeshes: InstancedMeshData[]) {
+    const newGeometry = geometry.clone();
+    newGeometry.computeVertexNormals();
+    newGeometry.scale(scale, scale, scale);
+
+    instancedMeshes.push(
+      this.createInstancedMesh(
+        newGeometry,
+        this.createStandardMaterial(mesh.material as THREE.Material),
+        mesh.matrixWorld.clone(),
+        mesh.parent?.matrixWorld.clone()
+      )
+    );
+  }
+
+  private processPartGeometry(
+    geometry: THREE.BufferGeometry,
+    scale: number,
+    group: { start: number; count: number; materialIndex?: number }
+  ): THREE.BufferGeometry {
+    const indexAttr = geometry.index!; // We ensure this exists in ensureIndexedGeometry
+    const posAttr = geometry.attributes.position;
+    const normAttr = geometry.attributes.normal;
+    const uvAttr = geometry.attributes.uv;
+
+    // Create new geometry for this material group
+    const partGeometry = new THREE.BufferGeometry();
+
+    // Create lookup for faster vertex deduplication
+    const vertexMap = new Map<string, number>();
+    const vertices: number[] = [];
+    const normals: number[] = [];
+    const uvs: number[] = [];
+    const newIndices: number[] = [];
+
+    // Process indices for this group
+    for (let i = group.start; i < group.start + group.count; i++) {
+      const oldIndex = indexAttr.getX(i);
+
+      // Create unique key for vertex deduplication
+      const key = [
+        posAttr.getX(oldIndex),
+        posAttr.getY(oldIndex),
+        posAttr.getZ(oldIndex),
+        normAttr?.getX(oldIndex) ?? 0,
+        normAttr?.getY(oldIndex) ?? 0,
+        normAttr?.getZ(oldIndex) ?? 0,
+        uvAttr?.getX(oldIndex) ?? 0,
+        uvAttr?.getY(oldIndex) ?? 0,
+      ].join(",");
+
+      let newIndex = vertexMap.get(key);
+
+      if (newIndex === undefined) {
+        newIndex = vertices.length / 3;
+        vertexMap.set(key, newIndex);
+
+        // Add vertex data
+        vertices.push(posAttr.getX(oldIndex), posAttr.getY(oldIndex), posAttr.getZ(oldIndex));
+
+        // Add normal data if available
+        if (normAttr) {
+          normals.push(normAttr.getX(oldIndex), normAttr.getY(oldIndex), normAttr.getZ(oldIndex));
+        }
+
+        // Add UV data if available
+        if (uvAttr) {
+          uvs.push(uvAttr.getX(oldIndex), uvAttr.getY(oldIndex));
+        }
+      }
+
+      newIndices.push(newIndex);
+    }
+
+    // Set attributes
+    partGeometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
+    if (normals.length > 0) {
+      partGeometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+    }
+    if (uvs.length > 0) {
+      partGeometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+    }
+    partGeometry.setIndex(newIndices);
+
+    // Final geometry processing
+    partGeometry.scale(scale, scale, scale);
+    partGeometry.computeVertexNormals();
+    partGeometry.computeBoundingSphere();
+
+    return partGeometry;
   }
 
   public dispose(): void {
     this.meshCache.forEach((meshes) => {
       meshes.forEach((mesh) => {
-        mesh.geometry.dispose();
-        mesh.material.dispose();
+        mesh.instancedMesh.geometry.dispose();
+        if (Array.isArray(mesh.instancedMesh.material)) {
+          mesh.instancedMesh.material.forEach((material) => material.dispose());
+        } else {
+          mesh.instancedMesh.material.dispose();
+        }
       });
     });
     this.meshCache.clear();

@@ -3,15 +3,22 @@ import { Globe } from "../planet/Globe";
 import { terrainHelper } from "../planet/terrainHelper";
 import { getBiomeByElevation } from "../utils/biomes";
 import { getModelKey, ProgressCallback } from "../utils/utils";
-import { ModelLoader, ModelMeshData } from "./ModelLoader";
-import { CachedLandVertex, MAX_INSTANCES_PER_TYPE, ModelGroup, ModelType, SpatialHashGrid } from "./models";
+import { ModelLoader } from "./ModelLoader";
+import { CachedLandVertex, ModelGroup, ModelType, SpatialHashGrid } from "./models";
 
-interface InstancedModelGroup {
-  group: THREE.Group;
-  meshes: THREE.InstancedMesh[];
-  meshData: ModelMeshData[];
+// Shared interfaces
+export interface InstancedMeshData {
+  instancedMesh: THREE.InstancedMesh;
+  originalWorldMatrix: THREE.Matrix4;
+  parentMatrix?: THREE.Matrix4;
 }
 
+export interface InstancedModelGroup {
+  group: THREE.Group;
+  meshes: InstancedMeshData[];
+}
+
+const MAX_INSTANCES = 1000;
 export class ObjectManager {
   private readonly modelLoader: ModelLoader;
   private readonly globe: Globe;
@@ -30,7 +37,7 @@ export class ObjectManager {
   private static readonly tempNormal = new THREE.Vector3();
 
   constructor(globe: Globe, scene: THREE.Scene) {
-    this.modelLoader = new ModelLoader();
+    this.modelLoader = new ModelLoader(MAX_INSTANCES);
     this.globe = globe;
     this.landGeometry = this.globe.getLandGeometry();
     this.scene = scene;
@@ -111,7 +118,6 @@ export class ObjectManager {
       };
     }
   }
-
   private async preloadModelVariants(modelType: ModelType, onProgress?: ProgressCallback): Promise<void> {
     const promises = modelType.files.map(async (fileIndex) => {
       const modelKey = getModelKey(modelType.filename, fileIndex);
@@ -119,40 +125,35 @@ export class ObjectManager {
       if (!this.instancedMeshes.has(modelKey)) {
         const modelData = await this.modelLoader.loadModelForInstancing(modelType.filename, fileIndex, modelType.scale || 1, modelType.noLeadingZero);
 
-        // Create root group
         const instanceGroup = new THREE.Group();
-        const instancedMeshes: THREE.InstancedMesh[] = [];
+        const instancedMeshArray: InstancedMeshData[] = [];
 
-        // Process each mesh data
         modelData.meshes.forEach((meshData) => {
-          // Create instanced mesh
-          const instancedMesh = new THREE.InstancedMesh(meshData.geometry, meshData.material, MAX_INSTANCES_PER_TYPE);
+          const { instancedMesh, originalWorldMatrix, parentMatrix } = meshData;
 
-          // Setup mesh properties
           instancedMesh.castShadow = true;
           instancedMesh.receiveShadow = true;
-          instancedMesh.count = 0;
-
-          // Apply world matrix from original mesh
-          instancedMesh.applyMatrix4(meshData.worldMatrix);
-
-          instancedMeshes.push(instancedMesh);
-
           instancedMesh.visible = true;
           instanceGroup.add(instancedMesh);
+
+          instancedMeshArray.push({
+            instancedMesh,
+            originalWorldMatrix,
+            parentMatrix,
+          });
+
+          if (this.isDebugMode) {
+            this.createBoundingBoxHelper(instancedMesh, modelKey);
+          }
         });
 
-        // Store model data
-        this.instancedMeshes.set(modelKey, {
+        const instancedModelGroup: InstancedModelGroup = {
           group: instanceGroup,
-          meshes: instancedMeshes,
-          meshData: modelData.meshes,
-        });
+          meshes: instancedMeshArray,
+        };
 
-        // Initialize instance counts
-        this.instanceCounts.set(modelKey, new Array(instancedMeshes.length).fill(0));
-
-        // Add to scene
+        this.instancedMeshes.set(modelKey, instancedModelGroup);
+        this.instanceCounts.set(modelKey, new Array(instancedMeshArray.length).fill(0));
         this.scene.add(instanceGroup);
       }
     });
@@ -217,46 +218,33 @@ export class ObjectManager {
       onProgress(95);
     }
     // Apply matrices
-    this.applyTransforms(matrices, modelVariants);
+    this.applyTransforms(matrices);
 
     if (onProgress) {
       onProgress(100);
     }
   }
-  private applyTransforms(matrices: Map<string, THREE.Matrix4[]>, modelVariants: Map<string, ModelType>): void {
-    matrices.forEach((matrixArray, modelKey) => {
-      const instancedModelGroup = this.instancedMeshes.get(modelKey)!;
-      const modelType = modelVariants.get(modelKey)!;
-      const scale = modelType.scale || 1;
 
-      instancedModelGroup.meshes.forEach((instancedMesh, meshIndex) => {
-        const meshData = instancedModelGroup.meshData[meshIndex];
+  private applyTransforms(matrices: Map<string, THREE.Matrix4[]>): void {
+    const tempMatrix = new THREE.Matrix4();
+
+    matrices.forEach((matrixArray, modelKey) => {
+      const instancedModelGroup = this.instancedMeshes.get(modelKey);
+      if (!instancedModelGroup) return;
+
+      instancedModelGroup.meshes.forEach((instanceData) => {
+        const { instancedMesh, originalWorldMatrix } = instanceData;
         const tempPosition = new THREE.Vector3();
         for (let i = 0; i < matrixArray.length; i++) {
-          // Start with placement matrix
-          const finalMatrix = new THREE.Matrix4(); //.makeScale(scale, scale, scale);
+          tempMatrix.copy(originalWorldMatrix);
+          tempMatrix.premultiply(matrixArray[i]);
 
-          finalMatrix.multiply(matrixArray[i].clone());
+          instancedMesh.setMatrixAt(i, tempMatrix);
 
-          // Apply parent transform if exists
-          if (meshData.parentMatrix) {
-            // finalMatrix.multiply(meshData.parentMatrix);
-          }
-
-          // // Apply mesh's world transform
-          finalMatrix.multiply(meshData.worldMatrix);
-
-          // Apply scale last
-          // finalMatrix.scale(new THREE.Vector3(scale, scale, scale));
-          // console.log(finalMatrix);
-          instancedMesh.setMatrixAt(i, finalMatrix);
-
-          if (this.isDebugMode) {
-            tempPosition.setFromMatrixPosition(finalMatrix);
-            // Scale marker size with model scale, minimum 0.5
-            const markerScale = Math.max(scale * Math.random(), Math.random());
-            this.addDebugMarker(tempPosition, markerScale);
-          }
+          // if (this.isDebugMode) {
+          //   tempPosition.setFromMatrixPosition(tempMatrix);
+          //   this.addDebugMarker(tempPosition, 1);
+          // }
         }
 
         instancedMesh.count = matrixArray.length;
@@ -264,52 +252,6 @@ export class ObjectManager {
       });
     });
   }
-  private applyTransformsOLD(matrices: Map<string, THREE.Matrix4[]>, modelVariants: Map<string, ModelType>): void {
-    matrices.forEach((matrixArray, modelKey) => {
-      const instancedModelGroup = this.instancedMeshes.get(modelKey)!;
-      const modelType = modelVariants.get(modelKey)!;
-      const scale = modelType.scale || 1;
-
-      // Apply transforms to each submesh
-      instancedModelGroup.meshes.forEach((instancedMesh, meshIndex) => {
-        // Create debugger helper once per mesh
-        if (this.isDebugMode) {
-          this.createBoundingBoxHelper(instancedMesh, `${modelKey}_${meshIndex}`);
-        }
-
-        const tempPosition = new THREE.Vector3();
-
-        for (let i = 0; i < matrixArray.length; i++) {
-          const finalMatrix = matrixArray[i].clone();
-          finalMatrix.scale(new THREE.Vector3(scale, scale, scale));
-          instancedMesh.setMatrixAt(i, finalMatrix);
-
-          // Add debug marker at instance position
-          if (this.isDebugMode) {
-            tempPosition.setFromMatrixPosition(finalMatrix);
-            // Scale marker size with model scale, minimum 0.5
-            const markerScale = Math.max(scale * 0.5, 0.5);
-            this.addDebugMarker(tempPosition, markerScale);
-          }
-        }
-
-        // Update mesh properties
-        instancedMesh.count = matrixArray.length;
-        instancedMesh.instanceMatrix.needsUpdate = true;
-        instancedMesh.visible = true;
-        instancedMesh.frustumCulled = false;
-
-        // Update instance count tracking
-        this.instanceCounts.get(modelKey)![meshIndex] = matrixArray.length;
-      });
-
-      // Add group to scene only once
-      if (!instancedModelGroup.group.parent) {
-        this.scene.add(instancedModelGroup.group);
-      }
-    });
-  }
-
   private getRandomModelVariant(modelType: ModelType): string {
     const basePath = modelType.filename;
     const randomIndex = Math.floor(Math.random() * modelType.files.length);
@@ -320,9 +262,9 @@ export class ObjectManager {
     // Clean up resources
     this.instancedMeshes.forEach(({ group, meshes }) => {
       meshes.forEach((mesh) => {
-        mesh.geometry.dispose();
-        if (mesh.material instanceof THREE.Material) {
-          mesh.material.dispose();
+        mesh.instancedMesh.geometry.dispose();
+        if (mesh.instancedMesh.material instanceof THREE.Material) {
+          mesh.instancedMesh.material.dispose();
         }
       });
       this.scene.remove(group);
