@@ -1,18 +1,19 @@
 import * as THREE from "three";
 import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader";
-import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils";
+
+interface ModelMeshData {
+  geometry: THREE.BufferGeometry;
+  material: THREE.MeshPhongMaterial;
+  worldMatrix: THREE.Matrix4;
+}
 
 interface ModelData {
-  meshes: Array<{
-    geometry: THREE.BufferGeometry;
-    material: THREE.MeshPhongMaterial;
-    worldMatrix: THREE.Matrix4;
-  }>;
+  meshes: ModelMeshData[];
   scale: number;
 }
 
 export class ModelLoader {
-  private meshCache: Map<string, Array<{ geometry: THREE.BufferGeometry; material: THREE.MeshPhongMaterial; worldMatrix: THREE.Matrix4 }>>;
+  private meshCache: Map<string, ModelMeshData[]>;
 
   constructor() {
     this.meshCache = new Map();
@@ -22,8 +23,6 @@ export class ModelLoader {
     const fullFilename = `${filename}_${!noLeadingZero ? String(fileIndex).padStart(2, "0") : fileIndex}.fbx`;
     const cacheKey = fullFilename;
 
-    console.log(`Attempting to load model: ${fullFilename}`);
-
     if (this.meshCache.has(cacheKey)) {
       return {
         meshes: this.meshCache.get(cacheKey)!,
@@ -31,109 +30,117 @@ export class ModelLoader {
       };
     }
 
-    const modelData = await this.fetchModel(fullFilename, scale);
-    this.cacheModelData(cacheKey, modelData);
-    return modelData;
-  }
+    const loader = new FBXLoader();
+    const fbx = await loader.loadAsync(`${fullFilename}`);
+    const meshDatas: ModelMeshData[] = [];
 
-  private cacheModelData(cacheKey: string, modelData: ModelData): void {
-    this.meshCache.set(cacheKey, modelData.meshes);
-  }
+    fbx.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        const mesh = child as THREE.Mesh;
+        const geometry = mesh.geometry;
+        mesh.updateWorldMatrix(true, true);
 
-  private async fetchModel(filename: string, scale: number): Promise<ModelData> {
-    return new Promise((resolve, reject) => {
-      const loader = new FBXLoader();
+        console.log("Processing mesh:", {
+          name: child.name,
+          hasMaterials: Array.isArray(mesh.material),
+          materialsCount: Array.isArray(mesh.material) ? mesh.material.length : 1,
+          geometryGroups: geometry.groups,
+          geometryIndex: geometry.index ? geometry.index.count : 0,
+          geometryVertices: geometry.attributes.position.count,
+        });
 
-      const onProgress = (event: ProgressEvent) => {
-        if (event.lengthComputable) {
-          const percentComplete = (event.loaded / event.total) * 100;
-          console.log(`Loading progress: ${Math.round(percentComplete)}%`);
-        }
-      };
+        if (Array.isArray(mesh.material)) {
+          const materials = mesh.material as THREE.MeshPhongMaterial[];
+          const groups = geometry.groups;
+          const indexAttr = geometry.index;
+          const posAttr = geometry.attributes.position;
+          const normAttr = geometry.attributes.normal;
+          const uvAttr = geometry.attributes.uv;
 
-      loader.load(
-        filename,
-        (object) => {
-          console.log(`Loading model: ${filename}`, {
-            children: object.children.length,
-            meshes: object.children.filter((c) => c instanceof THREE.Mesh).length,
-          });
-          const geometries: THREE.BufferGeometry[] = [];
-          const combinedGeometry = new THREE.BufferGeometry();
-          const materials: THREE.Material[] = [];
+          materials.forEach((material, matIndex) => {
+            const group = groups.find((g) => g.materialIndex === matIndex);
+            if (!group) return;
 
-          // Normalize the model scale first
-          const normalizeScale = 1 / Math.max(...object.scale.toArray(), Number.EPSILON); // Prevent division by zero
-          object.scale.setScalar(normalizeScale * scale); // Apply the requested scale
-          object.updateMatrixWorld(true);
+            // Create new geometry for this material
+            const partGeometry = new THREE.BufferGeometry();
 
-          object.traverse((child) => {
-            if (child instanceof THREE.Mesh) {
-              const geometry = new THREE.BufferGeometry().copy(child.geometry);
-              geometry.applyMatrix4(child.matrixWorld);
+            // Get indices for this group
+            const indices = [];
+            if (indexAttr) {
+              for (let i = group.start; i < group.start + group.count; i++) {
+                indices.push(indexAttr.getX(i));
+              }
+            }
 
-              // Check for UVs
-              const hasUV = geometry.attributes.uv !== undefined;
-              console.log(`Mesh "${child.name}" has UVs: ${hasUV}`);
+            // Track unique vertices and create mapping
+            const uniqueVertices = new Map();
+            const newIndices: number[] = [];
+            const vertices: number[] = [];
+            const normals: number[] = [];
+            const uvs: number[] = [];
 
-              // Handle multiple materials
-              const childMaterials = Array.isArray(child.material) ? child.material.map((m) => m.clone()) : [child.material.clone()];
+            // Process each index
+            indices.forEach((oldIndex) => {
+              if (!uniqueVertices.has(oldIndex)) {
+                // Add new vertex
+                const vertexIndex = vertices.length / 3;
+                uniqueVertices.set(oldIndex, vertexIndex);
 
-              childMaterials.forEach((material) => {
-                // Ensure the material is MeshPhongMaterial
-                const phongMaterial = new THREE.MeshPhongMaterial();
-                phongMaterial.copy(material as THREE.MeshPhongMaterial);
+                // Copy position
+                vertices.push(posAttr.getX(oldIndex), posAttr.getY(oldIndex), posAttr.getZ(oldIndex));
 
-                // Preserve maps only if UVs are present
-                if (hasUV) {
-                  if ((child.material as THREE.MeshPhongMaterial).map) {
-                    phongMaterial.map = (child.material as THREE.MeshPhongMaterial).map;
-                  }
-                  if ((child.material as THREE.MeshPhongMaterial).normalMap) {
-                    phongMaterial.normalMap = (child.material as THREE.MeshPhongMaterial).normalMap;
-                  }
-                } else {
-                  // Remove maps if UVs are missing to prevent shader errors
-                  phongMaterial.map = null;
-                  phongMaterial.normalMap = null;
-                  phongMaterial.emissiveMap = null;
-                  phongMaterial.bumpMap = null;
-                  phongMaterial.envMap = null;
-                  phongMaterial.lightMap = null;
-                  phongMaterial.alphaMap = null;
-                  phongMaterial.displacementMap = null;
-
-                  console.warn(`UVs missing: Skipping texture assignments for material "${material.name}".`);
+                // Copy normal if exists
+                if (normAttr) {
+                  normals.push(normAttr.getX(oldIndex), normAttr.getY(oldIndex), normAttr.getZ(oldIndex));
                 }
 
-                phongMaterial.reflectivity = 0;
-                phongMaterial.side = THREE.FrontSide;
-                phongMaterial.needsUpdate = true;
-                materials.push(phongMaterial);
-              });
-              geometries.push(geometry);
+                // Copy UV if exists
+                if (uvAttr) {
+                  uvs.push(uvAttr.getX(oldIndex), uvAttr.getY(oldIndex));
+                }
+              }
+
+              // Add index to new buffer
+              newIndices.push(uniqueVertices.get(oldIndex));
+            });
+
+            // Set attributes
+            partGeometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
+            if (normals.length > 0) {
+              partGeometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
             }
-          });
+            if (uvs.length > 0) {
+              partGeometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+            }
+            partGeometry.setIndex(newIndices);
 
-          const bufferGeometry = mergeGeometries(geometries);
-          bufferGeometry.scale(scale, scale, scale);
-
-          resolve({
-            meshes: [{ geometry: bufferGeometry, material: materials[0] as THREE.MeshPhongMaterial, worldMatrix: new THREE.Matrix4() }],
-            scale,
+            meshDatas.push({
+              geometry: partGeometry,
+              material: material.clone(),
+              worldMatrix: mesh.matrixWorld.clone(),
+            });
           });
-        },
-        onProgress,
-        (error: any) => {
-          console.error(`Error loading model ${filename}:`, error);
-          reject(new Error(`Failed to load model ${filename}: ${error.message}`));
+        } else {
+          console.log("single material");
+          // Single material case
+          meshDatas.push({
+            geometry: geometry.clone(),
+            material: (mesh.material as THREE.MeshPhongMaterial).clone(),
+            worldMatrix: mesh.matrix.clone(),
+          });
         }
-      );
+      }
     });
+
+    this.meshCache.set(cacheKey, meshDatas);
+
+    return {
+      meshes: meshDatas,
+      scale,
+    };
   }
 
   public dispose(): void {
-    // Clean up resources
     this.meshCache.forEach((meshes) => {
       meshes.forEach((mesh) => {
         mesh.geometry.dispose();

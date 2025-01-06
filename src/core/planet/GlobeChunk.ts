@@ -60,7 +60,7 @@ export class GlobeChunk {
   private generateLODLevels(baseGeometry: THREE.BufferGeometry): THREE.BufferGeometry[] {
     const levels: THREE.BufferGeometry[] = [baseGeometry];
     const modifier = new SimplifyModifier();
-    const reductionFactors = [0.5, 0.25, 0.125]; // Progressive vertex reduction
+    const reductionFactors = [0.5]; // Progressive vertex reduction
 
     for (const factor of reductionFactors) {
       const vertexCount = Math.floor(baseGeometry.attributes.position.count * factor);

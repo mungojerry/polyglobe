@@ -396,7 +396,7 @@ export class Globe {
 
     this.chunks.forEach((row) => {
       row.forEach((chunk) => {
-        chunk.mesh.visible = this.frustum.intersectsObject(chunk.mesh);
+        chunk.mesh.visible = false; //this.frustum.intersectsObject(chunk.mesh);
         if (chunk.mesh.visible) chunksVisible++;
         numChunks++;
       });
