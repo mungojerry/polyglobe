@@ -22,7 +22,7 @@ export class ChunkGenerator {
 
   public async generateChunks(
     landGeometry: THREE.BufferGeometry,
-    landMaterial: THREE.MeshPhongMaterial,
+    landMaterial: THREE.Material,
     parentObject: THREE.Object3D,
     chunkSize: number,
     onProgress?: ProgressCallback
@@ -95,7 +95,7 @@ export class ChunkGenerator {
   private async processChunk(
     task: ChunkTask,
     landGeometry: THREE.BufferGeometry,
-    landMaterial: THREE.MeshPhongMaterial,
+    landMaterial: THREE.Material,
     parentObject: THREE.Object3D,
     chunkSize: number,
     chunks: GlobeChunk[][],

@@ -31,10 +31,15 @@ export class Globe {
 
   private readonly frustum = new THREE.Frustum();
   private readonly cameraViewProjectionMatrix = new THREE.Matrix4();
-  private readonly landMaterial: THREE.MeshPhongMaterial = new THREE.MeshPhongMaterial({
+  // private readonly landMaterial: THREE.MeshPhongMaterial = new THREE.MeshPhongMaterial({
+  //   vertexColors: true,
+  //   flatShading: true,
+  //   shininess: 0.6,
+  //   shadowSide: THREE.DoubleSide,
+  //   clipShadows: false,
+  // });
+  private readonly landMaterial: THREE.MeshToonMaterial = new THREE.MeshToonMaterial({
     vertexColors: true,
-    flatShading: true,
-    shininess: 0.6,
     shadowSide: THREE.DoubleSide,
     clipShadows: false,
   });

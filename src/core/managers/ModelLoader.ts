@@ -1,13 +1,14 @@
 import * as THREE from "three";
 import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader";
 
-interface ModelMeshData {
+export interface ModelMeshData {
   geometry: THREE.BufferGeometry;
   material: THREE.MeshPhongMaterial;
   worldMatrix: THREE.Matrix4;
+  parentMatrix?: THREE.Matrix4;
 }
 
-interface ModelData {
+export interface ModelData {
   meshes: ModelMeshData[];
   scale: number;
 }
@@ -34,10 +35,22 @@ export class ModelLoader {
     const fbx = await loader.loadAsync(`${fullFilename}`);
     const meshDatas: ModelMeshData[] = [];
 
+    // Update all world matrices
+    fbx.updateWorldMatrix(true, true);
+
     fbx.traverse((child) => {
       if (child instanceof THREE.Mesh) {
         const mesh = child as THREE.Mesh;
         const geometry = mesh.geometry;
+
+        // make sure geoemtry is indexed and not non indexed
+        if (!geometry.index) {
+          const indices = [];
+          for (let i = 0; i < geometry.attributes.position.count; i++) {
+            indices.push(i);
+          }
+          geometry.setIndex(indices);
+        }
         mesh.updateWorldMatrix(true, true);
 
         console.log("Processing mesh:", {
@@ -59,7 +72,10 @@ export class ModelLoader {
 
           materials.forEach((material, matIndex) => {
             const group = groups.find((g) => g.materialIndex === matIndex);
-            if (!group) return;
+            if (!group) {
+              console.warn(`Can\'t find material index ${matIndex} for ${material.name}`);
+              return;
+            }
 
             // Create new geometry for this material
             const partGeometry = new THREE.BufferGeometry();
@@ -70,6 +86,8 @@ export class ModelLoader {
               for (let i = group.start; i < group.start + group.count; i++) {
                 indices.push(indexAttr.getX(i));
               }
+            } else {
+              console.warn(`Geometry is non indexed: ${material.name}`);
             }
 
             // Track unique vertices and create mapping
@@ -113,20 +131,45 @@ export class ModelLoader {
               partGeometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
             }
             partGeometry.setIndex(newIndices);
+            partGeometry.computeVertexNormals();
 
+            partGeometry.computeBoundingSphere();
+            console.log(partGeometry.boundingSphere);
+            console.log(partGeometry.attributes.position.count);
+            partGeometry.scale(scale, scale, scale);
+            const newMaterial = material.clone() as THREE.MeshPhongMaterial;
+            newMaterial.flatShading = true;
+            newMaterial.reflectivity = 0;
+            newMaterial.shininess = 0;
+            newMaterial.side = THREE.DoubleSide;
+            newMaterial.transparent = false;
+            newMaterial.needsUpdate = true;
             meshDatas.push({
               geometry: partGeometry,
-              material: material.clone(),
+              material: newMaterial,
               worldMatrix: mesh.matrixWorld.clone(),
+              parentMatrix: mesh.parent?.matrixWorld.clone(),
             });
           });
         } else {
           console.log("single material");
+          const newMaterial = mesh.material.clone() as THREE.MeshPhongMaterial;
+          newMaterial.flatShading = true;
+          newMaterial.reflectivity = 0;
+          newMaterial.shininess = 0;
+          newMaterial.transparent = false;
+          newMaterial.side = THREE.DoubleSide;
+          newMaterial.needsUpdate = true;
+
+          const newGeometry = geometry.clone();
+          newGeometry.computeVertexNormals();
+          newGeometry.scale(scale, scale, scale);
           // Single material case
           meshDatas.push({
-            geometry: geometry.clone(),
-            material: (mesh.material as THREE.MeshPhongMaterial).clone(),
+            geometry: newGeometry,
+            material: newMaterial,
             worldMatrix: mesh.matrix.clone(),
+            parentMatrix: mesh.parent?.matrixWorld.clone(),
           });
         }
       }
