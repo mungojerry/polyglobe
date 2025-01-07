@@ -4,18 +4,21 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
 // Define a configurable thrust force
-const THRUST_FORCE = 1;
-const TORQUE_FORCE = 0.9;
+const THRUST_FORCE = 1.0;
 const LINEAR_DAMPING = 0.3; // Reduced from 2
 const ANGULAR_DAMPING = 2; // Reduced from 5
 
 const STABILIZATION_STRENGTH = 0.006; // Adjustable auto-level strength
 
 // Rotation limits in radians
-const MAX_PITCH = Math.PI / 4; // 45 degrees
-const MAX_ROLL = Math.PI / 4; // 45 degrees
+const MAX_PITCH = Math.PI / 2; // 45 degrees
+const MAX_ROLL = Math.PI / 42; // 45 degrees
 
 const ROTATION_CORRECTION_STRENGTH = 1; // Adjustable correction force
+
+// Constants
+const MOUSE_SENSITIVITY = 0.002;
+const ROLL_SENSITIVITY = 0.1;
 
 export class FlyScene {
   private scene: THREE.Scene;
@@ -23,11 +26,15 @@ export class FlyScene {
   private renderer: THREE.WebGLRenderer;
   private world: RAPIER.World;
   private shipBody: RAPIER.RigidBody | undefined;
-  private thrust: boolean = false;
-  private pitch: number = 0;
+
   private roll: number = 0;
   private cameraOffset: THREE.Vector3;
   private shipModel: THREE.Group | null = null;
+  private mousePosition: THREE.Vector2;
+  private targetRotation: THREE.Quaternion;
+  private thrustUp: boolean = false;
+  private thrustDown: boolean = false;
+  private rollAmount: number = 0;
 
   constructor() {
     // Scene, camera, renderer setup
@@ -53,12 +60,21 @@ export class FlyScene {
 
     // Controls state
 
-    this.thrust = false;
-    this.pitch = 0;
+    this.thrustUp = false;
+    this.thrustDown = false;
     this.roll = 0;
 
     // Camera follow setup
     this.cameraOffset = new THREE.Vector3(0, 3, 10);
+    this.mousePosition = new THREE.Vector2();
+    this.targetRotation = new THREE.Quaternion();
+    window.addEventListener("wheel", this.handleMouseWheel.bind(this));
+
+    // Add mouse controls
+    document.addEventListener("mousemove", (event) => this.onMouseMove(event));
+    document.addEventListener("pointerlockchange", () => this.onPointerLockChange());
+    this.renderer.domElement.addEventListener("click", () => this.renderer.domElement.requestPointerLock());
+
     this.initialize();
   }
 
@@ -105,7 +121,7 @@ export class FlyScene {
   private updateCamera(): void {
     if (this.shipModel) {
       const shipPosition = this.shipModel.position;
-      this.camera.position.lerp(shipPosition.clone().add(this.cameraOffset), 0.1);
+      this.camera.position.lerp(shipPosition.clone().add(this.cameraOffset), 0.9);
       this.camera.lookAt(shipPosition);
     }
   }
@@ -130,22 +146,27 @@ export class FlyScene {
     });
   }
 
+  private onMouseMove(event: MouseEvent): void {
+    if (document.pointerLockElement === this.renderer.domElement) {
+      this.mousePosition.x += event.movementX * MOUSE_SENSITIVITY;
+      this.mousePosition.y += event.movementY * MOUSE_SENSITIVITY;
+      this.mousePosition.y = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, this.mousePosition.y));
+    }
+  }
+
+  private onPointerLockChange(): void {
+    if (document.pointerLockElement !== this.renderer.domElement) {
+      this.mousePosition.set(0, 0);
+    }
+  }
+
   private onKeyDown(event: KeyboardEvent): void {
     switch (event.code.toLowerCase()) {
       case "space":
-        this.thrust = true;
+        this.thrustUp = true;
         break;
-      case "keyw":
-        this.pitch = -1;
-        break;
-      case "keys":
-        this.pitch = 1;
-        break;
-      case "keya":
-        this.roll = 1;
-        break;
-      case "keyd":
-        this.roll = -1;
+      case "shiftleft":
+        this.thrustDown = true;
         break;
     }
   }
@@ -153,15 +174,10 @@ export class FlyScene {
   private onKeyUp(event: KeyboardEvent): void {
     switch (event.code.toLowerCase()) {
       case "space":
-        this.thrust = false;
+        this.thrustUp = false;
         break;
-      case "keyw":
-      case "keys":
-        this.pitch = 0;
-        break;
-      case "keya":
-      case "keyd":
-        this.roll = 0;
+      case "shiftleft":
+        this.thrustDown = false;
         break;
     }
   }
@@ -204,12 +220,12 @@ export class FlyScene {
     if (!this.shipModel || !this.shipBody) return;
     requestAnimationFrame(() => this.animate());
 
-    // Apply thrust force in ship's local up direction
-    if (this.thrust) {
+    this.updateShipRotation();
+
+    if (this.thrustUp || this.thrustDown) {
       const rotation = this.shipBody.rotation();
       const quaternion = new THREE.Quaternion(rotation.x, rotation.y, rotation.z, rotation.w);
-
-      const thrustDirection = new THREE.Vector3(0, 1, 0);
+      const thrustDirection = new THREE.Vector3(0, this.thrustUp ? 1 : -1, 0);
       thrustDirection.applyQuaternion(quaternion);
 
       this.shipBody.applyImpulse(
@@ -222,45 +238,13 @@ export class FlyScene {
       );
     }
 
-    // Get current rotation for control input scaling
-    const currentRotation = this.getCurrentRotation();
-    let pitchInput = this.pitch;
-    let rollInput = this.roll;
-
-    // Scale down control inputs when approaching limits
-    if (Math.abs(currentRotation.x) > MAX_PITCH * 0.8) {
-      const scale = Math.max(0, 1 - (Math.abs(currentRotation.x) - MAX_PITCH * 0.8) / (MAX_PITCH * 0.2));
-      if (Math.sign(pitchInput) === Math.sign(currentRotation.x)) {
-        pitchInput *= scale;
-      }
-    }
-
-    if (Math.abs(currentRotation.z) > MAX_ROLL * 0.8) {
-      const scale = Math.max(0, 1 - (Math.abs(currentRotation.z) - MAX_ROLL * 0.8) / (MAX_ROLL * 0.2));
-      if (Math.sign(rollInput) === Math.sign(currentRotation.z)) {
-        rollInput *= scale;
-      }
-    }
-
-    // Apply scaled control torques
-    if (pitchInput !== 0 || rollInput !== 0) {
-      this.shipBody.applyTorqueImpulse(
-        {
-          x: pitchInput * TORQUE_FORCE,
-          y: 0,
-          z: rollInput * TORQUE_FORCE,
-        },
-        true
-      );
-    }
-
     // Apply stabilization when no input
-    const stabilizationTorque = this.getStabilizationTorque();
-    this.shipBody.applyTorqueImpulse(stabilizationTorque, true);
+    // const stabilizationTorque = this.getStabilizationTorque();
+    // this.shipBody.applyTorqueImpulse(stabilizationTorque, true);
 
-    // Apply limit correction torque
-    const correctionTorque = this.getLimitCorrectionTorque();
-    this.shipBody.applyTorqueImpulse(correctionTorque, true);
+    // // Apply limit correction torque
+    // const correctionTorque = this.getLimitCorrectionTorque();
+    // this.shipBody.applyTorqueImpulse(correctionTorque, true);
 
     // Sync visual model with physics body
     const translation = this.shipBody.translation();
@@ -269,26 +253,38 @@ export class FlyScene {
     this.shipModel.position.set(translation.x, translation.y, translation.z);
     this.shipModel.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
 
+    // Update ship rotation based on mouse
+    if (this.shipBody) {
+      const euler = new THREE.Euler(-this.mousePosition.y, -this.mousePosition.x, 0, "YXZ");
+      this.targetRotation.setFromEuler(euler);
+
+      const currentRot = new THREE.Quaternion().setFromEuler(this.getCurrentRotation());
+      currentRot.slerp(this.targetRotation, 0.1);
+
+      this.shipBody.setRotation(currentRot, true);
+    }
+
     this.updateCamera();
     this.world.step();
     this.renderer.render(this.scene, this.camera);
   }
 
-  private getStabilizationTorque(): { x: number; y: number; z: number } {
-    if (!this.shipBody || this.pitch !== 0 || this.roll !== 0) {
-      return { x: 0, y: 0, z: 0 };
+  private handleMouseWheel(event: WheelEvent): void {
+    if (document.pointerLockElement === this.renderer.domElement) {
+      this.rollAmount += Math.sign(event.deltaY) * ROLL_SENSITIVITY;
     }
+  }
 
-    const currentRotation = this.getCurrentRotation();
+  private updateShipRotation(): void {
+    if (!this.shipBody) return;
 
-    // Calculate correction torques (ignore yaw - y axis)
-    const correctionX = -currentRotation.x * STABILIZATION_STRENGTH;
-    const correctionZ = -currentRotation.z * STABILIZATION_STRENGTH;
+    // Y movement affects pitch (X rotation), X movement affects roll (Z rotation)
+    const euler = new THREE.Euler(-this.mousePosition.y, 0, -this.mousePosition.x, "XYZ");
 
-    return {
-      x: correctionX,
-      y: 0,
-      z: correctionZ,
-    };
+    const targetQuat = new THREE.Quaternion().setFromEuler(euler);
+    const currentRot = new THREE.Quaternion().setFromEuler(this.getCurrentRotation());
+    currentRot.slerp(targetQuat, 0.1);
+
+    this.shipBody.setRotation(currentRot, true);
   }
 }
