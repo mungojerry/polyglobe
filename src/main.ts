@@ -1,4 +1,4 @@
-import { GameScene } from "./core/scenes/GameScene";
+import { FlyScene } from "./core/scenes/FlyScene";
 import "./style.css";
 
 // let mode = "GAME";
@@ -38,7 +38,8 @@ import "./style.css";
 
 // Create a test scene
 // const testScene = new FBXViewerScene();
-const testScene = new GameScene();
+// const testScene = new GameScene();
+const testScene = new FlyScene();
 
 // Add random objects to the scene
 
