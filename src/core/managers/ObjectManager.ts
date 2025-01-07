@@ -132,8 +132,9 @@ export class ObjectManager {
           const { instancedMesh, originalWorldMatrix, parentMatrix } = meshData;
 
           instancedMesh.castShadow = true;
-          instancedMesh.receiveShadow = true;
-          instancedMesh.visible = true;
+          // instancedMesh.receiveShadow = true;
+          // instancedMesh.visible = true;
+          // (instancedMesh.material as THREE.MeshPhongMaterial).color = new THREE.Color(255, 0, 0);
           instanceGroup.add(instancedMesh);
 
           instancedMeshArray.push({
@@ -146,7 +147,8 @@ export class ObjectManager {
             this.createBoundingBoxHelper(instancedMesh, modelKey);
           }
         });
-
+        instanceGroup.castShadow = true;
+        instanceGroup.receiveShadow = true;
         const instancedModelGroup: InstancedModelGroup = {
           group: instanceGroup,
           meshes: instancedMeshArray,

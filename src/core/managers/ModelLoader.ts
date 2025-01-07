@@ -30,7 +30,7 @@ export class ModelLoader {
     const instancedMeshes: InstancedMeshData[] = [];
 
     fbx.updateWorldMatrix(true, true);
-
+    console.log(fbx);
     fbx.traverse((child) => {
       if (!(child instanceof THREE.Mesh)) return;
 
@@ -57,7 +57,7 @@ export class ModelLoader {
 
   private createInstancedMesh(
     geometry: THREE.BufferGeometry,
-    material: THREE.Material,
+    material: THREE.MeshPhongMaterial,
     worldMatrix: THREE.Matrix4,
     parentMatrix?: THREE.Matrix4
   ): InstancedMeshData {
@@ -80,13 +80,31 @@ export class ModelLoader {
   }
 
   private createStandardMaterial(originalMaterial: THREE.Material): THREE.MeshPhongMaterial {
-    const material = originalMaterial.clone() as THREE.MeshPhongMaterial;
-    material.flatShading = true;
-    material.reflectivity = 0;
-    material.shininess = 0;
-    material.side = THREE.DoubleSide;
+    const orig = originalMaterial as THREE.MeshPhongMaterial;
+    const material = new THREE.MeshPhongMaterial(); //originalMaterial.clone() as THREE.MeshPhongMaterial;
+    // material.flatShading = true;
+    // material.vertexColors = false;
+    material.reflectivity = orig.reflectivity;
+    material.shininess = orig.shininess;
+    material.side = THREE.FrontSide;
     material.transparent = false;
-    material.needsUpdate = true;
+    material.flatShading = true;
+    material.opacity = 1;
+    material.specular.copy(orig.specular);
+    material.emissive.copy(orig.emissive);
+    material.emissiveIntensity = 1; //orig.emissiveIntensity;
+    material.toneMapped = orig.toneMapped;
+    material.depthFunc = orig.depthFunc;
+    material.colorWrite = orig.colorWrite;
+    material.color.copy(orig.color); //new THREE.Color(originalMaterial.color.r * 2, originalMaterial.color.g * 2, originalMaterial.color.b * 2));
+    // material.color = new THREE.Color(1, 0, 0);
+    if (originalMaterial instanceof THREE.MeshPhongMaterial) {
+      // material.map = originalMaterial.map;
+      // material.normalMap = originalMaterial.normalMap;
+      // material.specularMap = originalMaterial.specularMap;
+    }
+    console.log(material.color.getHexString());
+    // material.needsUpdate = true;
     return material;
   }
 
@@ -112,6 +130,11 @@ export class ModelLoader {
       }
 
       const material = materials[materialIndex];
+
+      console.log("Original FBX material:", {
+        name: material.name,
+        color: material.color,
+      });
       const partGeometry = this.processPartGeometry(geometry, scale, group);
 
       if (partGeometry.attributes.position.count === 0) {
@@ -147,6 +170,7 @@ export class ModelLoader {
   ): THREE.BufferGeometry {
     const indexAttr = geometry.index!; // We ensure this exists in ensureIndexedGeometry
     const posAttr = geometry.attributes.position;
+
     const normAttr = geometry.attributes.normal;
     const uvAttr = geometry.attributes.uv;
 

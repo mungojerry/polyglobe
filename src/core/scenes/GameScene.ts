@@ -156,7 +156,7 @@ export class GameScene {
     this.initialize();
 
     this.sun = new Sun(this.globe, this.scene, this.globe.getRadius() * 2.4);
-    this.moon = new Moon(this.scene, this.globe.getRadius() * 2.4);
+    // this.moon = new Moon(this.scene, this.globe.getRadius() * 2.4);
 
     this.setupControls();
 
@@ -324,7 +324,7 @@ export class GameScene {
         this.miniGlobe.update();
       }
       debugManager.set("polys", "Polys: " + this.renderer.info.render.triangles);
-      if (this.cameraAttachedTo === this.player.getObject() && !config.orbitCoontrols) this.updateCameraFOV();
+      // if (this.cameraAttachedTo === this.player.getObject() && !config.orbitCoontrols) this.updateCameraFOV();
       this.composer.render();
       requestAnimationFrame(step);
     };
@@ -390,7 +390,7 @@ export class GameScene {
     this.camera.updateMatrixWorld(true);
 
     this.sun.update(1);
-    this.moon.update(1);
+    // this.moon.update(1);
 
     this.camera.updateProjectionMatrix();
   }

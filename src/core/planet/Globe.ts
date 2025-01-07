@@ -38,9 +38,11 @@ export class Globe {
   //   shadowSide: THREE.DoubleSide,
   //   clipShadows: false,
   // });
-  private readonly landMaterial: THREE.MeshToonMaterial = new THREE.MeshToonMaterial({
+  private readonly landMaterial: THREE.MeshPhongMaterial = new THREE.MeshPhongMaterial({
     vertexColors: true,
-    shadowSide: THREE.DoubleSide,
+    shininess: 0,
+    reflectivity: 0,
+    shadowSide: THREE.FrontSide,
     clipShadows: false,
   });
   private readonly infection: Infection;
@@ -401,7 +403,7 @@ export class Globe {
 
     this.chunks.forEach((row) => {
       row.forEach((chunk) => {
-        chunk.mesh.visible = false; //this.frustum.intersectsObject(chunk.mesh);
+        chunk.mesh.visible = this.frustum.intersectsObject(chunk.mesh);
         if (chunk.mesh.visible) chunksVisible++;
         numChunks++;
       });
