@@ -4,19 +4,20 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
 // Define a configurable thrust force
-const THRUST_FORCE = 1.0;
-const LINEAR_DAMPING = 0.8; // Reduced from 2
-
-const MOUSE_SENSITIVITY = 0.001;
-const ROLL_SENSITIVITY = 0.1;
+// Updated constants for better handling
+const THRUST_FORCE = 1.0; // Doubled for more responsive acceleration
+const LINEAR_DAMPING = 2.0; // Increased for tighter stopping
+const MOUSE_SENSITIVITY = 0.002; // Reduced for finer control
+const AUTO_STABILIZE_SPEED = 0.15; // Increased for snappier stabilization
+const BANKING_FACTOR = 0.4; // Increased for more visible banking
+const ROLL_SENSITIVITY = 0.05; // Added for mouse wheel roll control
 
 const PLANET_RADIUS = 300;
-const GRAVITY_STRENGTH = 20.0;
+const GRAVITY_STRENGTH = 18.0; // Reduced further for more forgiving flight
+const HOVER_FORCE = 1.2; // Increased for stronger hover
+const MAX_VELOCITY = 150; // Increased for higher top speed
 const SHIP_START_HEIGHT = PLANET_RADIUS + 10;
 
-// Update constants
-const MAX_PITCH = Math.PI / 4; // 45 degrees
-const MAX_ROLL = Math.PI / 4; // 45 degrees
 const ROTATION_SMOOTHING = 0.05; // Reduced from 0.1
 
 const COLLISION_MASKS = {
@@ -24,7 +25,6 @@ const COLLISION_MASKS = {
   SHIP: 0xffffffff, // Collide with everything
 };
 
-const MAX_VELOCITY = 100;
 const SHIP_MASS = 1.0;
 const PLANET_MASS = 1000.0;
 
