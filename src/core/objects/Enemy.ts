@@ -18,7 +18,7 @@ enum Mode {
   Attack = "attack",
   Infect = "infect",
 }
-export class FlyingObject extends BaseGameObject implements IGameObject {
+export class Enemy extends BaseGameObject implements IGameObject {
   private mode: Mode = Mode.Infect;
   private attackRange = 50;
   private shootRange = 30;

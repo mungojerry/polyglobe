@@ -1,15 +1,17 @@
 import RAPIER from "@dimforge/rapier3d";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { vectorPool } from "../utils/vectorPool";
 
 // Constants
 const THRUST_FORCE = 1.5;
-const LINEAR_DAMPING = 1.0;
+const LINEAR_DAMPING = 0.3;
+const ANGULAR_DAMPING = 4.9;
 const PLANET_RADIUS = 300;
 const GRAVITY_STRENGTH = 40.0;
-const MAX_VELOCITY = 150;
+const MAX_VELOCITY = 80;
 const SHIP_START_HEIGHT = PLANET_RADIUS + 10;
-const ROTATION_RATE = 0.05;
+const ROTATION_RATE = 0.1;
 
 const COLLISION_MASKS = {
   PLANET: 0xffffffff,
@@ -25,11 +27,6 @@ export class ZarchFlyScene {
   private planetBody: RAPIER.RigidBody | undefined;
   private shipModel: THREE.Group | null = null;
   private thrustActive: boolean = false;
-
-  // Target angles for ship rotation
-  private targetRotationX: number = 0;
-  private targetRotationY: number = 0;
-  private targetRotationZ: number = 0;
 
   // Current mouse state
   private mouseX: number = 0;
@@ -105,8 +102,8 @@ export class ZarchFlyScene {
           const rigidBodyDesc = new RAPIER.RigidBodyDesc(RAPIER.RigidBodyType.Dynamic)
             .setTranslation(startPos.x, startPos.y, startPos.z)
             .setLinearDamping(LINEAR_DAMPING)
-            .setAngularDamping(0.9)
-            .setAdditionalMass(1.0);
+            .setAngularDamping(ANGULAR_DAMPING)
+            .setAdditionalMass(0);
 
           this.shipBody = this.world.createRigidBody(rigidBodyDesc);
 
@@ -168,8 +165,8 @@ export class ZarchFlyScene {
 
     // Create rotation quaternion based on mouse position
     const euler = new THREE.Euler(
-      -relativeY * Math.PI * 0.4, // Pitch (based on Y mouse position)
-      -relativeX * Math.PI * 0.94, // Yaw (based on X mouse position)
+      -relativeY * Math.PI * 0.6, // Pitch (based on Y mouse position)
+      -relativeX * Math.PI * 2, // Yaw (based on X mouse position)
       0, // Roll (can be added if needed)
       "YXZ"
     );
@@ -242,52 +239,59 @@ export class ZarchFlyScene {
   //   if (!this.shipModel) return;
 
   //   const shipPos = this.shipModel.position;
+
+  //   // Calculate the up vector from the planet center to the ship
   //   const upVector = shipPos.clone().normalize();
 
-  //   // Position camera behind and slightly above ship
-  //   const offset = new THREE.Vector3(0, 3, 15);
-  //   const shipRotation = this.shipModel.quaternion;
-  //   offset.applyQuaternion(shipRotation);
+  //   // Define spherical coordinates for the camera position relative to the ship
+  //   const radius = 10; // Distance from the ship
+  //   const theta = Math.PI / 4; // Angle from the vertical (elevation)
+  //   const phi = Math.PI / 4; // Angle around the vertical axis (azimuth)
 
-  //   const targetCameraPos = shipPos.clone().add(offset);
-  //   this.camera.position.lerp(targetCameraPos, 0.1);
+  //   // Convert spherical coordinates to Cartesian coordinates
+  //   const offsetX = radius * Math.sin(theta) * Math.cos(phi);
+  //   const offsetY = radius * Math.cos(theta);
+  //   const offsetZ = radius * Math.sin(theta) * Math.sin(phi);
 
-  //   // Orient camera to look at ship
-  //   this.camera.up.copy(upVector);
+  //   // Calculate the target camera position
+  //   const targetPos = new THREE.Vector3(shipPos.x + offsetX, shipPos.y + offsetY, shipPos.z + offsetZ);
+
+  //   // Smooth camera movement
+  //   this.camera.position.lerp(targetPos, 0.8);
+
+  //   // Ensure the camera looks at the ship
   //   this.camera.lookAt(shipPos);
+
+  //   // Set the camera's up vector to be perpendicular to the sphere surface
+  //   this.camera.up.copy(upVector);
   // }
 
-  private updateCamera(): void {
-    if (!this.shipModel) return;
+  private offset = new THREE.Vector3(0, 5, -8);
+  private currentPosition = new THREE.Vector3(0, 0, 0);
 
-    const shipPos = this.shipModel.position;
+  private currentLookAt = new THREE.Vector3();
+  private updateCamera(position: THREE.Vector3, playerRotation: THREE.Quaternion): void {
+    const up = position.clone().normalize();
+    const forward = vectorPool.getVector(0, 0, 1);
+    forward.applyQuaternion(playerRotation);
+    const right = vectorPool.getVector().crossVectors(up, forward).normalize();
+    forward.crossVectors(right, up).normalize();
 
-    // Calculate up vector (from planet center to ship)
-    const upVector = shipPos.clone().normalize();
+    const targetPosition = position.clone();
+    targetPosition.add(up.multiplyScalar(this.offset.y));
+    targetPosition.add(forward.multiplyScalar(this.offset.z));
+    const cameraLerp = 0.75;
 
-    // Create right vector
-    const right = new THREE.Vector3(0, 0, 1).cross(upVector).normalize();
+    this.currentPosition.lerp(targetPosition, cameraLerp);
+    this.camera.position.copy(this.currentPosition);
+    this.currentLookAt.lerp(position, cameraLerp);
+    this.camera.lookAt(this.currentLookAt);
+    this.camera.up.copy(up);
 
-    // Create forward vector perpendicular to up and right
-    const forward = upVector.clone().cross(right);
-
-    // Create rotation matrix from these vectors
-    const rotationMatrix = new THREE.Matrix4();
-    rotationMatrix.makeBasis(right, upVector, forward);
-
-    // Apply camera offset in this local space
-    const offset = new THREE.Vector3(0, 3, 10);
-    offset.applyMatrix4(rotationMatrix);
-
-    // Calculate final camera position
-    const targetPos = shipPos.clone().add(offset);
-
-    // Smooth camera movement
-    this.camera.position.lerp(targetPos, 0.8);
-
-    // Orient camera
-    this.camera.up.copy(upVector);
-    this.camera.lookAt(shipPos);
+    vectorPool.releaseVector(forward);
+    vectorPool.releaseVector(right);
+    this.camera.updateMatrixWorld(true);
+    this.camera.updateProjectionMatrix();
   }
   private animate(): void {
     requestAnimationFrame(() => this.animate());
@@ -304,7 +308,7 @@ export class ZarchFlyScene {
     this.shipModel.position.set(translation.x, translation.y, translation.z);
     this.shipModel.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
 
-    this.updateCamera();
+    this.updateCamera(this.shipModel.position.clone(), this.shipModel.quaternion.clone());
     this.world.step();
     this.renderer.render(this.scene, this.camera);
   }

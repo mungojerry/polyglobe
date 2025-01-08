@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { FlyingObject } from "../objects/FlyingObject";
+import { Enemy } from "../objects/Enemy";
 
 const cameraConfig = {
   snapToLevelFlight: false,
@@ -54,9 +54,9 @@ export class CameraController {
     }
   }
 
-  private attachedTo!: FlyingObject;
+  private attachedTo!: Enemy;
 
-  public attachTo(object: FlyingObject) {
+  public attachTo(object: Enemy) {
     this.attachedTo = object;
   }
 

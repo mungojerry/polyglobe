@@ -12,7 +12,7 @@ import { debugManager } from "../managers/debugManager";
 import { modelGroups } from "../managers/models";
 import { ObjectManager } from "../managers/ObjectManager";
 import { Cloud } from "../objects/Cloud";
-import { FlyingObject } from "../objects/FlyingObject";
+import { Enemy } from "../objects/Enemy";
 import { Moon } from "../objects/Moon";
 import { Player } from "../objects/Player";
 import { Stars } from "../objects/Stars";
@@ -78,7 +78,7 @@ export class GameScene {
   private currentGenerator: BaseNoise;
   private sun!: Sun;
   private moon!: Moon;
-  private flyingObjects: FlyingObject[] = [];
+  private enemys: Enemy[] = [];
   private currentLookAt = new THREE.Vector3();
   private currentPosition = new THREE.Vector3();
   private offset = new THREE.Vector3(0, 2, -3);
@@ -150,7 +150,7 @@ export class GameScene {
 
     this.loadingScreen = new LoadingScreen();
 
-    this.initializeFlyingObjects();
+    this.initializeEnemys();
 
     // Start initialization
     this.initialize();
@@ -223,7 +223,7 @@ export class GameScene {
       this.miniGlobe = new MiniGlobe(this.globe.getMiniMapGeometry(), this.camera, 200, 200);
       // Add markers to miniglobe
       this.miniGlobe.addMarkers([this.player], 0x00ff00);
-      this.miniGlobe.addMarkers([...this.flyingObjects], 0xff0000);
+      this.miniGlobe.addMarkers([...this.enemys], 0xff0000);
 
       this.loadingScreen.updateStage("Initializing World", 50);
       this.loadingScreen.setStageComplete("Initializing World");
@@ -245,13 +245,13 @@ export class GameScene {
     }
   }
 
-  private async initializeFlyingObjects(): Promise<void> {
+  private async initializeEnemys(): Promise<void> {
     const globeRadius = this.globe.getRadius();
     const minDistance = globeRadius * 1.3;
     for (let i = 0; i < config.numUFOs; i++) {
       const position = generateRandomPosition(minDistance);
-      const flyingObject = new FlyingObject(this.scene, this.world, position, this.globe, this.player);
-      this.flyingObjects.push(flyingObject);
+      const enemy = new Enemy(this.scene, this.world, position, this.globe, this.player);
+      this.enemys.push(enemy);
     }
   }
 
@@ -319,7 +319,7 @@ export class GameScene {
       if (this.debugMesh?.visible) {
         this.updateDebugVisualization();
       }
-      this.flyingObjects.forEach((flyingObject) => flyingObject.update(this.camera));
+      this.enemys.forEach((enemy) => enemy.update(this.camera));
       if (this.miniGlobe) {
         this.miniGlobe.update();
       }
@@ -416,8 +416,8 @@ export class GameScene {
     this.dynamicBodies.forEach(({ body }) => {
       this.applyGravity(body);
     });
-    this.flyingObjects.forEach((flyingObject) => {
-      this.applyGravity(flyingObject.getBody());
+    this.enemys.forEach((enemy) => {
+      this.applyGravity(enemy.getBody());
     });
   }
 
@@ -479,9 +479,9 @@ export class GameScene {
       "Camera: ",
       () => "Player",
       (value) => {
-        this.cameraAttachedTo = value === "Player" ? this.player.getObject() : this.flyingObjects[parseInt(value.replace("UFO #", ""))].getObject();
+        this.cameraAttachedTo = value === "Player" ? this.player.getObject() : this.enemys[parseInt(value.replace("UFO #", ""))].getObject();
       },
-      ["Player", ...this.flyingObjects.map((_, index) => "UFO #" + index)]
+      ["Player", ...this.enemys.map((_, index) => "UFO #" + index)]
     );
 
     controlManager.addAccordion("waterControls", "Water Shader Controls");
