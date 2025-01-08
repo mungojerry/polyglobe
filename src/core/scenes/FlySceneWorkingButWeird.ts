@@ -7,14 +7,14 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 // Updated constants for better handling
 const THRUST_FORCE = 1.0; // Doubled for more responsive acceleration
 const LINEAR_DAMPING = 1.0; // Increased for tighter stopping
-const ROLL_SENSITIVITY = 2; // Added for mouse wheel roll control
+const SENSITIVITY = 0.002; // Added for mouse wheel roll control
 
 const PLANET_RADIUS = 300;
 const GRAVITY_STRENGTH = 20.0; // Reduced further for more forgiving flight
 const MAX_VELOCITY = 150; // Increased for higher top speed
 const SHIP_START_HEIGHT = PLANET_RADIUS + 10;
 
-const ROTATION_SMOOTHING = 0.05; // Reduced from 0.1
+const ROTATION_SMOOTHING = 1; // Reduced from 0.1
 
 const COLLISION_MASKS = {
   PLANET: 0xffffffff, // Collide with everything
@@ -30,14 +30,13 @@ export class FlyScene {
   private renderer: THREE.WebGLRenderer;
   private world: RAPIER.World;
   private shipBody: RAPIER.RigidBody | undefined;
+  private planet!: THREE.Mesh;
   private planetBody: RAPIER.RigidBody | undefined;
 
   private shipModel: THREE.Group | null = null;
   private mousePosition: THREE.Vector2;
   private thrustUp: boolean = false;
   private thrustDown: boolean = false;
-  private rollAmount: number = 0;
-  private planet!: THREE.Mesh;
 
   private mouseRotation: THREE.Euler = new THREE.Euler(0, 0, 0, "YXZ");
   private desiredRotation: THREE.Quaternion = new THREE.Quaternion();
@@ -72,7 +71,6 @@ export class FlyScene {
 
     // Camera follow setup
     this.mousePosition = new THREE.Vector2();
-    window.addEventListener("wheel", this.handleMouseWheel.bind(this));
 
     this.screenCenter = new THREE.Vector2(window.innerWidth / 2, window.innerHeight / 2);
     this.mouseScreenPosition = new THREE.Vector2(this.screenCenter.x, this.screenCenter.y);
@@ -93,7 +91,6 @@ export class FlyScene {
     // Add mouse controls
     document.addEventListener("mousemove", (event) => this.onMouseMove(event));
     document.addEventListener("pointerlockchange", () => this.onPointerLockChange());
-    //  this.renderer.domElement.addEventListener("click", () => this.renderer.domElement.requestPointerLock());
 
     this.animate();
   }
@@ -188,16 +185,18 @@ export class FlyScene {
     this.mouseScreenPosition.y = Math.max(0, Math.min(window.innerHeight, this.mouseScreenPosition.y));
 
     // Calculate relative position from center (-1 to 1 range)
-    const relativeX = (this.mouseScreenPosition.x - this.screenCenter.x) / (window.innerWidth / 2);
-    const relativeY = (this.mouseScreenPosition.y - this.screenCenter.y) / (window.innerHeight / 2);
+    const relativeX = this.mouseScreenPosition.x - this.screenCenter.x; /// (window.innerWidth / 2);
+    const relativeY = this.mouseScreenPosition.y - this.screenCenter.y; // / (window.innerHeight / 2);
 
     // Update mouse position with relative values and sensitivity
     this.mousePosition.x = Math.max(-1, Math.min(1, relativeX)) * Math.PI;
-    this.mousePosition.y = Math.max(-1, Math.min(1, relativeY)) * (Math.PI / 2.5);
+    this.mousePosition.y = Math.max(-1, Math.min(1, relativeY)) * Math.PI;
 
     // Directly apply pitch and roll based on mouse movement
-    this.rollAmount = relativeX * ROLL_SENSITIVITY;
-    this.mouseRotation.x = relativeY * ROLL_SENSITIVITY;
+    this.mouseRotation.x = relativeY * SENSITIVITY;
+    this.mouseRotation.y = relativeX * SENSITIVITY;
+    // Calculate roll based on horizontal mouse movement
+    this.mouseRotation.z = -relativeX * SENSITIVITY;
   }
 
   private onPointerLockChange(): void {
@@ -267,11 +266,6 @@ export class FlyScene {
     this.renderer.render(this.scene, this.camera);
   }
 
-  private handleMouseWheel(event: WheelEvent): void {
-    if (document.pointerLockElement === this.renderer.domElement) {
-      this.rollAmount += Math.sign(event.deltaY) * ROLL_SENSITIVITY;
-    }
-  }
   private updateShipRotation(): void {
     if (!this.shipBody) return;
 
@@ -290,8 +284,9 @@ export class FlyScene {
     let surfaceMatrix = new THREE.Matrix4().makeBasis(right, upVector, forward);
 
     // Apply pitch and roll
-    const pitchMatrix = new THREE.Matrix4().makeRotationAxis(right, this.mouseRotation.x);
-    const rollMatrix = new THREE.Matrix4().makeRotationAxis(forward, this.rollAmount);
+    const pitchMatrix = new THREE.Matrix4().makeRotationAxis(forward, this.mouseRotation.y);
+    const rollMatrix = new THREE.Matrix4().makeRotationAxis(right, this.mouseRotation.x);
+    const yawMatrix = new THREE.Matrix4().makeRotationAxis(upVector, this.mouseRotation.z);
 
     const finalMatrix = surfaceMatrix.clone().multiply(rollMatrix).multiply(pitchMatrix);
 
