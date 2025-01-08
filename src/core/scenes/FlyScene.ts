@@ -5,20 +5,28 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
 // Define a configurable thrust force
 const THRUST_FORCE = 1.0;
-const LINEAR_DAMPING = 0.3; // Reduced from 2
-const ANGULAR_DAMPING = 2; // Reduced from 5
+const LINEAR_DAMPING = 0.8; // Reduced from 2
 
-const STABILIZATION_STRENGTH = 0.006; // Adjustable auto-level strength
-
-// Rotation limits in radians
-const MAX_PITCH = Math.PI / 2; // 45 degrees
-const MAX_ROLL = Math.PI / 42; // 45 degrees
-
-const ROTATION_CORRECTION_STRENGTH = 1; // Adjustable correction force
-
-// Constants
-const MOUSE_SENSITIVITY = 0.002;
+const MOUSE_SENSITIVITY = 0.001;
 const ROLL_SENSITIVITY = 0.1;
+
+const PLANET_RADIUS = 300;
+const GRAVITY_STRENGTH = 20.0;
+const SHIP_START_HEIGHT = PLANET_RADIUS + 10;
+
+// Update constants
+const MAX_PITCH = Math.PI / 4; // 45 degrees
+const MAX_ROLL = Math.PI / 4; // 45 degrees
+const ROTATION_SMOOTHING = 0.05; // Reduced from 0.1
+
+const COLLISION_MASKS = {
+  PLANET: 0xffffffff, // Collide with everything
+  SHIP: 0xffffffff, // Collide with everything
+};
+
+const MAX_VELOCITY = 100;
+const SHIP_MASS = 1.0;
+const PLANET_MASS = 1000.0;
 
 export class FlyScene {
   private scene: THREE.Scene;
@@ -26,8 +34,8 @@ export class FlyScene {
   private renderer: THREE.WebGLRenderer;
   private world: RAPIER.World;
   private shipBody: RAPIER.RigidBody | undefined;
+  private planetBody: RAPIER.RigidBody | undefined;
 
-  private roll: number = 0;
   private cameraOffset: THREE.Vector3;
   private shipModel: THREE.Group | null = null;
   private mousePosition: THREE.Vector2;
@@ -35,6 +43,13 @@ export class FlyScene {
   private thrustUp: boolean = false;
   private thrustDown: boolean = false;
   private rollAmount: number = 0;
+  private planet!: THREE.Mesh;
+
+  private mouseRotation: THREE.Euler = new THREE.Euler(0, 0, 0, "YXZ");
+  private desiredRotation: THREE.Quaternion = new THREE.Quaternion();
+
+  private screenCenter: THREE.Vector2;
+  private mouseScreenPosition: THREE.Vector2;
 
   constructor() {
     // Scene, camera, renderer setup
@@ -56,13 +71,10 @@ export class FlyScene {
     this.scene.add(directionalLight);
 
     // Physics setup
-    this.world = new RAPIER.World({ x: 0, y: -19.81, z: 0 });
-
-    // Controls state
+    this.world = new RAPIER.World({ x: 0, y: 0, z: 0 }); // Remove default gravity
 
     this.thrustUp = false;
     this.thrustDown = false;
-    this.roll = 0;
 
     // Camera follow setup
     this.cameraOffset = new THREE.Vector3(0, 3, 10);
@@ -70,44 +82,26 @@ export class FlyScene {
     this.targetRotation = new THREE.Quaternion();
     window.addEventListener("wheel", this.handleMouseWheel.bind(this));
 
-    // Add mouse controls
-    document.addEventListener("mousemove", (event) => this.onMouseMove(event));
-    document.addEventListener("pointerlockchange", () => this.onPointerLockChange());
-    this.renderer.domElement.addEventListener("click", () => this.renderer.domElement.requestPointerLock());
+    this.screenCenter = new THREE.Vector2(window.innerWidth / 2, window.innerHeight / 2);
+    this.mouseScreenPosition = new THREE.Vector2(this.screenCenter.x, this.screenCenter.y);
 
     this.initialize();
   }
 
   private async initialize() {
-    await this.loadShipModel();
-
-    // Create physics body without joint constraints
-    this.shipBody = this.world.createRigidBody(
-      RAPIER.RigidBodyDesc.newDynamic().setTranslation(0, 10, 0).setAngularDamping(ANGULAR_DAMPING).setLinearDamping(LINEAR_DAMPING)
-    );
-
-    this.world.createCollider(RAPIER.ColliderDesc.cuboid(0.5, 0.5, 0.5), this.shipBody);
-
-    // Ground geometry with grid
-    const groundGeometry = new THREE.PlaneGeometry(400, 400, 50, 50);
-    groundGeometry.rotateX(-Math.PI / 2);
-    const groundMaterial = new THREE.MeshStandardMaterial({ color: 0x228b22, wireframe: false });
-    const groundMesh = new THREE.Mesh(groundGeometry, groundMaterial);
-    groundMesh.receiveShadow = true;
-    this.scene.add(groundMesh);
-
-    const gridHelper = new THREE.GridHelper(400, 50, 0x000000, 0x000000);
-    gridHelper.position.y = 0.1;
-    this.scene.add(gridHelper);
-
-    const groundBody = this.world.createRigidBody(RAPIER.RigidBodyDesc.newStatic());
-    this.world.createCollider(RAPIER.ColliderDesc.cuboid(200, 0.1, 200).setTranslation(0, 0, 0), groundBody);
+    await this.createShip();
+    this.createPlanet();
 
     // Input handling
     window.addEventListener("keydown", (event) => this.onKeyDown(event));
     window.addEventListener("keyup", (event) => this.onKeyUp(event));
 
     window.addEventListener("resize", () => this.onWindowResize());
+
+    // Add mouse controls
+    document.addEventListener("mousemove", (event) => this.onMouseMove(event));
+    document.addEventListener("pointerlockchange", () => this.onPointerLockChange());
+    //  this.renderer.domElement.addEventListener("click", () => this.renderer.domElement.requestPointerLock());
 
     this.animate();
   }
@@ -116,17 +110,43 @@ export class FlyScene {
     this.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-  }
 
+    this.screenCenter.set(window.innerWidth / 2, window.innerHeight / 2);
+  }
   private updateCamera(): void {
-    if (this.shipModel) {
-      const shipPosition = this.shipModel.position;
-      this.camera.position.lerp(shipPosition.clone().add(this.cameraOffset), 0.9);
-      this.camera.lookAt(shipPosition);
-    }
+    if (!this.shipModel) return;
+
+    const shipPos = this.shipModel.position;
+
+    // Calculate up vector (from planet center to ship)
+    const upVector = shipPos.clone().normalize();
+
+    // Create right vector
+    const right = new THREE.Vector3(0, 0, 1).cross(upVector).normalize();
+
+    // Create forward vector perpendicular to up and right
+    const forward = upVector.clone().cross(right);
+
+    // Create rotation matrix from these vectors
+    const rotationMatrix = new THREE.Matrix4();
+    rotationMatrix.makeBasis(right, upVector, forward);
+
+    // Apply camera offset in this local space
+    const offset = new THREE.Vector3(0, 3, 10);
+    offset.applyMatrix4(rotationMatrix);
+
+    // Calculate final camera position
+    const targetPos = shipPos.clone().add(offset);
+
+    // Smooth camera movement
+    this.camera.position.lerp(targetPos, 0.1);
+
+    // Orient camera
+    this.camera.up.copy(upVector);
+    this.camera.lookAt(shipPos);
   }
 
-  private loadShipModel(): Promise<void> {
+  private createShip(): Promise<void> {
     return new Promise((resolve, reject) => {
       const loader = new GLTFLoader();
       loader.load(
@@ -135,6 +155,26 @@ export class FlyScene {
           this.shipModel = gltf.scene;
           this.shipModel.scale.set(1.5, 1.5, 1.5); // Adjust scale as needed
           this.scene.add(this.shipModel);
+
+          // Position ship above planet surface
+          const startPos = new THREE.Vector3(0, SHIP_START_HEIGHT, 0);
+
+          // Create static RigidBody for planet
+          const rigidBodyDesc = new RAPIER.RigidBodyDesc(RAPIER.RigidBodyType.Dynamic)
+            .setTranslation(startPos.x, startPos.y, startPos.z)
+            .setLinearDamping(LINEAR_DAMPING)
+            .setAngularDamping(2.0)
+            .setAdditionalMass(SHIP_MASS);
+          this.shipBody = this.world.createRigidBody(rigidBodyDesc);
+
+          // Ship collider with collision group
+          const shipCollider = RAPIER.ColliderDesc.cuboid(0.5, 0.5, 0.5)
+            .setCollisionGroups(COLLISION_MASKS.SHIP)
+            .setActiveCollisionTypes(RAPIER.ActiveCollisionTypes.ALL)
+            .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS)
+            .setFriction(0.2)
+            .setRestitution(0.9);
+          this.world.createCollider(shipCollider, this.shipBody);
           resolve();
         },
         undefined,
@@ -147,15 +187,30 @@ export class FlyScene {
   }
 
   private onMouseMove(event: MouseEvent): void {
-    if (document.pointerLockElement === this.renderer.domElement) {
-      this.mousePosition.x += event.movementX * MOUSE_SENSITIVITY;
-      this.mousePosition.y += event.movementY * MOUSE_SENSITIVITY;
-      this.mousePosition.y = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, this.mousePosition.y));
-    }
+    // Update actual screen position of mouse
+    this.mouseScreenPosition.x += event.movementX;
+    this.mouseScreenPosition.y += event.movementY;
+
+    // Clamp to screen bounds
+    this.mouseScreenPosition.x = Math.max(0, Math.min(window.innerWidth, this.mouseScreenPosition.x));
+    this.mouseScreenPosition.y = Math.max(0, Math.min(window.innerHeight, this.mouseScreenPosition.y));
+
+    // Calculate relative position from center (-1 to 1 range)
+    const relativeX = (this.mouseScreenPosition.x - this.screenCenter.x) / (window.innerWidth / 2);
+    const relativeY = (this.mouseScreenPosition.y - this.screenCenter.y) / (window.innerHeight / 2);
+
+    // Update mouse position with relative values and sensitivity
+    this.mousePosition.x = Math.max(-1, Math.min(1, relativeX)) * Math.PI;
+    this.mousePosition.y = Math.max(-1, Math.min(1, relativeY)) * (Math.PI / 2.5);
   }
 
   private onPointerLockChange(): void {
     if (document.pointerLockElement !== this.renderer.domElement) {
+      // Reset local rotation when pointer lock is released
+      this.mouseRotation.set(0, 0, 0);
+      this.desiredRotation.identity();
+
+      this.mouseScreenPosition.copy(this.screenCenter);
       this.mousePosition.set(0, 0);
     }
   }
@@ -181,46 +236,13 @@ export class FlyScene {
         break;
     }
   }
-  private getCurrentRotation(): THREE.Euler {
-    if (!this.shipBody) return new THREE.Euler();
-
-    const rotation = this.shipBody.rotation();
-    const euler = new THREE.Euler().setFromQuaternion(new THREE.Quaternion(rotation.x, rotation.y, rotation.z, rotation.w));
-
-    // Normalize angles to [-π, π]
-    euler.x = ((euler.x + Math.PI) % (2 * Math.PI)) - Math.PI;
-    euler.z = ((euler.z + Math.PI) % (2 * Math.PI)) - Math.PI;
-
-    return euler;
-  }
-
-  private getLimitCorrectionTorque(): { x: number; y: number; z: number } {
-    if (!this.shipBody) return { x: 0, y: 0, z: 0 };
-
-    const currentRotation = this.getCurrentRotation();
-    let correctionX = 0;
-    let correctionZ = 0;
-
-    // Calculate correction for pitch
-    if (Math.abs(currentRotation.x) > MAX_PITCH) {
-      const overRotation = Math.abs(currentRotation.x) - MAX_PITCH;
-      correctionX = -Math.sign(currentRotation.x) * overRotation * ROTATION_CORRECTION_STRENGTH;
-    }
-
-    // Calculate correction for roll
-    if (Math.abs(currentRotation.z) > MAX_ROLL) {
-      const overRotation = Math.abs(currentRotation.z) - MAX_ROLL;
-      correctionZ = -Math.sign(currentRotation.z) * overRotation * ROTATION_CORRECTION_STRENGTH;
-    }
-
-    return { x: correctionX, y: 0, z: correctionZ };
-  }
 
   private animate(): void {
     if (!this.shipModel || !this.shipBody) return;
     requestAnimationFrame(() => this.animate());
 
-    this.updateShipRotation();
+    this.updateGravity();
+    this.updateShipRotation(); // This will now handle all rotation
 
     if (this.thrustUp || this.thrustDown) {
       const rotation = this.shipBody.rotation();
@@ -238,31 +260,11 @@ export class FlyScene {
       );
     }
 
-    // Apply stabilization when no input
-    // const stabilizationTorque = this.getStabilizationTorque();
-    // this.shipBody.applyTorqueImpulse(stabilizationTorque, true);
-
-    // // Apply limit correction torque
-    // const correctionTorque = this.getLimitCorrectionTorque();
-    // this.shipBody.applyTorqueImpulse(correctionTorque, true);
-
-    // Sync visual model with physics body
     const translation = this.shipBody.translation();
     const rotation = this.shipBody.rotation();
 
     this.shipModel.position.set(translation.x, translation.y, translation.z);
     this.shipModel.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
-
-    // Update ship rotation based on mouse
-    if (this.shipBody) {
-      const euler = new THREE.Euler(-this.mousePosition.y, -this.mousePosition.x, 0, "YXZ");
-      this.targetRotation.setFromEuler(euler);
-
-      const currentRot = new THREE.Quaternion().setFromEuler(this.getCurrentRotation());
-      currentRot.slerp(this.targetRotation, 0.1);
-
-      this.shipBody.setRotation(currentRot, true);
-    }
 
     this.updateCamera();
     this.world.step();
@@ -274,17 +276,109 @@ export class FlyScene {
       this.rollAmount += Math.sign(event.deltaY) * ROLL_SENSITIVITY;
     }
   }
-
   private updateShipRotation(): void {
     if (!this.shipBody) return;
 
-    // Y movement affects pitch (X rotation), X movement affects roll (Z rotation)
-    const euler = new THREE.Euler(-this.mousePosition.y, 0, -this.mousePosition.x, "XYZ");
+    const pos = this.shipBody.translation();
+    const shipPos = new THREE.Vector3(pos.x, pos.y, pos.z);
 
-    const targetQuat = new THREE.Quaternion().setFromEuler(euler);
-    const currentRot = new THREE.Quaternion().setFromEuler(this.getCurrentRotation());
-    currentRot.slerp(targetQuat, 0.1);
+    // Get the up vector (from planet center to ship)
+    const upVector = shipPos.clone().normalize();
 
+    // Calculate the base orientation on the planet surface
+    const worldForward = new THREE.Vector3(0, 0, 1);
+    const right = worldForward.cross(upVector).normalize();
+    const forward = upVector.clone().cross(right).normalize();
+
+    // Create the surface-aligned basis matrix
+    const surfaceMatrix = new THREE.Matrix4().makeBasis(right, upVector, forward);
+
+    // Add stabilization factor that increases near extreme angles
+    const pitchFactor = Math.cos(this.mousePosition.y * 0.8); // Reduces effect near poles
+    const yawFactor = Math.cos(this.mousePosition.x * 0.8);
+
+    // Apply rotations with stabilization
+    const yawMatrix = new THREE.Matrix4().makeRotationAxis(upVector, -this.mousePosition.x * 4 * yawFactor);
+
+    const yawedMatrix = surfaceMatrix.clone().multiply(yawMatrix);
+    const yawedRight = new THREE.Vector3().setFromMatrixColumn(yawedMatrix, 0);
+
+    const pitchMatrix = new THREE.Matrix4().makeRotationAxis(yawedRight, -this.mousePosition.y * 2 * pitchFactor);
+
+    // Combine transformations
+    const finalMatrix = yawedMatrix.multiply(pitchMatrix);
+    const finalRotation = new THREE.Quaternion().setFromRotationMatrix(finalMatrix);
+
+    // Get current rotation
+    const currentRot = new THREE.Quaternion(this.shipBody.rotation().x, this.shipBody.rotation().y, this.shipBody.rotation().z, this.shipBody.rotation().w);
+
+    // Calculate angle between current and target rotation
+    const angle = currentRot.angleTo(finalRotation);
+
+    // If angle is too large, use more aggressive smoothing
+    const smoothingFactor =
+      angle > Math.PI / 2
+        ? ROTATION_SMOOTHING * 4 // More aggressive for large angles
+        : ROTATION_SMOOTHING * 2; // Normal smoothing
+
+    // Smooth interpolation with angle-based smoothing
+    currentRot.slerp(finalRotation, smoothingFactor);
+
+    // Apply the rotation to the ship
     this.shipBody.setRotation(currentRot, true);
+  }
+  private createPlanet(): void {
+    const geometry = new THREE.SphereGeometry(PLANET_RADIUS, 64, 64);
+    const material = new THREE.MeshStandardMaterial({
+      color: 0x33ff66,
+      wireframe: true,
+      roughness: 0.8,
+    });
+
+    this.planet = new THREE.Mesh(geometry, material);
+    this.scene.add(this.planet);
+
+    // Create static RigidBody for planet
+    const rigidBodyDesc = new RAPIER.RigidBodyDesc(RAPIER.RigidBodyType.Fixed).setTranslation(0, 0, 0);
+    this.planetBody = this.world.createRigidBody(rigidBodyDesc);
+
+    // Create spherical collider
+    // Create spherical collider
+    const colliderDesc = RAPIER.ColliderDesc.ball(PLANET_RADIUS)
+      .setCollisionGroups(COLLISION_MASKS.PLANET)
+      .setActiveCollisionTypes(RAPIER.ActiveCollisionTypes.ALL)
+      .setFriction(0.5)
+      .setRestitution(0.2);
+
+    this.world.createCollider(colliderDesc, this.planetBody);
+  }
+
+  private updateGravity(): void {
+    if (!this.shipBody) return;
+
+    const pos = this.shipBody.translation();
+    const shipPos = new THREE.Vector3(pos.x, pos.y, pos.z);
+    const distanceToCenter = shipPos.length();
+
+    // Scale gravity by inverse square law
+    const gravityScale = GRAVITY_STRENGTH * (PLANET_MASS / (distanceToCenter * distanceToCenter));
+    const gravityDir = shipPos.normalize().multiplyScalar(-gravityScale);
+
+    this.shipBody.applyImpulse(
+      {
+        x: gravityDir.x,
+        y: gravityDir.y,
+        z: gravityDir.z,
+      },
+      true
+    );
+
+    // Limit velocity
+    const vel = this.shipBody.linvel();
+    const velocity = new THREE.Vector3(vel.x, vel.y, vel.z);
+    if (velocity.length() > MAX_VELOCITY) {
+      velocity.normalize().multiplyScalar(MAX_VELOCITY);
+      this.shipBody.setLinvel({ x: velocity.x, y: velocity.y, z: velocity.z }, true);
+    }
   }
 }
