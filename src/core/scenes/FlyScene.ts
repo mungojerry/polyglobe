@@ -7,7 +7,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 // Updated constants for better handling
 const THRUST_FORCE = 1.0; // Doubled for more responsive acceleration
 const LINEAR_DAMPING = 1.0; // Increased for tighter stopping
-const ROLL_SENSITIVITY = 0.05; // Added for mouse wheel roll control
+const ROLL_SENSITIVITY = 2; // Added for mouse wheel roll control
 
 const PLANET_RADIUS = 300;
 const GRAVITY_STRENGTH = 20.0; // Reduced further for more forgiving flight
@@ -194,6 +194,10 @@ export class FlyScene {
     // Update mouse position with relative values and sensitivity
     this.mousePosition.x = Math.max(-1, Math.min(1, relativeX)) * Math.PI;
     this.mousePosition.y = Math.max(-1, Math.min(1, relativeY)) * (Math.PI / 2.5);
+
+    // Directly apply pitch and roll based on mouse movement
+    this.rollAmount = relativeX * ROLL_SENSITIVITY;
+    this.mouseRotation.x = relativeY * ROLL_SENSITIVITY;
   }
 
   private onPointerLockChange(): void {
@@ -274,7 +278,7 @@ export class FlyScene {
     const pos = this.shipBody.translation();
     const shipPos = new THREE.Vector3(pos.x, pos.y, pos.z);
 
-    // Get the up vector (from planet center to ship)
+    // Up vector (from planet center to ship)
     const upVector = shipPos.clone().normalize();
 
     // Calculate the base orientation on the planet surface
@@ -282,41 +286,21 @@ export class FlyScene {
     const right = worldForward.cross(upVector).normalize();
     const forward = upVector.clone().cross(right).normalize();
 
-    // Create the surface-aligned basis matrix
-    const surfaceMatrix = new THREE.Matrix4().makeBasis(right, upVector, forward);
+    // Surface-aligned basis matrix
+    let surfaceMatrix = new THREE.Matrix4().makeBasis(right, upVector, forward);
 
-    // Add stabilization factor that increases near extreme angles
-    const pitchFactor = Math.cos(this.mousePosition.y * 0.8); // Reduces effect near poles
-    const yawFactor = Math.cos(this.mousePosition.x * 0.8);
+    // Apply pitch and roll
+    const pitchMatrix = new THREE.Matrix4().makeRotationAxis(right, this.mouseRotation.x);
+    const rollMatrix = new THREE.Matrix4().makeRotationAxis(forward, this.rollAmount);
 
-    // Apply rotations with stabilization
-    const yawMatrix = new THREE.Matrix4().makeRotationAxis(upVector, -this.mousePosition.x * 4 * yawFactor);
+    const finalMatrix = surfaceMatrix.clone().multiply(rollMatrix).multiply(pitchMatrix);
 
-    const yawedMatrix = surfaceMatrix.clone().multiply(yawMatrix);
-    const yawedRight = new THREE.Vector3().setFromMatrixColumn(yawedMatrix, 0);
-
-    const pitchMatrix = new THREE.Matrix4().makeRotationAxis(yawedRight, -this.mousePosition.y * 2 * pitchFactor);
-
-    // Combine transformations
-    const finalMatrix = yawedMatrix.multiply(pitchMatrix);
     const finalRotation = new THREE.Quaternion().setFromRotationMatrix(finalMatrix);
 
-    // Get current rotation
     const currentRot = new THREE.Quaternion(this.shipBody.rotation().x, this.shipBody.rotation().y, this.shipBody.rotation().z, this.shipBody.rotation().w);
 
-    // Calculate angle between current and target rotation
-    const angle = currentRot.angleTo(finalRotation);
+    currentRot.slerp(finalRotation, ROTATION_SMOOTHING);
 
-    // If angle is too large, use more aggressive smoothing
-    const smoothingFactor =
-      angle > Math.PI / 2
-        ? ROTATION_SMOOTHING * 4 // More aggressive for large angles
-        : ROTATION_SMOOTHING * 2; // Normal smoothing
-
-    // Smooth interpolation with angle-based smoothing
-    currentRot.slerp(finalRotation, smoothingFactor);
-
-    // Apply the rotation to the ship
     this.shipBody.setRotation(currentRot, true);
   }
   private createPlanet(): void {
