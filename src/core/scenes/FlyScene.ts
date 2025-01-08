@@ -6,15 +6,11 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 // Define a configurable thrust force
 // Updated constants for better handling
 const THRUST_FORCE = 1.0; // Doubled for more responsive acceleration
-const LINEAR_DAMPING = 2.0; // Increased for tighter stopping
-const MOUSE_SENSITIVITY = 0.002; // Reduced for finer control
-const AUTO_STABILIZE_SPEED = 0.15; // Increased for snappier stabilization
-const BANKING_FACTOR = 0.4; // Increased for more visible banking
+const LINEAR_DAMPING = 1.0; // Increased for tighter stopping
 const ROLL_SENSITIVITY = 0.05; // Added for mouse wheel roll control
 
 const PLANET_RADIUS = 300;
-const GRAVITY_STRENGTH = 18.0; // Reduced further for more forgiving flight
-const HOVER_FORCE = 1.2; // Increased for stronger hover
+const GRAVITY_STRENGTH = 20.0; // Reduced further for more forgiving flight
 const MAX_VELOCITY = 150; // Increased for higher top speed
 const SHIP_START_HEIGHT = PLANET_RADIUS + 10;
 
@@ -36,10 +32,8 @@ export class FlyScene {
   private shipBody: RAPIER.RigidBody | undefined;
   private planetBody: RAPIER.RigidBody | undefined;
 
-  private cameraOffset: THREE.Vector3;
   private shipModel: THREE.Group | null = null;
   private mousePosition: THREE.Vector2;
-  private targetRotation: THREE.Quaternion;
   private thrustUp: boolean = false;
   private thrustDown: boolean = false;
   private rollAmount: number = 0;
@@ -77,9 +71,7 @@ export class FlyScene {
     this.thrustDown = false;
 
     // Camera follow setup
-    this.cameraOffset = new THREE.Vector3(0, 3, 10);
     this.mousePosition = new THREE.Vector2();
-    this.targetRotation = new THREE.Quaternion();
     window.addEventListener("wheel", this.handleMouseWheel.bind(this));
 
     this.screenCenter = new THREE.Vector2(window.innerWidth / 2, window.innerHeight / 2);
@@ -163,7 +155,7 @@ export class FlyScene {
           const rigidBodyDesc = new RAPIER.RigidBodyDesc(RAPIER.RigidBodyType.Dynamic)
             .setTranslation(startPos.x, startPos.y, startPos.z)
             .setLinearDamping(LINEAR_DAMPING)
-            .setAngularDamping(2.0)
+            .setAngularDamping(0.9)
             .setAdditionalMass(SHIP_MASS);
           this.shipBody = this.world.createRigidBody(rigidBodyDesc);
 
