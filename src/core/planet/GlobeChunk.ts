@@ -64,6 +64,7 @@ export class GlobeChunk {
     for (const factor of reductionFactors) {
       const vertexCount = Math.floor(baseGeometry.attributes.position.count * factor);
       const simplifiedGeometry = modifier.modify(baseGeometry.clone(), vertexCount);
+      simplifiedGeometry.computeVertexNormals();
       levels.push(simplifiedGeometry);
     }
 
@@ -125,7 +126,6 @@ export class GlobeChunk {
       positions.needsUpdate = true;
       colors.needsUpdate = true;
       baseGeometry.computeVertexNormals();
-      baseGeometry.computeTangents();
 
       // Regenerate LOD levels
       this.geometryLevels = this.generateLODLevels(baseGeometry);

@@ -9,7 +9,7 @@ const THRUST_FORCE = 50;
 const LINEAR_DAMPING = 0.3;
 const ANGULAR_DAMPING = 4.9;
 const PLANET_RADIUS = 1300;
-const GRAVITY_STRENGTH = 9.8 * 20;
+const GRAVITY_STRENGTH = 9.8 * 20; //20;
 const MAX_VELOCITY = 100;
 const SHIP_START_HEIGHT = PLANET_RADIUS + 10;
 const ROTATION_RATE = 0.1;
@@ -179,14 +179,75 @@ export class ZarchFlyScene {
     this.world.createCollider(colliderDesc, this.planetBody);
   }
 
+  private mouseDeltaX = 0;
+  private mouseDeltaY = 0;
+  private readonly MOUSE_SMOOTHING = 0.95; // Higher = smoother but less responsive
+  private readonly MOUSE_SENSITIVITY = 0.002; // Lower = less sensitive
   private updateRotation(): void {
+    if (!this.shipBody) return;
+
+    // 1. Get ship's position and up vector (surface normal)
+    const pos = this.shipBody.translation();
+    const shipPos = new THREE.Vector3(pos.x, pos.y, pos.z);
+    const up = shipPos.clone().normalize();
+
+    // 2. Get mouse position relative to screen center
+    let deltaX = this.mouseX - this.screenCenterX;
+    const deltaY = this.mouseY - this.screenCenterY;
+
+    if (this.mouseY > this.screenCenterY) deltaX = -deltaX;
+    // 3. Calculate normalized distances separately for X and Y
+    const maxDistance = Math.sqrt(this.screenCenterX * this.screenCenterX + this.screenCenterY * this.screenCenterY);
+
+    // X position affects yaw (which way the craft faces)
+    const normalizedX = deltaX / maxDistance;
+    // Y position affects pitch
+    const normalizedY = deltaY / maxDistance;
+
+    // 4. Calculate yaw based on X position
+    const yawAngle = normalizedX * Math.PI;
+
+    // 5. Calculate pitch based on Y position
+    // Center (blue) = pointing up (-PI/2)
+    // Edge (red) = pointing down (PI/2)
+    const pitch = normalizedY * Math.PI;
+
+    // 6. Create base quaternion aligned with planet surface
+    const baseQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
+
+    // 7. Create yaw rotation
+    const yawQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yawAngle);
+
+    // 8. Create pitch rotation
+    const pitchQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), pitch);
+
+    // 9. Combine rotations: base * yaw * pitch
+    let finalQuat = new THREE.Quaternion().multiplyQuaternions(baseQuat, yawQuat).multiply(pitchQuat);
+
+    // 10. Smooth interpolation using ROTATION_RATE
+    const currentRotation = new THREE.Quaternion(
+      this.shipBody.rotation().x,
+      this.shipBody.rotation().y,
+      this.shipBody.rotation().z,
+      this.shipBody.rotation().w
+    );
+
+    currentRotation.slerp(finalQuat, ROTATION_RATE);
+    this.shipBody.setRotation(currentRotation, true);
+  }
+
+  private updateRotationWorking(): void {
     if (!this.shipBody) return;
 
     // Calculate vector from screen center to mouse
     let deltaX = this.mouseX - this.screenCenterX;
     let deltaY = this.mouseY - this.screenCenterY;
 
-    if (this.mouseY < this.screenCenterY) deltaX = -deltaX;
+    // if (this.mouseY < this .screenCenterY) deltaX = -deltaX;
+
+    // Increase the sensitivity of the yaw by applying a multiplier
+    // const yawSensitivity = 2.0; // Adjust this value to make yaw more pronounced
+    // deltaX *= yawSensitivity;
     // Calculate angle and normalized distance from center
     const angleToMouse = Math.atan2(deltaY, deltaX);
     const distanceFromCenter = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
@@ -206,8 +267,8 @@ export class ZarchFlyScene {
     // This creates the base direction for the yaw
     const directionVector = new THREE.Vector3(
       Math.cos(angleToMouse), // X component
-      Math.sin(angleToMouse), // Y component (will be affected by pitch)
-      0 // Z component
+      0, // Y component (will be affected by pitch)
+      Math.sin(angleToMouse) //// Z component
     ).normalize();
 
     // Step 3: Calculate pitch based on distance from center
@@ -220,6 +281,13 @@ export class ZarchFlyScene {
 
     // Apply pitch to the direction vector
     directionVector.applyAxisAngle(new THREE.Vector3(1, 0, 0), pitch);
+
+    const baseYaw = -Math.PI / 2; // Start pointing straight up
+    const yawRange = Math.PI; // Full 180-degree range
+    const yaw = baseYaw + normalizedDistance * yawRange;
+
+    // Apply pitch to the direction vector
+    directionVector.applyAxisAngle(new THREE.Vector3(0, 0, 1), -yaw);
 
     // Step 4: Create quaternion that rotates from forward vector to our desired direction
     const dirQuat = new THREE.Quaternion();
