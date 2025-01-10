@@ -16,7 +16,7 @@ const globeConfig = {
   showWall: false,
   showPoles: false,
   showWater: true,
-  radius: 300,
+  radius: 1300,
   detail: 110,
   chunkSize: 20,
 };
@@ -31,17 +31,12 @@ export class Globe {
 
   private readonly frustum = new THREE.Frustum();
   private readonly cameraViewProjectionMatrix = new THREE.Matrix4();
-  // private readonly landMaterial: THREE.MeshPhongMaterial = new THREE.MeshPhongMaterial({
-  //   vertexColors: true,
-  //   flatShading: true,
-  //   shininess: 0.6,
-  //   shadowSide: THREE.DoubleSide,
-  //   clipShadows: false,
-  // });
+
   private readonly landMaterial: THREE.MeshPhongMaterial = new THREE.MeshPhongMaterial({
     vertexColors: true,
     shininess: 0,
     reflectivity: 0,
+    flatShading: true,
     shadowSide: THREE.FrontSide,
     clipShadows: false,
   });
@@ -64,8 +59,8 @@ export class Globe {
     this.waterLevel = globeConfig.radius * 1.055;
 
     if (globeConfig.showWater) this.buildWater();
-
     if (globeConfig.showWall) this.buildEquatorWall();
+
     this.object.castShadow = true;
     this.object.receiveShadow = true;
     this.infection = new Infection(this);
@@ -243,13 +238,15 @@ export class Globe {
   private async buildLandGeometry(onProgress: ProgressCallback) {
     const landWorker = new LandGeometryGenerator();
     const geometry = await landWorker.generateLand(globeConfig.radius, globeConfig.detail, Math.random(), this.noise, onProgress);
+    geometry.computeVertexNormals();
     this.landGeometry = geometry;
 
     // Create terrain deformer using the actual landGeometry
-    const landMesh = new THREE.Mesh(this.landGeometry, this.landMaterial);
-    this.terrainDeformer = new TerrainDeformer(landMesh, this.noise);
-  }
+    this.landMesh = new THREE.Mesh(this.landGeometry, this.landMaterial);
 
+    this.terrainDeformer = new TerrainDeformer(this.landMesh, this.noise);
+  }
+  public landMesh!: THREE.Mesh;
   /** Terrain queries */
   public deformTerrain(deformPosition: THREE.Vector3, strength: number = 2.5, radius: number = 25) {
     if (!this.terrainDeformer) {

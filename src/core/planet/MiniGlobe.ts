@@ -19,7 +19,7 @@ export class MiniGlobe {
 
   constructor(bufferGeometry: THREE.BufferGeometry, mainCamera: THREE.Camera, width: number = 200, height: number = 200) {
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 1000);
+    this.camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 2000);
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setSize(width, height);
@@ -121,7 +121,7 @@ export class MiniGlobe {
     this.mainCamera.getWorldPosition(mainCameraPos);
     const normalizedPos = mainCameraPos.clone().normalize();
 
-    const miniGlobeRadius = 800;
+    const miniGlobeRadius = 3000;
     this.camera.position.copy(normalizedPos.multiplyScalar(miniGlobeRadius));
     this.camera.up.set(0, 1, 0);
     this.camera.lookAt(0, 0, 0);

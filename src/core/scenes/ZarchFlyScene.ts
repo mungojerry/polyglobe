@@ -4,11 +4,11 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { vectorPool } from "../utils/vectorPool";
 
 // Constants
-const THRUST_FORCE = 1.5;
+const THRUST_FORCE = 5;
 const LINEAR_DAMPING = 0.3;
 const ANGULAR_DAMPING = 4.9;
-const PLANET_RADIUS = 300;
-const GRAVITY_STRENGTH = 40.0;
+const PLANET_RADIUS = 1300;
+const GRAVITY_STRENGTH = 9.8;
 const MAX_VELOCITY = 80;
 const SHIP_START_HEIGHT = PLANET_RADIUS + 10;
 const ROTATION_RATE = 0.1;
@@ -103,7 +103,7 @@ export class ZarchFlyScene {
             .setTranslation(startPos.x, startPos.y, startPos.z)
             .setLinearDamping(LINEAR_DAMPING)
             .setAngularDamping(ANGULAR_DAMPING)
-            .setAdditionalMass(0);
+            .setAdditionalMass(100);
 
           this.shipBody = this.world.createRigidBody(rigidBodyDesc);
 
@@ -165,7 +165,7 @@ export class ZarchFlyScene {
 
     // Create rotation quaternion based on mouse position
     const euler = new THREE.Euler(
-      -relativeY * Math.PI * 0.6, // Pitch (based on Y mouse position)
+      -relativeY * Math.PI * 0.9, // Pitch (based on Y mouse position)
       -relativeX * Math.PI * 2, // Yaw (based on X mouse position)
       0, // Roll (can be added if needed)
       "YXZ"
@@ -222,7 +222,9 @@ export class ZarchFlyScene {
     const shipPos = new THREE.Vector3(pos.x, pos.y, pos.z);
     const distanceToCenter = shipPos.length();
 
-    const gravityScale = GRAVITY_STRENGTH * (1000 / (distanceToCenter * distanceToCenter));
+    // Calculate the gravitational force based on the ship's mass
+    const mass = this.shipBody.mass();
+    const gravityScale = GRAVITY_STRENGTH * mass * (1000 / (distanceToCenter * distanceToCenter));
     const gravityDir = shipPos.normalize().multiplyScalar(-gravityScale);
 
     this.shipBody.applyImpulse(
@@ -270,18 +272,24 @@ export class ZarchFlyScene {
   private currentPosition = new THREE.Vector3(0, 0, 0);
 
   private currentLookAt = new THREE.Vector3();
+  private lastValidForward: THREE.Vector3 | null = null;
   private updateCamera(position: THREE.Vector3, playerRotation: THREE.Quaternion): void {
     const up = position.clone().normalize();
     const forward = vectorPool.getVector(0, 0, 1);
-    forward.applyQuaternion(playerRotation);
+
+    const yawOnlyQuat = new THREE.Quaternion();
+    const shipEuler = new THREE.Euler().setFromQuaternion(playerRotation);
+    yawOnlyQuat.setFromEuler(new THREE.Euler(0, -shipEuler.y, 0)); // Negated yaw
+
+    forward.applyQuaternion(yawOnlyQuat);
     const right = vectorPool.getVector().crossVectors(up, forward).normalize();
     forward.crossVectors(right, up).normalize();
 
     const targetPosition = position.clone();
     targetPosition.add(up.multiplyScalar(this.offset.y));
     targetPosition.add(forward.multiplyScalar(this.offset.z));
-    const cameraLerp = 0.75;
 
+    const cameraLerp = 0.75;
     this.currentPosition.lerp(targetPosition, cameraLerp);
     this.camera.position.copy(this.currentPosition);
     this.currentLookAt.lerp(position, cameraLerp);
@@ -290,8 +298,6 @@ export class ZarchFlyScene {
 
     vectorPool.releaseVector(forward);
     vectorPool.releaseVector(right);
-    this.camera.updateMatrixWorld(true);
-    this.camera.updateProjectionMatrix();
   }
   private animate(): void {
     requestAnimationFrame(() => this.animate());

@@ -12,9 +12,9 @@ export class Player extends BaseGameObject implements IGameObject {
     super(scene, initPos, world, "player");
     this.body.setLinearDamping(0.8);
     this.body.setAngularDamping(0.8);
-    this.rotationSpeed = 0.1;
-    this.thrustForce = 1;
-    this.movementForce = 0.9;
+    this.rotationSpeed = 0.2;
+    this.thrustForce = 2;
+    this.movementForce = 2;
     const loader = new GLTFLoader();
 
     loader.load("assets/models/wooden_ufo_toy.glb", (gltf) => {

@@ -5,7 +5,6 @@ export class GlobeChunk {
   public mesh!: THREE.Mesh;
   public boundingSphere!: THREE.Sphere;
   public normalizedPositions!: Float32Array;
-  // public elevations!: Float32Array;
   public latStart: number = 0;
   public latEnd: number = 0;
   public lonStart: number = 0;
@@ -13,7 +12,7 @@ export class GlobeChunk {
 
   private currentLOD: number = 0;
   private geometryLevels: THREE.BufferGeometry[] = [];
-  private lodDistanceThresholds: number[] = [1000, 2000, 4000];
+  private lodDistanceThresholds: number[] = [1000, 2000];
 
   constructor(geometry: THREE.BufferGeometry, material: THREE.Material) {
     // Generate LOD chain
@@ -60,7 +59,7 @@ export class GlobeChunk {
   private generateLODLevels(baseGeometry: THREE.BufferGeometry): THREE.BufferGeometry[] {
     const levels: THREE.BufferGeometry[] = [baseGeometry];
     const modifier = new SimplifyModifier();
-    const reductionFactors = [0.5]; // Progressive vertex reduction
+    const reductionFactors = [1, 0.5]; // Progressive vertex reduction
 
     for (const factor of reductionFactors) {
       const vertexCount = Math.floor(baseGeometry.attributes.position.count * factor);
@@ -79,7 +78,8 @@ export class GlobeChunk {
         targetLOD = i + 1;
       }
     }
-
+    // FIXME!
+    targetLOD = 0;
     if (targetLOD !== this.currentLOD && targetLOD < this.geometryLevels.length) {
       this.mesh.geometry = this.geometryLevels[targetLOD];
       this.currentLOD = targetLOD;
@@ -116,10 +116,6 @@ export class GlobeChunk {
         positions.setXYZ(vertexData.index, position.x, position.y, position.z);
         colors.setXYZ(vertexData.index, vertexData.color.r, vertexData.color.g, vertexData.color.b);
 
-        // Update elevation if provided
-        // if (vertexData.elevation !== undefined) {
-        //   this.elevations[vertexData.index] = vertexData.elevation;
-        // }
         geometryModified = true;
       }
     }
@@ -129,6 +125,7 @@ export class GlobeChunk {
       positions.needsUpdate = true;
       colors.needsUpdate = true;
       baseGeometry.computeVertexNormals();
+      baseGeometry.computeTangents();
 
       // Regenerate LOD levels
       this.geometryLevels = this.generateLODLevels(baseGeometry);

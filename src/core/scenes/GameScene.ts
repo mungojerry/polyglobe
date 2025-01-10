@@ -129,7 +129,6 @@ export class GameScene {
     this.scene.add(ambientLight);
 
     this.globe = new Globe(this.camera, this.world);
-    this.scene.add(this.globe.getObject());
 
     this.currentGenerator = this.globe.noise;
     TerrainHelper.getInstance().setDefaults(this.currentGenerator, this.globe.getLandGeometry());
@@ -138,7 +137,7 @@ export class GameScene {
     this.cameraAttachedTo = this.player.getObject();
 
     this.dynamicBodies.push({ body: this.player.getBody(), mesh: this.player.getObject() });
-    this.camera.position.set(0, 400, 0);
+    this.camera.position.set(0, this.player.getPosition().y, 0);
 
     this.debugMesh = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xffffff, vertexColors: true }));
     this.debugMesh.frustumCulled = false;
