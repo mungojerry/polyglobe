@@ -210,7 +210,7 @@ export class ZarchFlyScene {
     // 5. Calculate pitch based on Y position
     // Center (blue) = pointing up (-PI/2)
     // Edge (red) = pointing down (PI/2)
-    const pitch = normalizedY * Math.PI;
+    const pitch = normalizedY * Math.PI * 2;
 
     // 6. Create base quaternion aligned with planet surface
     const baseQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
