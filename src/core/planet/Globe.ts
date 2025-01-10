@@ -1,12 +1,13 @@
 import RAPIER from "@dimforge/rapier3d";
 import * as THREE from "three";
 import { Vector3 } from "three";
+import { mergeVertices } from "three-stdlib";
 import { Water } from "../effects/Water";
 import { debugManager } from "../managers/debugManager";
 import { pseudoRandom } from "../utils/PseudoRandom";
 import { ProgressCallback } from "../utils/utils";
-import { ChunkGenerator } from "./ChunkGenerator";
 import { GlobeChunk } from "./GlobeChunk";
+import { GlobeChunkGenerator } from "./GlobeChunkGenerator";
 import { Infection } from "./Infection";
 import { LandGeometryGenerator } from "./LandGeometryGenerator";
 import { BaseNoise } from "./noise/BaseNoise";
@@ -216,8 +217,8 @@ export class Globe {
   public async buildChunks(onProgress: ProgressCallback) {
     this.chunks.flat().forEach((chunk) => chunk.dispose());
     this.chunks = [];
-    const chunkGenerator = new ChunkGenerator();
-    const newChunks = await chunkGenerator.generateChunks(this.landGeometry, this.landMaterial, this.object, globeConfig.chunkSize, onProgress);
+    const globeChunkGenerator = new GlobeChunkGenerator();
+    const newChunks = await globeChunkGenerator.generateChunks(this.landGeometry, this.landMaterial, this.object, globeConfig.chunkSize, onProgress);
 
     this.chunks.push(...newChunks);
   }
@@ -238,10 +239,10 @@ export class Globe {
   private async buildLandGeometry(onProgress: ProgressCallback) {
     const landWorker = new LandGeometryGenerator();
     const geometry = await landWorker.generateLand(globeConfig.radius, globeConfig.detail, Math.random(), this.noise, onProgress);
-    geometry.computeVertexNormals();
-    this.landGeometry = geometry;
 
-    // Create terrain deformer using the actual landGeometry
+    geometry.computeBoundingSphere();
+    this.landGeometry = mergeVertices(geometry);
+    this.landGeometry.computeVertexNormals();
     this.landMesh = new THREE.Mesh(this.landGeometry, this.landMaterial);
 
     this.terrainDeformer = new TerrainDeformer(this.landMesh, this.noise);

@@ -1,15 +1,16 @@
 import RAPIER from "@dimforge/rapier3d";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise";
 import { vectorPool } from "../utils/vectorPool";
 
 // Constants
-const THRUST_FORCE = 5;
+const THRUST_FORCE = 50;
 const LINEAR_DAMPING = 0.3;
 const ANGULAR_DAMPING = 4.9;
 const PLANET_RADIUS = 1300;
-const GRAVITY_STRENGTH = 9.8;
-const MAX_VELOCITY = 80;
+const GRAVITY_STRENGTH = 9.8 * 20;
+const MAX_VELOCITY = 100;
 const SHIP_START_HEIGHT = PLANET_RADIUS + 10;
 const ROTATION_RATE = 0.1;
 
@@ -36,17 +37,21 @@ export class ZarchFlyScene {
 
   constructor() {
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 10000);
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(this.renderer.domElement);
 
     // Lighting
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.15);
     this.scene.add(ambientLight);
     const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-    directionalLight.position.set(10, 20, 10);
+    directionalLight.position.set(1000, 2000, 1000);
     this.scene.add(directionalLight);
+
+    const pointLight1 = new THREE.PointLight(0xffffff, 1);
+    pointLight1.position.set(2000, 0, 0);
+    this.scene.add(pointLight1);
 
     this.world = new RAPIER.World({ x: 0, y: 0, z: 0 });
 
@@ -124,14 +129,42 @@ export class ZarchFlyScene {
   }
 
   private createPlanet(): void {
-    const geometry = new THREE.SphereGeometry(PLANET_RADIUS, 64, 64);
+    const simplex = new SimplexNoise();
+    const geometry = new THREE.SphereGeometry(PLANET_RADIUS, 32, 32);
+    const positions = geometry.attributes.position;
+
+    // Apply noise to vertices
+    for (let i = 0; i < positions.count; i++) {
+      const vertex = new THREE.Vector3();
+      vertex.fromBufferAttribute(positions, i);
+      const scale = 1; // Increased frequency
+      let amplitude = 20; // Increased height variation
+      // Get normalized position for noise input
+      const normalized = vertex.clone().normalize();
+
+      // Apply noise
+      // Apply multi-octave noise
+
+      let noise = simplex.noise3d(normalized.x * scale, normalized.y * scale, normalized.z * scale) * amplitude;
+      noise = noise * 0.5 + simplex.noise3d(normalized.x * scale, normalized.y * scale, normalized.z * scale) * (amplitude * 0.5);
+      vertex.add(normalized.multiplyScalar(noise));
+
+      // Update vertex
+      positions.setXYZ(i, vertex.x, vertex.y, vertex.z);
+    }
+
     const material = new THREE.MeshStandardMaterial({
       color: 0x33ff66,
-      wireframe: true,
+      flatShading: true,
+      metalness: 0,
       roughness: 0.8,
+      wireframe: true,
+      // depthWrite: true,
     });
 
     const planet = new THREE.Mesh(geometry, material);
+    planet.castShadow = true;
+    planet.receiveShadow = true;
     this.scene.add(planet);
 
     const rigidBodyDesc = new RAPIER.RigidBodyDesc(RAPIER.RigidBodyType.Fixed).setTranslation(0, 0, 0);
@@ -149,33 +182,54 @@ export class ZarchFlyScene {
   private updateRotation(): void {
     if (!this.shipBody) return;
 
-    // Calculate relative mouse position (-1 to 1 range)
-    const relativeX = (this.mouseX - this.screenCenterX) / this.screenCenterX;
-    const relativeY = (this.mouseY - this.screenCenterY) / this.screenCenterY;
+    // Calculate vector from screen center to mouse
+    let deltaX = this.mouseX - this.screenCenterX;
+    let deltaY = this.mouseY - this.screenCenterY;
 
-    // Get current ship orientation relative to planet
+    if (this.mouseY < this.screenCenterY) deltaX = -deltaX;
+    // Calculate angle and normalized distance from center
+    const angleToMouse = Math.atan2(deltaY, deltaX);
+    const distanceFromCenter = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+    const maxDistance = Math.sqrt(this.screenCenterX * this.screenCenterX + this.screenCenterY * this.screenCenterY);
+    const normalizedDistance = Math.min(distanceFromCenter / maxDistance, 1.0);
+
+    // Get ship's position relative to planet center
     const pos = this.shipBody.translation();
     const shipPos = new THREE.Vector3(pos.x, pos.y, pos.z);
-    const upVector = shipPos.clone().normalize();
+    const up = shipPos.clone().normalize();
 
-    // Create a quaternion for our base orientation relative to planet
-    const baseOrientation = new THREE.Quaternion();
-    const worldUp = new THREE.Vector3(0, 1, 0);
-    baseOrientation.setFromUnitVectors(worldUp, upVector);
+    // Step 1: Create the base orientation aligned with planet surface
+    const baseQuat = new THREE.Quaternion();
+    baseQuat.setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
 
-    // Create rotation quaternion based on mouse position
-    const euler = new THREE.Euler(
-      -relativeY * Math.PI * 0.9, // Pitch (based on Y mouse position)
-      -relativeX * Math.PI * 2, // Yaw (based on X mouse position)
-      0, // Roll (can be added if needed)
-      "YXZ"
-    );
-    const targetQuat = new THREE.Quaternion().setFromEuler(euler);
+    // Step 2: Create a direction vector based on mouse angle
+    // This creates the base direction for the yaw
+    const directionVector = new THREE.Vector3(
+      Math.cos(angleToMouse), // X component
+      Math.sin(angleToMouse), // Y component (will be affected by pitch)
+      0 // Z component
+    ).normalize();
 
-    // Combine base orientation with target rotation
-    const finalQuat = baseOrientation.multiply(targetQuat);
+    // Step 3: Calculate pitch based on distance from center
+    // 0 (center, blue) = straight up (-PI/2)
+    // 1 (edge, red) = straight down (PI/2)
+    // The purple zone is in between
+    const basePitch = -Math.PI / 2; // Start pointing straight up
+    const pitchRange = Math.PI; // Full 180-degree range
+    const pitch = basePitch + normalizedDistance * pitchRange;
 
-    // Get current rotation
+    // Apply pitch to the direction vector
+    directionVector.applyAxisAngle(new THREE.Vector3(1, 0, 0), pitch);
+
+    // Step 4: Create quaternion that rotates from forward vector to our desired direction
+    const dirQuat = new THREE.Quaternion();
+    dirQuat.setFromUnitVectors(new THREE.Vector3(0, 0, 1), directionVector);
+
+    // Combine base alignment with direction rotation
+    const finalQuat = new THREE.Quaternion();
+    finalQuat.multiplyQuaternions(baseQuat, dirQuat);
+
+    // Get current rotation and smoothly interpolate
     const currentRotation = new THREE.Quaternion(
       this.shipBody.rotation().x,
       this.shipBody.rotation().y,
@@ -274,28 +328,32 @@ export class ZarchFlyScene {
   private currentLookAt = new THREE.Vector3();
   private lastValidForward: THREE.Vector3 | null = null;
   private updateCamera(position: THREE.Vector3, playerRotation: THREE.Quaternion): void {
+    // Calculate up vector based on position relative to planet center
     const up = position.clone().normalize();
+
+    // Use a constant forward direction (we don't want it to yaw)
     const forward = vectorPool.getVector(0, 0, 1);
 
-    const yawOnlyQuat = new THREE.Quaternion();
-    const shipEuler = new THREE.Euler().setFromQuaternion(playerRotation);
-    yawOnlyQuat.setFromEuler(new THREE.Euler(0, -shipEuler.y, 0)); // Negated yaw
-
-    forward.applyQuaternion(yawOnlyQuat);
+    // Calculate right vector from up and forward
     const right = vectorPool.getVector().crossVectors(up, forward).normalize();
+
+    // Recalculate forward to ensure it's perpendicular to up
     forward.crossVectors(right, up).normalize();
 
+    // Calculate target position using offset
     const targetPosition = position.clone();
     targetPosition.add(up.multiplyScalar(this.offset.y));
     targetPosition.add(forward.multiplyScalar(this.offset.z));
 
-    const cameraLerp = 0.75;
+    // Smooth camera movement
+    const cameraLerp = 1;
     this.currentPosition.lerp(targetPosition, cameraLerp);
     this.camera.position.copy(this.currentPosition);
     this.currentLookAt.lerp(position, cameraLerp);
     this.camera.lookAt(this.currentLookAt);
     this.camera.up.copy(up);
 
+    // Release vectors back to pool
     vectorPool.releaseVector(forward);
     vectorPool.releaseVector(right);
   }

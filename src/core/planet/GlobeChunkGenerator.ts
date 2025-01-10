@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { ProgressCallback, yieldToMainThread } from "../utils/utils";
 import { GlobeChunk } from "./GlobeChunk";
 
-interface ChunkTask {
+interface GlobeChunkTask {
   latIndex: number;
   lonIndex: number;
   lat: number;
@@ -10,7 +10,7 @@ interface ChunkTask {
   chunkId: number;
 }
 
-export class ChunkGenerator {
+export class GlobeChunkGenerator {
   private totalChunks: number = 0;
   private completedChunks: number = 0;
   private readonly spherical: THREE.Spherical;
@@ -73,9 +73,9 @@ export class ChunkGenerator {
     }
   }
 
-  private groupTasksByLocation(tasks: ChunkTask[], groupSize: number): ChunkTask[][] {
-    const groups: ChunkTask[][] = [];
-    let currentGroup: ChunkTask[] = [];
+  private groupTasksByLocation(tasks: GlobeChunkTask[], groupSize: number): GlobeChunkTask[][] {
+    const groups: GlobeChunkTask[][] = [];
+    let currentGroup: GlobeChunkTask[] = [];
 
     for (const task of tasks) {
       currentGroup.push(task);
@@ -93,7 +93,7 @@ export class ChunkGenerator {
   }
 
   private async processChunk(
-    task: ChunkTask,
+    task: GlobeChunkTask,
     landGeometry: THREE.BufferGeometry,
     landMaterial: THREE.Material,
     parentObject: THREE.Object3D,
@@ -219,8 +219,8 @@ export class ChunkGenerator {
     return { hasVertices, vertexCount, indexCount };
   }
 
-  private createTaskQueue(chunkSize: number): ChunkTask[] {
-    const tasks: ChunkTask[] = [];
+  private createTaskQueue(chunkSize: number): GlobeChunkTask[] {
+    const tasks: GlobeChunkTask[] = [];
     const latChunks = Math.ceil(180 / chunkSize);
     const lonChunks = Math.ceil(360 / chunkSize);
 

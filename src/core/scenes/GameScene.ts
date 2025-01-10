@@ -85,7 +85,7 @@ export class GameScene {
   private baseOffset = new THREE.Vector3(0, 2, -3);
   private closeOffset = new THREE.Vector3(0, 1, -2);
   private debugEnabled: boolean = false;
-  private readonly GRAVITY_FUDGE: number = 0.01;
+  private readonly GRAVITY_FUDGE: number = 1; //   0.01;
   private readonly G = 9.81 * this.GRAVITY_FUDGE;
 
   private readonly BASE_FOV = 75; // Default FOV
@@ -155,7 +155,7 @@ export class GameScene {
     this.initialize();
 
     this.sun = new Sun(this.globe, this.scene, this.globe.getRadius() * 2.4);
-    // this.moon = new Moon(this.scene, this.globe.getRadius() * 2.4);
+    this.moon = new Moon(this.scene, this.globe.getRadius() * 2.4);
 
     this.setupControls();
 
@@ -389,7 +389,7 @@ export class GameScene {
     this.camera.updateMatrixWorld(true);
 
     this.sun.update(1);
-    // this.moon.update(1);
+    this.moon.update(1);
 
     this.camera.updateProjectionMatrix();
   }

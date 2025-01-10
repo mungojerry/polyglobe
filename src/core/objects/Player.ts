@@ -12,8 +12,9 @@ export class Player extends BaseGameObject implements IGameObject {
     super(scene, initPos, world, "player");
     this.body.setLinearDamping(0.8);
     this.body.setAngularDamping(0.8);
+    this.body.setAdditionalMass(100, true);
     this.rotationSpeed = 0.2;
-    this.thrustForce = 2;
+    this.thrustForce = 10;
     this.movementForce = 2;
     const loader = new GLTFLoader();
 

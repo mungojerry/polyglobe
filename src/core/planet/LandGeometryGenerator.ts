@@ -27,7 +27,7 @@ export class LandGeometryGenerator {
     terrainHelper.setDefaults(noise, geometry);
 
     // Process vertices in chunks to report progress
-    const CHUNK_SIZE = 2000;
+    const CHUNK_SIZE = 1024;
     const totalVertices = vertexCount;
 
     for (let i = 0; i < vertexCount; i += CHUNK_SIZE) {
