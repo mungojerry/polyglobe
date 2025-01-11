@@ -5,14 +5,17 @@ import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise";
 import { vectorPool } from "../utils/vectorPool";
 
 // Constants
-const THRUST_FORCE = 50;
-const LINEAR_DAMPING = 0.3;
-const ANGULAR_DAMPING = 4.9;
+const THRUST_FORCE = 10; // Increased for better control
+const LINEAR_DAMPING = 0.2; // Reduced for more responsive movement
+const ANGULAR_DAMPING = 2.0; // Reduced for smoother rotation
 const PLANET_RADIUS = 1300;
-const GRAVITY_STRENGTH = 9.8 * 20; //20;
-const MAX_VELOCITY = 100;
-const SHIP_START_HEIGHT = PLANET_RADIUS + 10;
-const ROTATION_RATE = 0.1;
+const GRAVITY_STRENGTH = 9.8 * 20; // Reduced gravity for better control
+const MAX_VELOCITY = 150;
+const SHIP_START_HEIGHT = PLANET_RADIUS + 50;
+const ROTATION_RATE = 0.05; // Slower rotation for better control
+const MAX_PITCH = Math.PI * 0.8; // Maximum pitch angle (about 72 degrees)
+const MAX_ROLL = Math.PI * 0.3; // Maximum roll angle (about 54 degrees)
+const MOUSE_SENSITIVITY = 0.003;
 
 const COLLISION_MASKS = {
   PLANET: 0xffffffff,
@@ -28,12 +31,13 @@ export class ZarchFlyScene {
   private planetBody: RAPIER.RigidBody | undefined;
   private shipModel: THREE.Group | null = null;
   private thrustActive: boolean = false;
-
-  // Current mouse state
   private mouseX: number = 0;
   private mouseY: number = 0;
   private screenCenterX: number = 0;
   private screenCenterY: number = 0;
+  private isPointerLocked: boolean = false;
+  private currentPitch: number = 0;
+  private currentRoll: number = 0;
 
   constructor() {
     this.scene = new THREE.Scene();
@@ -72,24 +76,57 @@ export class ZarchFlyScene {
   }
 
   private setupEventListeners(): void {
-    window.addEventListener("mousemove", (event) => {
-      this.mouseX = event.clientX;
-      this.mouseY = event.clientY;
+    // Mouse movement with pointer lock
+    document.addEventListener("mousemove", (event) => {
+      if (this.isPointerLocked) {
+        // Use movement for relative control when locked
+        this.mouseX += event.movementX * MOUSE_SENSITIVITY;
+        this.mouseY += event.movementY * MOUSE_SENSITIVITY;
+
+        // Clamp mouse values
+        this.mouseX = Math.max(-1, Math.min(1, this.mouseX));
+        this.mouseY = Math.max(-1, Math.min(1, this.mouseY));
+      } else {
+        // Use screen position when not locked
+        this.mouseX = (event.clientX - this.screenCenterX) / this.screenCenterX;
+        this.mouseY = (this.screenCenterY - event.clientY) / this.screenCenterY;
+      }
     });
 
+    // Pointer lock controls
+    this.renderer.domElement.addEventListener("click", () => {
+      if (!this.isPointerLocked) {
+        this.renderer.domElement.requestPointerLock();
+      }
+    });
+
+    document.addEventListener("pointerlockchange", () => {
+      this.isPointerLocked = document.pointerLockElement === this.renderer.domElement;
+      if (!this.isPointerLocked) {
+        this.mouseX = 0;
+        this.mouseY = 0;
+      }
+    });
+
+    // Thrust control
+    window.addEventListener("keydown", (event) => {
+      if (event.code === "Space") {
+        this.thrustActive = true;
+      } else if (event.code === "Escape" && this.isPointerLocked) {
+        document.exitPointerLock();
+      }
+    });
+
+    window.addEventListener("keyup", (event) => {
+      if (event.code === "Space") this.thrustActive = false;
+    });
+
+    // Window resize
     window.addEventListener("resize", () => {
       this.camera.aspect = window.innerWidth / window.innerHeight;
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(window.innerWidth, window.innerHeight);
       this.updateScreenCenter();
-    });
-
-    window.addEventListener("keydown", (event) => {
-      if (event.code === "Space") this.thrustActive = true;
-    });
-
-    window.addEventListener("keyup", (event) => {
-      if (event.code === "Space") this.thrustActive = false;
     });
   }
 
@@ -100,7 +137,9 @@ export class ZarchFlyScene {
         "assets/models/wooden_ufo_toy.glb",
         (gltf) => {
           this.shipModel = gltf.scene;
+          // Scale and rotate ship model to match thrust direction
           this.shipModel.scale.set(1.5, 1.5, 1.5);
+          this.shipModel.rotation.x = Math.PI; // Rotate 180 degrees to point engines down
           this.scene.add(this.shipModel);
 
           const startPos = new THREE.Vector3(0, SHIP_START_HEIGHT, 0);
@@ -108,7 +147,7 @@ export class ZarchFlyScene {
             .setTranslation(startPos.x, startPos.y, startPos.z)
             .setLinearDamping(LINEAR_DAMPING)
             .setAngularDamping(ANGULAR_DAMPING)
-            .setAdditionalMass(100);
+            .setAdditionalMass(20); // Reduced mass for better responsiveness
 
           this.shipBody = this.world.createRigidBody(rigidBodyDesc);
 
@@ -142,9 +181,7 @@ export class ZarchFlyScene {
       // Get normalized position for noise input
       const normalized = vertex.clone().normalize();
 
-      // Apply noise
-      // Apply multi-octave noise
-
+      // Apply multi-octave noise for terrain variation
       let noise = simplex.noise3d(normalized.x * scale, normalized.y * scale, normalized.z * scale) * amplitude;
       noise = noise * 0.5 + simplex.noise3d(normalized.x * scale, normalized.y * scale, normalized.z * scale) * (amplitude * 0.5);
       vertex.add(normalized.multiplyScalar(noise));
@@ -159,7 +196,6 @@ export class ZarchFlyScene {
       metalness: 0,
       roughness: 0.8,
       wireframe: true,
-      // depthWrite: true,
     });
 
     const planet = new THREE.Mesh(geometry, material);
@@ -178,162 +214,60 @@ export class ZarchFlyScene {
 
     this.world.createCollider(colliderDesc, this.planetBody);
   }
-
-  private mouseDeltaX = 0;
-  private mouseDeltaY = 0;
-  private readonly MOUSE_SMOOTHING = 0.95; // Higher = smoother but less responsive
-  private readonly MOUSE_SENSITIVITY = 0.002; // Lower = less sensitive
   private updateRotation(): void {
     if (!this.shipBody) return;
 
-    // 1. Get ship's position and up vector (surface normal)
+    // Get ship's position and up vector (surface normal)
     const pos = this.shipBody.translation();
-    const shipPos = new THREE.Vector3(pos.x, pos.y, pos.z);
-    const up = shipPos.clone().normalize();
+    const planetUp = new THREE.Vector3(pos.x, pos.y, pos.z).normalize();
 
-    // 2. Get mouse position relative to screen center
-    let deltaX = this.mouseX - this.screenCenterX;
-    const deltaY = this.mouseY - this.screenCenterY;
+    // Update pitch and roll based on mouse input
+    this.currentPitch = THREE.MathUtils.lerp(this.currentPitch, -this.mouseY * MAX_PITCH, ROTATION_RATE);
+    this.currentRoll = THREE.MathUtils.lerp(this.currentRoll, this.mouseX * MAX_ROLL, ROTATION_RATE);
 
-    if (this.mouseY > this.screenCenterY) deltaX = -deltaX;
-    // 3. Calculate normalized distances separately for X and Y
-    const maxDistance = Math.sqrt(this.screenCenterX * this.screenCenterX + this.screenCenterY * this.screenCenterY);
+    // Start with base orientation aligned to planet surface
+    const baseQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), planetUp);
 
-    // X position affects yaw (which way the craft faces)
-    const normalizedX = deltaX / maxDistance;
-    // Y position affects pitch
-    const normalizedY = deltaY / maxDistance;
+    // Apply pitch rotation around the right axis
+    const rightAxis = new THREE.Vector3(1, 0, 0).applyQuaternion(baseQuat);
+    const pitchQuat = new THREE.Quaternion().setFromAxisAngle(rightAxis, this.currentPitch);
 
-    // 4. Calculate yaw based on X position
-    const yawAngle = normalizedX * Math.PI;
+    // Apply roll rotation around the forward axis
+    const forwardAxis = new THREE.Vector3(0, 0, 1).applyQuaternion(baseQuat);
+    const rollQuat = new THREE.Quaternion().setFromAxisAngle(forwardAxis, this.currentRoll);
 
-    // 5. Calculate pitch based on Y position
-    // Center (blue) = pointing up (-PI/2)
-    // Edge (red) = pointing down (PI/2)
-    const pitch = normalizedY * Math.PI * 2;
-
-    // 6. Create base quaternion aligned with planet surface
-    const baseQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
-
-    // 7. Create yaw rotation
-    const yawQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yawAngle);
-
-    // 8. Create pitch rotation
-    const pitchQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), pitch);
-
-    // 9. Combine rotations: base * yaw * pitch
-    let finalQuat = new THREE.Quaternion().multiplyQuaternions(baseQuat, yawQuat).multiply(pitchQuat);
-
-    // 10. Smooth interpolation using ROTATION_RATE
-    const currentRotation = new THREE.Quaternion(
-      this.shipBody.rotation().x,
-      this.shipBody.rotation().y,
-      this.shipBody.rotation().z,
-      this.shipBody.rotation().w
-    );
-
-    currentRotation.slerp(finalQuat, ROTATION_RATE);
-    this.shipBody.setRotation(currentRotation, true);
-  }
-
-  private updateRotationWorking(): void {
-    if (!this.shipBody) return;
-
-    // Calculate vector from screen center to mouse
-    let deltaX = this.mouseX - this.screenCenterX;
-    let deltaY = this.mouseY - this.screenCenterY;
-
-    // if (this.mouseY < this .screenCenterY) deltaX = -deltaX;
-
-    // Increase the sensitivity of the yaw by applying a multiplier
-    // const yawSensitivity = 2.0; // Adjust this value to make yaw more pronounced
-    // deltaX *= yawSensitivity;
-    // Calculate angle and normalized distance from center
-    const angleToMouse = Math.atan2(deltaY, deltaX);
-    const distanceFromCenter = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
-    const maxDistance = Math.sqrt(this.screenCenterX * this.screenCenterX + this.screenCenterY * this.screenCenterY);
-    const normalizedDistance = Math.min(distanceFromCenter / maxDistance, 1.0);
-
-    // Get ship's position relative to planet center
-    const pos = this.shipBody.translation();
-    const shipPos = new THREE.Vector3(pos.x, pos.y, pos.z);
-    const up = shipPos.clone().normalize();
-
-    // Step 1: Create the base orientation aligned with planet surface
-    const baseQuat = new THREE.Quaternion();
-    baseQuat.setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
-
-    // Step 2: Create a direction vector based on mouse angle
-    // This creates the base direction for the yaw
-    const directionVector = new THREE.Vector3(
-      Math.cos(angleToMouse), // X component
-      0, // Y component (will be affected by pitch)
-      Math.sin(angleToMouse) //// Z component
-    ).normalize();
-
-    // Step 3: Calculate pitch based on distance from center
-    // 0 (center, blue) = straight up (-PI/2)
-    // 1 (edge, red) = straight down (PI/2)
-    // The purple zone is in between
-    const basePitch = -Math.PI / 2; // Start pointing straight up
-    const pitchRange = Math.PI; // Full 180-degree range
-    const pitch = basePitch + normalizedDistance * pitchRange;
-
-    // Apply pitch to the direction vector
-    directionVector.applyAxisAngle(new THREE.Vector3(1, 0, 0), pitch);
-
-    const baseYaw = -Math.PI / 2; // Start pointing straight up
-    const yawRange = Math.PI; // Full 180-degree range
-    const yaw = baseYaw + normalizedDistance * yawRange;
-
-    // Apply pitch to the direction vector
-    directionVector.applyAxisAngle(new THREE.Vector3(0, 0, 1), -yaw);
-
-    // Step 4: Create quaternion that rotates from forward vector to our desired direction
-    const dirQuat = new THREE.Quaternion();
-    dirQuat.setFromUnitVectors(new THREE.Vector3(0, 0, 1), directionVector);
-
-    // Combine base alignment with direction rotation
-    const finalQuat = new THREE.Quaternion();
-    finalQuat.multiplyQuaternions(baseQuat, dirQuat);
-
-    // Get current rotation and smoothly interpolate
-    const currentRotation = new THREE.Quaternion(
-      this.shipBody.rotation().x,
-      this.shipBody.rotation().y,
-      this.shipBody.rotation().z,
-      this.shipBody.rotation().w
-    );
-
-    // Smoothly interpolate to target rotation
-    currentRotation.slerp(finalQuat, ROTATION_RATE);
+    // Combine all rotations
+    const finalQuat = new THREE.Quaternion().multiplyQuaternions(baseQuat, pitchQuat).multiply(rollQuat);
 
     // Apply final rotation
-    this.shipBody.setRotation(currentRotation, true);
+    this.shipBody.setRotation(finalQuat, true);
   }
 
   private updateMovement(): void {
-    if (!this.shipBody || !this.thrustActive) return;
+    if (!this.shipBody) return;
 
-    const rotation = this.shipBody.rotation();
-    const quat = new THREE.Quaternion(rotation.x, rotation.y, rotation.z, rotation.w);
-    const thrustDirection = new THREE.Vector3(0, 1, 0).applyQuaternion(quat);
+    if (this.thrustActive) {
+      const rotation = this.shipBody.rotation();
+      const quat = new THREE.Quaternion(rotation.x, rotation.y, rotation.z, rotation.w);
+      // Thrust comes from bottom of ship (positive Y pushes away from bottom)
+      const thrustDirection = new THREE.Vector3(0, 1, 0).applyQuaternion(quat);
 
-    this.shipBody.applyImpulse(
-      {
-        x: thrustDirection.x * THRUST_FORCE,
-        y: thrustDirection.y * THRUST_FORCE,
-        z: thrustDirection.z * THRUST_FORCE,
-      },
-      true
-    );
+      this.shipBody.applyImpulse(
+        {
+          x: thrustDirection.x * THRUST_FORCE,
+          y: thrustDirection.y * THRUST_FORCE,
+          z: thrustDirection.z * THRUST_FORCE,
+        },
+        true
+      );
 
-    // Apply velocity limits
-    const vel = this.shipBody.linvel();
-    const velocity = new THREE.Vector3(vel.x, vel.y, vel.z);
-    if (velocity.length() > MAX_VELOCITY) {
-      velocity.normalize().multiplyScalar(MAX_VELOCITY);
-      this.shipBody.setLinvel({ x: velocity.x, y: velocity.y, z: velocity.z }, true);
+      // Apply velocity limits
+      const vel = this.shipBody.linvel();
+      const velocity = new THREE.Vector3(vel.x, vel.y, vel.z);
+      if (velocity.length() > MAX_VELOCITY) {
+        velocity.normalize().multiplyScalar(MAX_VELOCITY);
+        this.shipBody.setLinvel({ x: velocity.x, y: velocity.y, z: velocity.z }, true);
+      }
     }
   }
 
@@ -359,42 +293,11 @@ export class ZarchFlyScene {
     );
   }
 
-  // private updateCamera(): void {
-  //   if (!this.shipModel) return;
-
-  //   const shipPos = this.shipModel.position;
-
-  //   // Calculate the up vector from the planet center to the ship
-  //   const upVector = shipPos.clone().normalize();
-
-  //   // Define spherical coordinates for the camera position relative to the ship
-  //   const radius = 10; // Distance from the ship
-  //   const theta = Math.PI / 4; // Angle from the vertical (elevation)
-  //   const phi = Math.PI / 4; // Angle around the vertical axis (azimuth)
-
-  //   // Convert spherical coordinates to Cartesian coordinates
-  //   const offsetX = radius * Math.sin(theta) * Math.cos(phi);
-  //   const offsetY = radius * Math.cos(theta);
-  //   const offsetZ = radius * Math.sin(theta) * Math.sin(phi);
-
-  //   // Calculate the target camera position
-  //   const targetPos = new THREE.Vector3(shipPos.x + offsetX, shipPos.y + offsetY, shipPos.z + offsetZ);
-
-  //   // Smooth camera movement
-  //   this.camera.position.lerp(targetPos, 0.8);
-
-  //   // Ensure the camera looks at the ship
-  //   this.camera.lookAt(shipPos);
-
-  //   // Set the camera's up vector to be perpendicular to the sphere surface
-  //   this.camera.up.copy(upVector);
-  // }
-
   private offset = new THREE.Vector3(0, 5, -8);
   private currentPosition = new THREE.Vector3(0, 0, 0);
 
   private currentLookAt = new THREE.Vector3();
-  private lastValidForward: THREE.Vector3 | null = null;
+
   private updateCamera(position: THREE.Vector3, playerRotation: THREE.Quaternion): void {
     // Calculate up vector based on position relative to planet center
     const up = position.clone().normalize();
