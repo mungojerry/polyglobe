@@ -11,7 +11,7 @@ import { GlobeChunkGenerator } from "./GlobeChunkGenerator";
 import { Infection } from "./Infection";
 import { LandGeometryGenerator } from "./LandGeometryGenerator";
 import { BaseNoise } from "./noise/BaseNoise";
-import { Noise } from "./noise/Noise";
+import { DiamondSquareNoise } from "./noise/DiamonSquareNoise";
 import { TerrainDeformer } from "./TerrainDeformer";
 const globeConfig = {
   showWall: false,
@@ -45,7 +45,7 @@ export class Globe {
 
   public waterLevel: number = 0;
   public terrainClickAllowed: boolean = false;
-  public noise: BaseNoise = new Noise();
+  public noise: BaseNoise = new DiamondSquareNoise();
 
   private landGeometry!: THREE.BufferGeometry;
   private rigidBody!: RAPIER.RigidBody;
