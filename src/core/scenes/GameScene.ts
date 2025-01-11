@@ -85,7 +85,7 @@ export class GameScene {
   private baseOffset = new THREE.Vector3(0, 2, -3);
   private closeOffset = new THREE.Vector3(0, 1, -2);
   private debugEnabled: boolean = false;
-  private readonly GRAVITY_FUDGE: number = 1; //   0.01;
+  private readonly GRAVITY_FUDGE: number = 0.001; //   0.01;
   private readonly G = 9.81 * this.GRAVITY_FUDGE;
 
   private readonly BASE_FOV = 75; // Default FOV

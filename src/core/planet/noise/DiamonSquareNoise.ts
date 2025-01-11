@@ -1,21 +1,26 @@
 import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise.js";
 import { BaseNoise } from "./BaseNoise";
 import { LRUCache } from "./LRUCache";
+export type DiamondSquareNoiseConfig = {
+  octaves: number;
+  roughness: number;
+  heightScale: number;
+};
+
+const DEFAULT_CONFIG: Readonly<DiamondSquareNoiseConfig> = {
+  octaves: 7,
+  roughness: 0.3,
+  heightScale: 0.6,
+};
 
 export class DiamondSquareNoise implements BaseNoise {
   private simplexNoise: SimplexNoise;
-  private roughness: number;
-  private heightScale: number;
-  private radius: number;
-  private octaves: number;
+  private config: DiamondSquareNoiseConfig;
   private cache: LRUCache<string, number>;
 
-  constructor(roughness: number = 0.3, heightScale: number = 0.6, radius: number = 1300, octaves: number = 6) {
+  constructor(config: Partial<DiamondSquareNoiseConfig> = {}) {
     this.simplexNoise = new SimplexNoise();
-    this.roughness = roughness;
-    this.heightScale = heightScale; // Increased from 0.2 to 0.4 for more variation
-    this.radius = radius;
-    this.octaves = octaves;
+    this.config = { ...DEFAULT_CONFIG, ...config };
     this.cache = new LRUCache<string, number>(1000); // Increased cache size
   }
 
@@ -46,7 +51,7 @@ export class DiamondSquareNoise implements BaseNoise {
     let maxValue = 0;
 
     // Add multiple octaves of noise with rotation
-    for (let i = 0; i < this.octaves; i++) {
+    for (let i = 0; i < this.config.octaves; i++) {
       // Rotate the point differently for each octave to break up patterns
       const angle1 = i * 1.7 + 0.5;
       const angle2 = i * 2.3 + 0.8;
@@ -58,12 +63,12 @@ export class DiamondSquareNoise implements BaseNoise {
 
       total += value * amplitude;
       maxValue += amplitude;
-      amplitude *= this.roughness;
+      amplitude *= this.config.roughness;
       frequency *= 2;
     }
 
     // Apply heightScale after normalization for better control
-    return (total / maxValue) * this.heightScale;
+    return (total / maxValue) * this.config.heightScale;
   }
 
   public getValue(x: number, y: number, z: number): number {
@@ -83,12 +88,7 @@ export class DiamondSquareNoise implements BaseNoise {
     this.cache.clear();
   }
 
-  public getConfig(): any {
-    return {
-      roughness: this.roughness,
-      heightScale: this.heightScale,
-      radius: this.radius,
-      octaves: this.octaves,
-    };
+  public getConfig(): DiamondSquareNoiseConfig {
+    return this.config;
   }
 }

@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise.js";
 import { pseudoRandom } from "../../utils/PseudoRandom";
 import { BaseNoise } from "./BaseNoise";
+import { LRUCache } from "./LRUCache";
 
 export type NoiseConfig = {
   octaves: number;
@@ -36,40 +37,7 @@ export const MOUNTAINOUS_CONFIG: Readonly<NoiseConfig> = {
   erosionStrength: 0.3,
 };
 
-// LRU Cache implementation for better memory management
-class LRUCache<K, V> {
-  private cache: Map<K, V>;
-  private readonly maxSize: number;
-
-  constructor(maxSize: number) {
-    this.cache = new Map();
-    this.maxSize = maxSize;
-  }
-
-  get(key: K): V | undefined {
-    const value = this.cache.get(key);
-    if (value !== undefined) {
-      this.cache.delete(key);
-      this.cache.set(key, value);
-    }
-    return value;
-  }
-
-  set(key: K, value: V): void {
-    if (this.cache.size >= this.maxSize) {
-      const firstKey = this.cache.keys().next().value;
-      if (firstKey !== undefined) {
-        this.cache.delete(firstKey);
-      }
-    }
-    this.cache.set(key, value);
-  }
-
-  clear(): void {
-    this.cache.clear();
-  }
-}
-
+// LRU
 export class Noise implements BaseNoise {
   private static readonly CACHE_SIZE = 1024;
   private static readonly CACHE_PRECISION = 10000;
