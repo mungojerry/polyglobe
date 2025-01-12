@@ -75,29 +75,12 @@ export class ParticleExampleScene {
   }
 
   private initEffects(): void {
-    const effects = [
-      { name: "Thrust", creator: ParticlePresets.createThrustEffect },
-      { name: "Ion Thruster", creator: ParticlePresets.createIonThrusterEffect },
-      { name: "Fire", creator: ParticlePresets.createFireEffect },
-      { name: "Plasma", creator: ParticlePresets.createPlasmaEffect },
-      { name: "Smoke", creator: ParticlePresets.createSmokeEffect },
-      { name: "Magic", creator: ParticlePresets.createMagicEffect },
-      { name: "Explosion", creator: ParticlePresets.createExplosionEffect },
-      { name: "Sparkle", creator: ParticlePresets.createSparkleEffect },
-      { name: "Portal", creator: ParticlePresets.createPortalEffect },
-      { name: "Poison Cloud", creator: ParticlePresets.createPoisonCloudEffect },
-      { name: "Rain", creator: ParticlePresets.createRainEffect },
-      { name: "Waterfall", creator: ParticlePresets.createWaterfallEffect },
-      { name: "Swarm", creator: ParticlePresets.createSwarmEffect },
-      { name: "Snow", creator: ParticlePresets.createSnowEffect },
-      { name: "Glow effect", creator: ParticlePresets.createLanternGlowEffect },
-      { name: "Trail", creator: ParticlePresets.createCometTrailEffect },
-      { name: "Electric arc", creator: ParticlePresets.createElectricArcEffect },
-      { name: "Sphere emitter", creator: ParticlePresets.createSphereEmitterEffect },
-      { name: "Box emitter", creator: ParticlePresets.createBoxEmitterEffect },
-      { name: "Ring emitter", creator: ParticlePresets.createRingEmitterEffect },
-      { name: "Cylinder emitter", creator: ParticlePresets.createCylinderEmitterEffect },
-    ];
+    const effects = Object.getOwnPropertyNames(ParticlePresets)
+      .filter((name) => name.startsWith("create"))
+      .map((name) => {
+        console.log(name);
+        return { name: name.replace("create", "").replace("Effect", ""), creator: (ParticlePresets as any)[name] };
+      });
 
     const { rows, cols, spacing } = this.effectsGrid;
     const offsetX = ((cols - 1) * spacing) / 2;
