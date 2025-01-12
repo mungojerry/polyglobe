@@ -83,7 +83,7 @@ export class PointEmitter implements ParticleEmitterShape {
   }
 
   getEmissionDirection(): THREE.Vector3 {
-    return new THREE.Vector3((Math.random() - 0.5) * 2, Math.random(), (Math.random() - 0.5) * 2).normalize();
+    return new THREE.Vector3((Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2).normalize();
   }
 }
 
@@ -135,7 +135,7 @@ export class BoxEmitter implements ParticleEmitterShape {
   }
 
   getEmissionDirection(): THREE.Vector3 {
-    return new THREE.Vector3((Math.random() - 0.5) * 2, Math.random(), (Math.random() - 0.5) * 2).normalize();
+    return new THREE.Vector3((Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2).normalize();
   }
 }
 
@@ -163,7 +163,7 @@ export class CylinderEmitter implements ParticleEmitterShape {
   }
 
   getEmissionDirection(): THREE.Vector3 {
-    return new THREE.Vector3((Math.random() - 0.5) * 2, Math.random(), (Math.random() - 0.5) * 2).normalize();
+    return new THREE.Vector3((Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2).normalize();
   }
 }
 

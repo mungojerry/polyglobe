@@ -168,7 +168,9 @@ export class ParticleSystem extends THREE.Object3D {
       const direction = this.emitter.getEmissionDirection();
 
       particle.position.copy(emissionPoint);
-      particle.velocity.copy(direction).multiplyScalar(2);
+      // Randomize initial velocity slightly for more natural variation
+      const speed = 1.5 + Math.random() * 0.5; // Speed between 1.5 and 2
+      particle.velocity.copy(direction).multiplyScalar(speed);
       particle.lifetime = 2 + Math.random();
       particle.age = 0;
 

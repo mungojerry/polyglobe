@@ -69,27 +69,40 @@ export class VortexBehavior implements ParticleBehavior {
   }
 
   update(particle: Particle, deltaTime: number): void {
-    // Calculate tangential force for vortex effect
+    // Project particle position onto plane perpendicular to rotation axis
     this.temp.copy(particle.position);
-    const radius = this.temp.length();
-    if (radius === 0) return;
+    const dot = this.temp.dot(this.axis);
+    this.temp.copy(this.axis).multiplyScalar(dot);
+    const projectedPos = particle.position.clone().sub(this.temp);
 
-    // Create perpendicular force vector for circular motion
-    this.force.crossVectors(this.axis, particle.position);
+    const radius = projectedPos.length();
+    if (radius < 0.001) return; // Avoid division by zero and unstable behavior near axis
 
-    // Scale force by radius but with a dampening factor to prevent runaway acceleration
-    const dampening = 0.95;
+    // Calculate desired tangential velocity (perpendicular to radius)
+    this.force.copy(projectedPos).normalize();
+    const desiredDir = new THREE.Vector3().crossVectors(this.axis, this.force);
+
+    // Calculate current tangential velocity
+    const currentVel = particle.velocity.clone();
+    const radialVel = projectedPos.clone().multiplyScalar(currentVel.dot(projectedPos.clone().normalize()) / radius);
+    const tangentialVel = currentVel.sub(radialVel);
+
+    // Apply force to achieve target tangential velocity
     const targetSpeed = this.strength * Math.sqrt(radius);
-    const currentSpeed = particle.velocity.length();
-    const speedDiff = targetSpeed - currentSpeed;
+    const currentTangentialSpeed = tangentialVel.length();
+    const speedDiff = targetSpeed - currentTangentialSpeed;
 
-    this.force.normalize().multiplyScalar(speedDiff * particle.mass * dampening);
+    // Apply dampened force
+    const dampening = 0.95;
+    this.force.copy(desiredDir).multiplyScalar(speedDiff * particle.mass * dampening);
     particle.applyForce(this.force);
 
-    // Update rotation based on actual particle velocity
-    const angularSpeed = (currentSpeed / radius) * deltaTime;
-    this.rotationQuaternion.setFromAxisAngle(this.axis, angularSpeed);
-    particle.rotation.applyQuaternion(this.rotationQuaternion);
+    // Update rotation based on actual angular velocity
+    if (currentTangentialSpeed > 0) {
+      const angularSpeed = currentTangentialSpeed / radius;
+      this.rotationQuaternion.setFromAxisAngle(this.axis, angularSpeed * deltaTime);
+      particle.rotation.applyQuaternion(this.rotationQuaternion);
+    }
   }
 }
 
