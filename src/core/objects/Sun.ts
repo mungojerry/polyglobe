@@ -3,7 +3,7 @@ import { Globe } from "../planet/Globe";
 export class Sun {
   private directionalLight: THREE.DirectionalLight;
   private sunSprite: THREE.Sprite;
-  private sunSize: number = 100;
+  private sunSize: number = 200;
 
   getObject(): THREE.Sprite {
     return this.sunSprite;

@@ -2,6 +2,7 @@ import RAPIER from "@dimforge/rapier3d";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise";
+import { BoxEmitter, ParticleSystem } from "../particles/ParticleSystem";
 import { vectorPool } from "../utils/vectorPool";
 
 // Constants
@@ -13,8 +14,8 @@ const GRAVITY_STRENGTH = 9.8 * 20; // Reduced gravity for better control
 const MAX_VELOCITY = 150;
 const SHIP_START_HEIGHT = PLANET_RADIUS + 50;
 const ROTATION_RATE = 0.05; // Slower rotation for better control
-const MAX_PITCH = Math.PI * 0.8; // Maximum pitch angle (about 72 degrees)
-const MAX_ROLL = Math.PI * 0.3; // Maximum roll angle (about 54 degrees)
+const MAX_PITCH = Math.PI * 0.95; // Maximum pitch angle (about 72 degrees)
+const MAX_ROLL = Math.PI * 0.95; // Maximum roll angle (about 54 degrees)
 const MOUSE_SENSITIVITY = 0.003;
 
 const COLLISION_MASKS = {
@@ -38,6 +39,10 @@ export class ZarchFlyScene {
   private isPointerLocked: boolean = false;
   private currentPitch: number = 0;
   private currentRoll: number = 0;
+  private crosshair: HTMLDivElement;
+  private cursorX: number = 0;
+  private cursorY: number = 0;
+  private thrustParticles: ParticleSystem;
 
   constructor() {
     this.scene = new THREE.Scene();
@@ -46,16 +51,67 @@ export class ZarchFlyScene {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(this.renderer.domElement);
 
+    // Create and style the crosshair element
+    this.crosshair = document.createElement("div");
+    this.crosshair.style.position = "fixed";
+    this.crosshair.style.width = "32px";
+    this.crosshair.style.height = "32px";
+    this.crosshair.style.backgroundImage = "url(assets/textures/crosshair.svg)";
+    this.crosshair.style.backgroundSize = "contain";
+    this.crosshair.style.backgroundRepeat = "no-repeat";
+    this.crosshair.style.pointerEvents = "none";
+    this.crosshair.style.zIndex = "1000";
+    this.crosshair.style.transform = "translate(-50%, -50%)";
+    document.body.appendChild(this.crosshair);
+
+    // Hide the default cursor
+    this.renderer.domElement.style.cursor = "none";
+
     // Lighting
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.15);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.25);
     this.scene.add(ambientLight);
     const directionalLight = new THREE.DirectionalLight(0xffffff, 2);
-    directionalLight.position.set(1000, 2000, 1000);
+    directionalLight.position.set(0, 2000, 0);
     this.scene.add(directionalLight);
 
     const pointLight1 = new THREE.PointLight(0xffffff, 1);
     pointLight1.position.set(2000, 0, 0);
     this.scene.add(pointLight1);
+
+    // Create thrust particles with GPU acceleration
+    this.thrustParticles = new ParticleSystem({
+      maxParticles: 2000,
+      useGPUCompute: true,
+      renderer: this.renderer,
+      renderOptions: {
+        useCustomShader: true,
+        sortMode: "distance",
+        frustumCulled: true,
+      },
+      simulation: {
+        substeps: 2, // Increased for smoother motion
+        fixedTimeStep: 1 / 60,
+      },
+    });
+
+    // Create and configure emitter for thrust
+    const thrustEmitter = new BoxEmitter(0.5, 0.1, 0.5);
+    this.thrustParticles.addEmitter(thrustEmitter);
+
+    // Add particle modifier for thrust behavior
+    this.thrustParticles.addModifier({
+      updateParticle: (position, velocity, age, lifetime, deltaTime) => {
+        // Slow down particles over time
+        velocity.multiplyScalar(0.98);
+
+        // Add some turbulence
+        position.x += (Math.random() - 0.5) * 0.1;
+        position.y += (Math.random() - 0.5) * 0.1;
+        position.z += (Math.random() - 0.5) * 0.1;
+      },
+    });
+
+    this.scene.add(this.thrustParticles);
 
     this.world = new RAPIER.World({ x: 0, y: 0, z: 0 });
 
@@ -79,18 +135,28 @@ export class ZarchFlyScene {
     // Mouse movement with pointer lock
     document.addEventListener("mousemove", (event) => {
       if (this.isPointerLocked) {
-        // Use movement for relative control when locked
+        // Update cursor position based on movement
+        this.cursorX = Math.max(0, Math.min(window.innerWidth, this.cursorX + event.movementX));
+        this.cursorY = Math.max(0, Math.min(window.innerHeight, this.cursorY + event.movementY));
+
+        // Update ship control values
         this.mouseX += event.movementX * MOUSE_SENSITIVITY;
         this.mouseY += event.movementY * MOUSE_SENSITIVITY;
-
-        // Clamp mouse values
         this.mouseX = Math.max(-1, Math.min(1, this.mouseX));
         this.mouseY = Math.max(-1, Math.min(1, this.mouseY));
       } else {
-        // Use screen position when not locked
+        // Direct cursor position
+        this.cursorX = event.clientX;
+        this.cursorY = event.clientY;
+
+        // Update ship control values
         this.mouseX = (event.clientX - this.screenCenterX) / this.screenCenterX;
         this.mouseY = (this.screenCenterY - event.clientY) / this.screenCenterY;
       }
+
+      // Update crosshair position
+      this.crosshair.style.left = `${this.cursorX}px`;
+      this.crosshair.style.top = `${this.cursorY}px`;
     });
 
     // Pointer lock controls
@@ -105,6 +171,11 @@ export class ZarchFlyScene {
       if (!this.isPointerLocked) {
         this.mouseX = 0;
         this.mouseY = 0;
+        // Reset cursor to center when exiting pointer lock
+        this.cursorX = window.innerWidth / 2;
+        this.cursorY = window.innerHeight / 2;
+        this.crosshair.style.left = `${this.cursorX}px`;
+        this.crosshair.style.top = `${this.cursorY}px`;
       }
     });
 
@@ -293,12 +364,12 @@ export class ZarchFlyScene {
     );
   }
 
-  private offset = new THREE.Vector3(0, 5, -8);
+  private offset = new THREE.Vector3(0, 11, -8);
   private currentPosition = new THREE.Vector3(0, 0, 0);
 
   private currentLookAt = new THREE.Vector3();
 
-  private updateCamera(position: THREE.Vector3, playerRotation: THREE.Quaternion): void {
+  private updateCamera(position: THREE.Vector3): void {
     // Calculate up vector based on position relative to planet center
     const up = position.clone().normalize();
 
@@ -343,7 +414,43 @@ export class ZarchFlyScene {
     this.shipModel.position.set(translation.x, translation.y, translation.z);
     this.shipModel.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
 
-    this.updateCamera(this.shipModel.position.clone(), this.shipModel.quaternion.clone());
+    // Update thrust particles with new system
+    if (this.shipModel) {
+      // Calculate spawn point at ship's bottom
+      const shipBottom = this.shipModel.position.clone();
+      const thrustDirection = new THREE.Vector3(-1, 0, 0).applyQuaternion(this.shipModel.quaternion);
+      shipBottom.addScaledVector(thrustDirection, 1.5);
+
+      // Update particle system position and rotation
+      this.thrustParticles.position.copy(shipBottom);
+      this.thrustParticles.rotation.setFromRotationMatrix(new THREE.Matrix4().lookAt(new THREE.Vector3(), thrustDirection, new THREE.Vector3(0, 1, 0)));
+
+      // Emit particles when thrust is active
+      if (this.thrustActive) {
+        // Create new particles with appropriate properties
+        for (let i = 0; i < 5; i++) {
+          const particle = {
+            position: new THREE.Vector3(),
+            velocity: thrustDirection.clone().multiplyScalar(-10),
+            acceleration: new THREE.Vector3(),
+            rotation: Math.random() * Math.PI * 2,
+            angularVelocity: (Math.random() - 0.5) * 2,
+            size: 12.5,
+            color: new THREE.Color(0xff4400),
+            age: 0,
+            lifetime: 1.2,
+            active: true,
+          };
+          // The particle system will handle adding this to its internal array
+          this.thrustParticles.addParticle(particle);
+        }
+      }
+
+      // Update particle simulation
+      this.thrustParticles.update(1 / 60);
+    }
+
+    this.updateCamera(this.shipModel.position.clone());
     this.world.step();
     this.renderer.render(this.scene, this.camera);
   }
