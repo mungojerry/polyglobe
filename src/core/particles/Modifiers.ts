@@ -78,23 +78,33 @@ export class TurbulenceModifier implements ParticleModifier {
   private strength: number;
   private scale: number;
   private noiseOffset: THREE.Vector3;
+  private force: THREE.Vector3;
 
   constructor(strength = 0.1, scale = 1.0) {
     this.strength = strength;
     this.scale = scale;
     this.noiseOffset = new THREE.Vector3(Math.random() * 1000, Math.random() * 1000, Math.random() * 1000);
+    this.force = new THREE.Vector3();
+  }
+
+  update(particle: Particle, deltaTime: number): void {
+    // Improved noise approximation for turbulence using multiple frequencies
+    const time = particle.age * this.scale;
+
+    // Primary frequency
+    const px = Math.sin(time + this.noiseOffset.x) + Math.sin(time * 2.1 + this.noiseOffset.x * 1.7) * 0.5;
+    const py = Math.cos(time + this.noiseOffset.y) + Math.cos(time * 1.7 + this.noiseOffset.y * 2.3) * 0.5;
+    const pz = Math.sin(time + this.noiseOffset.z) + Math.sin(time * 1.9 + this.noiseOffset.z * 1.4) * 0.5;
+
+    // Apply turbulent force
+    this.force.set(px, py, pz).multiplyScalar(this.strength * deltaTime * particle.mass);
+    particle.applyForce(this.force);
   }
 
   apply(particle: Particle): void {
-    // Simple noise approximation for turbulence
-    const time = particle.age * this.scale;
-    const px = Math.sin(time + this.noiseOffset.x);
-    const py = Math.cos(time + this.noiseOffset.y);
-    const pz = Math.sin(time + this.noiseOffset.z);
-
-    particle.velocity.x += px * this.strength;
-    particle.velocity.y += py * this.strength;
-    particle.velocity.z += pz * this.strength;
+    // Keep apply method for ParticleModifier interface compatibility
+    // but delegate to update for actual behavior
+    this.update(particle, 1 / 60); // Use default deltaTime if called through apply
   }
 }
 

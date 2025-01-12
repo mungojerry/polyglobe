@@ -1,49 +1,55 @@
-export class ObjectPool<T> {
-  private pool: T[] = [];
-  private acquired: Set<T> = new Set();
-  private factory: () => T;
-  private batchSize: number;
+export interface Poolable {
+  reset(): void;
+  active: boolean;
+}
 
-  constructor(factory: () => T, initialSize: number = 10, batchSize: number = 10) {
-    this.factory = factory;
-    this.batchSize = batchSize;
-    for (let i = 0; i < initialSize; i++) {
-      this.pool.push(this.factory());
-    }
+export class ObjectPool<T extends Poolable> {
+  private objects: T[];
+  private createObject: () => T;
+  private expandAmount: number;
+
+  constructor(initialSize: number, createFn: () => T, expandAmount: number = Math.floor(initialSize * 0.5)) {
+    this.createObject = createFn;
+    this.expandAmount = expandAmount;
+    this.objects = Array(initialSize).fill(null).map(() => this.createObject());
   }
 
   acquire(): T {
-    if (this.pool.length === 0) {
-      this.growPool();
+    // Find first inactive object
+    const object = this.objects.find(obj => !obj.active);
+    
+    if (object) {
+      object.active = true;
+      return object;
     }
-    const obj = this.pool.pop()!;
-    this.acquired.add(obj);
-    return obj;
+
+    // Expand pool if no inactive objects found
+    this.expand();
+    const newObject = this.objects[this.objects.length - 1];
+    newObject.active = true;
+    return newObject;
   }
 
-  release(obj: T): void {
-    if (this.acquired.has(obj)) {
-      this.acquired.delete(obj);
-      this.pool.push(obj);
-    }
+  release(object: T): void {
+    object.reset();
   }
 
-  releaseAll(): void {
-    this.acquired.forEach((obj) => this.pool.push(obj));
-    this.acquired.clear();
+  private expand(): void {
+    const newObjects = Array(this.expandAmount)
+      .fill(null)
+      .map(() => this.createObject());
+    this.objects.push(...newObjects);
   }
 
-  private growPool(): void {
-    for (let i = 0; i < this.batchSize; i++) {
-      this.pool.push(this.factory());
-    }
+  clear(): void {
+    this.objects.forEach(obj => obj.reset());
   }
 
-  size(): number {
-    return this.pool.length;
+  getActiveCount(): number {
+    return this.objects.filter(obj => obj.active).length;
   }
 
-  acquiredSize(): number {
-    return this.acquired.size;
+  getTotalCount(): number {
+    return this.objects.length;
   }
 }

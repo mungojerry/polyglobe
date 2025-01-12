@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { ObjectPool } from "../utils/ObjectPool";
 import { GravityBehavior, ParticleBehavior } from "./Behaviours";
 import { ParticleEmitterShape, PointEmitter } from "./Emitters";
 import { AppearanceModifier, ParticleAppearance, ParticleModifier } from "./Modifiers";
@@ -14,7 +15,7 @@ interface ParticleSystemOptions {
 
 // Enhanced ParticleSystem class
 export class ParticleSystem extends THREE.Object3D {
-  private particles: Particle[];
+  private particlePool: ObjectPool<Particle>;
   private geometry!: THREE.BufferGeometry<THREE.NormalBufferAttributes>;
   private material!: THREE.ShaderMaterial;
   private points!: THREE.Points<THREE.BufferGeometry<THREE.NormalBufferAttributes>, THREE.ShaderMaterial>;
@@ -26,6 +27,7 @@ export class ParticleSystem extends THREE.Object3D {
 
   private positions!: Float32Array;
   private colors!: Float32Array;
+  private rotations!: Float32Array;
   private scales!: Float32Array;
   private opacities!: Float32Array;
 
@@ -48,9 +50,11 @@ export class ParticleSystem extends THREE.Object3D {
       },
     } = options;
 
-    this.particles = Array(count)
-      .fill(null)
-      .map(() => new Particle());
+    this.particlePool = new ObjectPool<Particle>(
+      count,
+      () => new Particle(),
+      Math.floor(count * 0.2) // Expand by 20% when needed
+    );
     this.emitter = emitter;
     this.behaviors = behaviors;
 
@@ -66,6 +70,7 @@ export class ParticleSystem extends THREE.Object3D {
   private initializeBuffers(count: number): void {
     this.positions = new Float32Array(count * 3);
     this.colors = new Float32Array(count * 3);
+    this.rotations = new Float32Array(count * 3);
     this.scales = new Float32Array(count);
     this.opacities = new Float32Array(count);
   }
@@ -80,17 +85,36 @@ export class ParticleSystem extends THREE.Object3D {
         attribute float scale;
         attribute float opacity;
         attribute vec3 color;
+        attribute vec3 rotation;
 
         varying float vOpacity;
         varying vec3 vColor;
         varying vec2 vUv;
+
+        mat3 rotationMatrix(vec3 rotation) {
+          float cx = cos(rotation.x);
+          float sx = sin(rotation.x);
+          float cy = cos(rotation.y);
+          float sy = sin(rotation.y);
+          float cz = cos(rotation.z);
+          float sz = sin(rotation.z);
+
+          return mat3(
+            cy * cz, -cy * sz, sy,
+            cx * sz + sx * sy * cz, cx * cz - sx * sy * sz, -sx * cy,
+            sx * sz - cx * sy * cz, sx * cz + cx * sy * sz, cx * cy
+          );
+        }
 
         void main() {
           vColor = color;
           vOpacity = opacity;
           vUv = position.xy * 0.5 + 0.5;
           
-          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+          // Apply rotation to position
+          vec3 rotatedPosition = rotationMatrix(rotation) * position;
+          vec4 mvPosition = modelViewMatrix * vec4(rotatedPosition, 1.0);
+          
           gl_Position = projectionMatrix * mvPosition;
           gl_PointSize = scale * (300.0 / -mvPosition.z);
         }
@@ -129,6 +153,7 @@ export class ParticleSystem extends THREE.Object3D {
 
     this.geometry.setAttribute("position", new THREE.BufferAttribute(this.positions, 3));
     this.geometry.setAttribute("color", new THREE.BufferAttribute(this.colors, 3));
+    this.geometry.setAttribute("rotation", new THREE.BufferAttribute(this.rotations, 3));
     this.geometry.setAttribute("scale", new THREE.BufferAttribute(this.scales, 1));
     this.geometry.setAttribute("opacity", new THREE.BufferAttribute(this.opacities, 1));
 
@@ -137,36 +162,38 @@ export class ParticleSystem extends THREE.Object3D {
   }
 
   emit(count: number): void {
-    let emitted = 0;
-    for (let i = 0; i < this.particles.length && emitted < count; i++) {
-      const particle = this.particles[i];
-      if (!particle.active) {
-        const emissionPoint = this.emitter.getEmissionPoint();
-        const direction = this.emitter.getEmissionDirection();
+    for (let i = 0; i < count; i++) {
+      const particle = this.particlePool.acquire();
+      const emissionPoint = this.emitter.getEmissionPoint();
+      const direction = this.emitter.getEmissionDirection();
 
-        particle.position.copy(emissionPoint);
-        particle.velocity.copy(direction).multiplyScalar(2);
-        particle.lifetime = 2 + Math.random();
-        particle.age = 0;
-        particle.active = true;
+      particle.position.copy(emissionPoint);
+      particle.velocity.copy(direction).multiplyScalar(2);
+      particle.lifetime = 2 + Math.random();
+      particle.age = 0;
 
-        this.modifiers.forEach((modifier) => modifier.apply(particle));
-        emitted++;
-      }
+      this.modifiers.forEach((modifier) => modifier.apply(particle));
     }
   }
 
   update(deltaTime: number): void {
+    let activeIndex = 0;
+    const particles = this.particlePool["objects"]; // Access internal array for performance
+
     // Update particle states
-    this.particles.forEach((particle, i) => {
+    for (let i = 0; i < particles.length; i++) {
+      const particle = particles[i];
       if (particle.active) {
         particle.age += deltaTime;
 
         if (particle.age >= particle.lifetime) {
-          particle.reset();
+          this.particlePool.release(particle);
         } else {
-          // Apply behaviors
+          // Apply behaviors first to accumulate forces
           this.behaviors.forEach((behavior) => behavior.update(particle, deltaTime));
+
+          // Integrate physics
+          particle.integrate(deltaTime);
 
           // Apply appearance modifier update
           this.appearanceModifier.update(particle);
@@ -178,20 +205,27 @@ export class ParticleSystem extends THREE.Object3D {
             }
           });
 
-          // Update buffers
-          const idx = i * 3;
+          // Update buffers (only for active particles)
+          const idx = activeIndex * 3;
           particle.position.toArray(this.positions, idx);
           particle.color.toArray(this.colors, idx);
+          particle.rotation.toArray(this.rotations, idx);
 
-          this.scales[i] = particle.scale;
-          this.opacities[i] = particle.opacity;
+          this.scales[activeIndex] = particle.scale;
+          this.opacities[activeIndex] = particle.opacity;
+
+          activeIndex++;
         }
       }
-    });
+    }
+
+    // Update geometry draw range
+    this.geometry.setDrawRange(0, activeIndex);
 
     // Update geometry attributes
     this.geometry.attributes.position.needsUpdate = true;
     this.geometry.attributes.color.needsUpdate = true;
+    this.geometry.attributes.rotation.needsUpdate = true;
     this.geometry.attributes.scale.needsUpdate = true;
     this.geometry.attributes.opacity.needsUpdate = true;
   }
@@ -209,7 +243,13 @@ export class ParticleSystem extends THREE.Object3D {
   }
 
   getActiveParticleCount(): number {
-    return this.particles.filter((p) => p.active).length;
+    return this.particlePool.getActiveCount();
+  }
+
+  dispose(): void {
+    this.geometry.dispose();
+    this.material.dispose();
+    this.particlePool.clear();
   }
 
   // Add method to update appearance at runtime

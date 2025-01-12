@@ -36,7 +36,7 @@ export class ParticleExampleScene {
     this.effectsGrid = {
       rows: 3,
       cols: 4,
-      spacing: 10,
+      spacing: 15,
     };
 
     this.initScene();
@@ -86,8 +86,10 @@ export class ParticleExampleScene {
       { name: "Sparkle", creator: ParticlePresets.createSparkleEffect },
       { name: "Portal", creator: ParticlePresets.createPortalEffect },
       { name: "Poison Cloud", creator: ParticlePresets.createPoisonCloudEffect },
+      { name: "Rain", creator: ParticlePresets.createRainEffect },
       { name: "Waterfall", creator: ParticlePresets.createWaterfallEffect },
       { name: "Swarm", creator: ParticlePresets.createSwarmEffect },
+      { name: "Snow", creator: ParticlePresets.createSnowEffect },
       { name: "Glow effect", creator: ParticlePresets.createLanternGlowEffect },
       { name: "Trail", creator: ParticlePresets.createCometTrailEffect },
       { name: "Electric arc", creator: ParticlePresets.createElectricArcEffect },

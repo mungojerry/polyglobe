@@ -5,6 +5,72 @@ export interface ParticleEmitterShape {
   getEmissionDirection(): THREE.Vector3;
 }
 
+// Cone emitter for directional particle emission
+export class ConeEmitter implements ParticleEmitterShape {
+  private position: THREE.Vector3;
+  private radius: number;
+  private angle: number;
+  private tempVector: THREE.Vector3;
+  private tempQuat: THREE.Quaternion;
+  private upVector: THREE.Vector3;
+  private apexOffset: number = 0;
+  private direction: THREE.Vector3;
+
+  constructor(position: THREE.Vector3 = new THREE.Vector3(), radius: number = 1, angle: number = 30) {
+    this.position = position.clone();
+    this.radius = radius;
+    this.angle = (angle * Math.PI) / 180; // Convert to radians
+    this.tempVector = new THREE.Vector3();
+    this.tempQuat = new THREE.Quaternion();
+    this.upVector = new THREE.Vector3(0, 1, 0);
+    this.direction = new THREE.Vector3(0, 1, 0); // Default direction is up
+
+    // Initialize quaternion for default direction
+    this.tempQuat.setFromUnitVectors(this.upVector, this.direction);
+  }
+
+  setDirection(direction: THREE.Vector3): void {
+    if (!direction.lengthSq()) {
+      console.warn("ConeEmitter: Cannot set zero vector as direction");
+      return;
+    }
+    this.direction.copy(direction).normalize();
+    this.tempQuat.setFromUnitVectors(this.upVector, this.direction);
+  }
+
+  setPosition(position: THREE.Vector3): void {
+    this.position.copy(position);
+  }
+
+  getEmissionPoint(): THREE.Vector3 {
+    // Random point in a disc perpendicular to emission direction
+    const r = this.radius * Math.sqrt(Math.random());
+    const theta = Math.random() * Math.PI * 2;
+
+    // Create point in disc
+    this.tempVector.set(r * Math.cos(theta), 0, r * Math.sin(theta));
+
+    // Rotate disc to align with emission direction
+    this.tempVector.applyQuaternion(this.tempQuat);
+    this.tempVector.addScaledVector(this.direction, this.apexOffset);
+    return this.tempVector.add(this.position);
+  }
+
+  getEmissionDirection(): THREE.Vector3 {
+    // Create a random direction within the cone
+    const phi = Math.random() * Math.PI * 2;
+    const cosTheta = Math.cos(this.angle);
+    const theta = Math.acos(cosTheta + Math.random() * (1 - cosTheta));
+    const sinTheta = Math.sin(theta);
+
+    // Create direction vector in cone space
+    this.tempVector.set(sinTheta * Math.cos(phi), cosTheta, sinTheta * Math.sin(phi)).normalize();
+
+    // Rotate to align with emission direction
+    return this.tempVector.applyQuaternion(this.tempQuat);
+  }
+}
+
 export class PointEmitter implements ParticleEmitterShape {
   private position: THREE.Vector3;
 
