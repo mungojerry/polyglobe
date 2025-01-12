@@ -14,8 +14,6 @@ export class Particle {
   opacity: number;
   mass: number;
 
-  private static tempVector = new THREE.Vector3();
-
   constructor() {
     this.position = new THREE.Vector3();
     this.velocity = new THREE.Vector3();
@@ -49,8 +47,7 @@ export class Particle {
   // Helper method to apply a force considering mass
   applyForce(force: THREE.Vector3): void {
     // F = ma -> a = F/m
-    Particle.tempVector.copy(force).divideScalar(this.mass);
-    this.acceleration.add(Particle.tempVector);
+    this.acceleration.add(force.clone().divideScalar(this.mass));
   }
 
   // Update particle physics

@@ -41,8 +41,8 @@ export class ParticlePresets {
       count: 800,
       emitter,
       behaviors: [
-        new GravityBehavior(-1.5),
         new VortexBehavior(0.2), // Reduced strength for more stable swirling
+        new GravityBehavior(-1.5),
         new DragBehavior(0.15), // Increased drag to stabilize motion
       ],
       appearance: {

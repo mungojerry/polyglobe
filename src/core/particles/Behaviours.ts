@@ -60,9 +60,9 @@ export class VortexBehavior implements ParticleBehavior {
   private force: THREE.Vector3;
   private rotationQuaternion: THREE.Quaternion;
 
-  constructor(strength: number = 1, axis: THREE.Vector3 = new THREE.Vector3(0, 1, 0)) {
+  constructor(strength: number = 1, axis: THREE.Vector3 = new THREE.Vector3(0, 0, 1)) {
     this.strength = strength;
-    this.axis = axis.normalize();
+    this.axis = axis.clone().normalize();
     this.temp = new THREE.Vector3();
     this.force = new THREE.Vector3();
     this.rotationQuaternion = new THREE.Quaternion();
