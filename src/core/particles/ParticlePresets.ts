@@ -1538,6 +1538,153 @@ export class ParticlePresets {
     return system;
   }
 
+  static createEmitterShowcaseEffect(position: THREE.Vector3 = new THREE.Vector3()): ParticleSystem {
+    // Create a system that demonstrates all emitter types
+    const system = new ParticleSystem({
+      count: 500,
+      emitter: new ConeEmitter(position, 0.5, 30),
+      behaviors: [new GravityBehavior(-0.5), new DragBehavior(0.1)],
+      appearance: {
+        startColor: new THREE.Color(1, 0.2, 0.5),
+        endColor: new THREE.Color(0.5, 0.1, 0.2),
+        startSize: 0.3,
+        endSize: 0.1,
+        startOpacity: 1,
+        endOpacity: 0,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    // Add ring emitter system
+    const ringSystem = new ParticleSystem({
+      count: 300,
+      emitter: new RingEmitter(new THREE.Vector3(position.x + 3, position.y, position.z), 1, 1.5),
+      behaviors: [new VortexBehavior(1), new OscillationBehavior(0.3, 2)],
+      appearance: {
+        startColor: new THREE.Color(0.2, 1, 0.5),
+        endColor: new THREE.Color(0.1, 0.5, 0.2),
+        startSize: 0.2,
+        endSize: 0.1,
+        startOpacity: 0.8,
+        endOpacity: 0,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    // Add sphere emitter system
+    const sphereSystem = new ParticleSystem({
+      count: 400,
+      emitter: new SphereEmitter(new THREE.Vector3(position.x - 3, position.y, position.z), 1),
+      behaviors: [new VortexBehavior(0.5), new TurbulenceModifier(0.2, 1)],
+      appearance: {
+        startColor: new THREE.Color(0.5, 0.2, 1),
+        endColor: new THREE.Color(0.2, 0.1, 0.5),
+        startSize: 0.25,
+        endSize: 0.1,
+        startOpacity: 0.9,
+        endOpacity: 0,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    // Add box emitter system
+    const boxSystem = new ParticleSystem({
+      count: 350,
+      emitter: new BoxEmitter(new THREE.Vector3(position.x, position.y + 3, position.z), 1, 1, 1),
+      behaviors: [new OscillationBehavior(0.5, 2), new DragBehavior(0.1)],
+      appearance: {
+        startColor: new THREE.Color(1, 0.8, 0.2),
+        endColor: new THREE.Color(0.5, 0.4, 0.1),
+        startSize: 0.2,
+        endSize: 0.1,
+        startOpacity: 0.8,
+        endOpacity: 0,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    // Add cylinder emitter system
+    const cylinderSystem = new ParticleSystem({
+      count: 400,
+      emitter: new CylinderEmitter(new THREE.Vector3(position.x, position.y - 3, position.z), 0.5, 2),
+      behaviors: [new VortexBehavior(0.8), new GravityBehavior(-0.2)],
+      appearance: {
+        startColor: new THREE.Color(0.2, 0.5, 1),
+        endColor: new THREE.Color(0.1, 0.2, 0.5),
+        startSize: 0.3,
+        endSize: 0.1,
+        startOpacity: 0.9,
+        endOpacity: 0,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    // Add point emitter system with radial burst
+    const pointSystem = new ParticleSystem({
+      count: 200,
+      emitter: new PointEmitter(new THREE.Vector3(position.x + 3, position.y + 3, position.z)),
+      behaviors: [new VortexBehavior(0.3), new OscillationBehavior(0.4, 3)],
+      appearance: {
+        startColor: new THREE.Color(1, 1, 1),
+        endColor: new THREE.Color(0.8, 0.8, 0.8),
+        startSize: 0.15,
+        endSize: 0.05,
+        startOpacity: 1,
+        endOpacity: 0,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    system.add(ringSystem);
+    system.add(sphereSystem);
+    system.add(boxSystem);
+    system.add(cylinderSystem);
+    system.add(pointSystem);
+    return system;
+  }
+
+  static createLavaLampEffect(position: THREE.Vector3 = new THREE.Vector3()): ParticleSystem {
+    // Create base cylinder for the lamp
+    const system = new ParticleSystem({
+      count: 800,
+      emitter: new CylinderEmitter(position, 1, 4),
+      behaviors: [new GravityBehavior(-0.2), new VortexBehavior(0.3), new OscillationBehavior(0.2, 1)],
+      appearance: {
+        startColor: new THREE.Color(1, 0.2, 0),
+        endColor: new THREE.Color(0.8, 0.1, 0),
+        startSize: 0.8,
+        endSize: 0.6,
+        startOpacity: 0.9,
+        endOpacity: 0.1,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    // Add floating blobs using sphere emitters
+    for (let i = 0; i < 3; i++) {
+      const blobSystem = new ParticleSystem({
+        count: 200,
+        emitter: new SphereEmitter(
+          new THREE.Vector3(position.x + Math.sin((i * Math.PI * 2) / 3) * 0.3, position.y + i - 1, position.z + Math.cos((i * Math.PI * 2) / 3) * 0.3),
+          0.4
+        ),
+        behaviors: [new GravityBehavior(-0.1 - Math.random() * 0.2), new OscillationBehavior(0.1, 0.5)],
+        appearance: {
+          startColor: new THREE.Color(1, 0.3, 0),
+          endColor: new THREE.Color(0.9, 0.2, 0),
+          startSize: 0.6,
+          endSize: 0.4,
+          startOpacity: 0.8,
+          endOpacity: 0.2,
+          blending: THREE.AdditiveBlending,
+        },
+      });
+      system.add(blobSystem);
+    }
+
+    return system;
+  }
+
   static createTidalWaveEffect(position: THREE.Vector3 = new THREE.Vector3()): ParticleSystem {
     // Create main wave body
     const system = new ParticleSystem({
