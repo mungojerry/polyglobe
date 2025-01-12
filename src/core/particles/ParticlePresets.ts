@@ -81,7 +81,7 @@ export class ParticlePresets {
     return new ParticleSystem({
       count: 300,
       emitter,
-      behaviors: [new GravityBehavior(-0.15), new VortexBehavior(0.2), new DragBehavior(0.02), new TurbulenceModifier(0.1, 0.3)],
+      behaviors: [new GravityBehavior(-0.15), new DragBehavior(0.02), new TurbulenceModifier(0.1, 0.3)],
       appearance: {
         startColor: new THREE.Color(0.8, 0.8, 0.8),
         endColor: new THREE.Color(0.2, 0.2, 0.2),
