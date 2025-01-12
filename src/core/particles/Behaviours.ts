@@ -36,13 +36,19 @@ export class PlanetaryGravityBehavior implements ParticleBehavior {
   }
 
   update(particle: Particle, deltaTime: number): void {
-    const directionToCenter = new THREE.Vector3().subVectors(this.center, particle.position);
-    const distanceSq = directionToCenter.lengthSq();
+    this.force.subVectors(this.center, particle.position);
+    const distanceSq = this.force.lengthSq();
     if (distanceSq === 0) return;
 
-    // F = GMm/r^2
-    const forceMagnitude = (this.gravitationalConstant * particle.mass) / distanceSq;
-    this.force.copy(directionToCenter.normalize()).multiplyScalar(forceMagnitude);
+    // Add minimum distance to prevent extreme forces
+    const minDistance = 0.1;
+    const clampedDistanceSq = Math.max(distanceSq, minDistance * minDistance);
+
+    // F = GMm/r^2 with force clamping
+    const maxForce = 100 * particle.mass;
+    const forceMagnitude = Math.min((this.gravitationalConstant * particle.mass) / clampedDistanceSq, maxForce);
+
+    this.force.normalize().multiplyScalar(forceMagnitude);
     particle.applyForce(this.force);
   }
 }
@@ -70,12 +76,19 @@ export class VortexBehavior implements ParticleBehavior {
 
     // Create perpendicular force vector for circular motion
     this.force.crossVectors(this.axis, particle.position);
-    this.force.normalize().multiplyScalar(this.strength * radius * particle.mass);
+
+    // Scale force by radius but with a dampening factor to prevent runaway acceleration
+    const dampening = 0.95;
+    const targetSpeed = this.strength * Math.sqrt(radius);
+    const currentSpeed = particle.velocity.length();
+    const speedDiff = targetSpeed - currentSpeed;
+
+    this.force.normalize().multiplyScalar(speedDiff * particle.mass * dampening);
     particle.applyForce(this.force);
 
-    // Update angular velocity for rotation
-    const angle = this.strength * deltaTime;
-    this.rotationQuaternion.setFromAxisAngle(this.axis, angle);
+    // Update rotation based on actual particle velocity
+    const angularSpeed = (currentSpeed / radius) * deltaTime;
+    this.rotationQuaternion.setFromAxisAngle(this.axis, angularSpeed);
     particle.rotation.applyQuaternion(this.rotationQuaternion);
   }
 }
@@ -116,14 +129,21 @@ export class BounceBehavior implements ParticleBehavior {
 
   update(particle: Particle, deltaTime: number): void {
     if (particle.position.y < this.groundLevel) {
-      // Apply normal force to prevent penetration
+      // Apply normal force to prevent penetration with deltaTime scaling
       const penetrationDepth = this.groundLevel - particle.position.y;
-      this.force.copy(this.normal).multiplyScalar(penetrationDepth * 1000); // Spring force
+      const springConstant = 1000 / deltaTime; // Scale with deltaTime for consistent behavior
+      this.force.copy(this.normal).multiplyScalar(penetrationDepth * springConstant);
       particle.applyForce(this.force);
 
-      // Apply impulse for bounce
+      // Apply impulse for bounce with friction
       if (particle.velocity.y < 0) {
+        // Vertical bounce
         particle.velocity.y = -particle.velocity.y * this.restitution;
+
+        // Horizontal friction
+        const friction = 0.98;
+        particle.velocity.x *= friction;
+        particle.velocity.z *= friction;
       }
 
       // Ensure minimum ground level
@@ -148,13 +168,22 @@ export class OscillationBehavior implements ParticleBehavior {
   }
 
   update(particle: Particle, deltaTime: number): void {
-    const time = performance.now() * 0.001 - this.startTime;
-    // Simple harmonic motion: F = -kx
-    // Where k is spring constant (frequency squared) and x is displacement
-    const displacement = Math.sin(time * this.frequency) * this.amplitude;
-    const springForce = -Math.pow(this.frequency, 2) * displacement;
+    // Use particle age instead of global time for consistent oscillation
+    const particleTime = particle.age;
+    const frequency = Math.max(this.frequency, 0.0001); // Prevent division by zero
 
-    this.force.copy(this.axis).multiplyScalar(springForce * particle.mass);
+    // Calculate current displacement from rest position
+    const currentDisplacement = this.axis.dot(particle.position);
+    const targetDisplacement = Math.sin(particleTime * frequency) * this.amplitude;
+
+    // Spring force with damping
+    const springConstant = Math.pow(frequency, 2);
+    const dampingFactor = 0.5;
+
+    const springForce = (targetDisplacement - currentDisplacement) * springConstant;
+    const dampingForce = -particle.velocity.dot(this.axis) * dampingFactor;
+
+    this.force.copy(this.axis).multiplyScalar((springForce + dampingForce) * particle.mass);
     particle.applyForce(this.force);
   }
 }

@@ -40,7 +40,11 @@ export class ParticlePresets {
     const system = new ParticleSystem({
       count: 800,
       emitter,
-      behaviors: [new GravityBehavior(-1.5), new VortexBehavior(0.4), new DragBehavior(0.05)],
+      behaviors: [
+        new GravityBehavior(-1.5),
+        new VortexBehavior(0.2), // Reduced strength for more stable swirling
+        new DragBehavior(0.15), // Increased drag to stabilize motion
+      ],
       appearance: {
         startColor: new THREE.Color(1, 0.7, 0.2),
         endColor: new THREE.Color(0.7, 0.1, 0),
@@ -154,7 +158,12 @@ export class ParticlePresets {
     return new ParticleSystem({
       count: 1000,
       emitter: new BoxEmitter(position, 20, 0.1, 20),
-      behaviors: [new GravityBehavior(0.3), new VortexBehavior(0.15), new DragBehavior(0.1), new OscillationBehavior(0.3, 0.5)],
+      behaviors: [
+        new GravityBehavior(0.3),
+        new VortexBehavior(0.08), // Reduced for gentler swirling
+        new DragBehavior(0.15), // Increased for more floating effect
+        new OscillationBehavior(0.2, 0.3), // Gentler oscillation
+      ],
       appearance: {
         startColor: new THREE.Color(1, 1, 1),
         endColor: new THREE.Color(0.95, 0.95, 1),
@@ -212,7 +221,11 @@ export class ParticlePresets {
     const system = new ParticleSystem({
       count: 600,
       emitter: new SphereEmitter(position, 0.5),
-      behaviors: [new VortexBehavior(1.2), new OscillationBehavior(0.3, 2), new TurbulenceModifier(0.2, 0.8)],
+      behaviors: [
+        new VortexBehavior(0.6), // Halved for more controlled rotation
+        new OscillationBehavior(0.2, 1.5), // Reduced frequency
+        new TurbulenceModifier(0.15, 0.6), // Reduced for less chaos
+      ],
       appearance: {
         startColor: new THREE.Color(0.6, 0.2, 1),
         endColor: new THREE.Color(0.3, 0, 0.8),
@@ -407,7 +420,11 @@ export class ParticlePresets {
     const system = new ParticleSystem({
       count: 800,
       emitter: new RingEmitter(position, 1.8, 2),
-      behaviors: [new VortexBehavior(3), new OscillationBehavior(0.4, 2), new TurbulenceModifier(0.2, 1)],
+      behaviors: [
+        new VortexBehavior(1.2), // Reduced significantly for more controlled rotation
+        new OscillationBehavior(0.3, 1.5), // Gentler oscillation
+        new TurbulenceModifier(0.1, 0.5), // Reduced turbulence
+      ],
       appearance: {
         startColor: new THREE.Color(0.6, 0.2, 1),
         endColor: new THREE.Color(0.2, 0.4, 1),
@@ -423,7 +440,10 @@ export class ParticlePresets {
     const tendrilSystem = new ParticleSystem({
       count: 400,
       emitter: new RingEmitter(position, 0, 2.2),
-      behaviors: [new VortexBehavior(1.5), new OscillationBehavior(0.6, 3)],
+      behaviors: [
+        new VortexBehavior(0.8), // Reduced for smoother motion
+        new OscillationBehavior(0.4, 2), // Reduced frequency
+      ],
       appearance: {
         startColor: new THREE.Color(1, 0.6, 1),
         endColor: new THREE.Color(0.4, 0.2, 1),
