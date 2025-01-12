@@ -34,8 +34,8 @@ export class ParticleExampleScene {
 
     // Grid layout configuration
     this.effectsGrid = {
-      rows: 3,
-      cols: 4,
+      rows: 5,
+      cols: 5,
       spacing: 15,
     };
 
