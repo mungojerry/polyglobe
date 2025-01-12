@@ -34,8 +34,8 @@ export class ParticleExampleScene {
 
     // Grid layout configuration
     this.effectsGrid = {
-      rows: 5,
-      cols: 5,
+      rows: 8,
+      cols: 8,
       spacing: 15,
     };
 
@@ -54,7 +54,7 @@ export class ParticleExampleScene {
   private initScene(): void {
     // Add ground plane for reference
     const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(100, 100),
+      new THREE.PlaneGeometry(400, 400),
       new THREE.MeshBasicMaterial({
         color: 0x333333,
         side: THREE.DoubleSide,

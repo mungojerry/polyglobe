@@ -24,35 +24,6 @@ export class GravityBehavior implements ParticleBehavior {
   }
 }
 
-export class PlanetaryGravityBehavior implements ParticleBehavior {
-  private center: THREE.Vector3;
-  private gravitationalConstant: number;
-  private force: THREE.Vector3;
-
-  constructor(center: THREE.Vector3 = new THREE.Vector3(0, 0, 0), gravitationalConstant: number = 10) {
-    this.center = center.clone();
-    this.gravitationalConstant = gravitationalConstant;
-    this.force = new THREE.Vector3();
-  }
-
-  update(particle: Particle, deltaTime: number): void {
-    this.force.subVectors(this.center, particle.position);
-    const distanceSq = this.force.lengthSq();
-    if (distanceSq === 0) return;
-
-    // Add minimum distance to prevent extreme forces
-    const minDistance = 0.1;
-    const clampedDistanceSq = Math.max(distanceSq, minDistance * minDistance);
-
-    // F = GMm/r^2 with force clamping
-    const maxForce = 100 * particle.mass;
-    const forceMagnitude = Math.min((this.gravitationalConstant * particle.mass) / clampedDistanceSq, maxForce);
-
-    this.force.normalize().multiplyScalar(forceMagnitude);
-    particle.applyForce(this.force);
-  }
-}
-
 export class VortexBehavior implements ParticleBehavior {
   private strength: number;
   private axis: THREE.Vector3;
@@ -197,6 +168,42 @@ export class OscillationBehavior implements ParticleBehavior {
     const dampingForce = -particle.velocity.dot(this.axis) * dampingFactor;
 
     this.force.copy(this.axis).multiplyScalar((springForce + dampingForce) * particle.mass);
+    particle.applyForce(this.force);
+  }
+}
+
+export class PlanetaryGravityBehavior implements ParticleBehavior {
+  private center: THREE.Vector3;
+  private strength: number;
+  private force: THREE.Vector3;
+  private direction: THREE.Vector3;
+  private minDistance: number;
+  private maxForce: number;
+
+  constructor(center: THREE.Vector3, strength: number = 5) {
+    this.center = center.clone();
+    this.strength = strength;
+    this.force = new THREE.Vector3();
+    this.direction = new THREE.Vector3();
+    this.minDistance = 0.1; // Minimum distance to prevent extreme forces
+    this.maxForce = 100; // Maximum force cap to prevent instability
+  }
+
+  update(particle: Particle, deltaTime: number): void {
+    // Calculate direction to center
+    this.direction.subVectors(this.center, particle.position);
+    const distanceSquared = this.direction.lengthSq();
+
+    if (distanceSquared === 0) return;
+
+    // Use clamped distance to prevent extreme forces near center
+    const clampedDistanceSquared = Math.max(distanceSquared, this.minDistance * this.minDistance);
+
+    // Calculate force magnitude using inverse square law (like real gravity)
+    const forceMagnitude = Math.min((this.strength * particle.mass) / clampedDistanceSquared, this.maxForce * particle.mass);
+
+    // Apply force towards center
+    this.force.copy(this.direction).normalize().multiplyScalar(forceMagnitude);
     particle.applyForce(this.force);
   }
 }

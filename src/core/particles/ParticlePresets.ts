@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { BounceBehavior, DragBehavior, GravityBehavior, OscillationBehavior, VortexBehavior } from "./Behaviours";
+import { BounceBehavior, DragBehavior, GravityBehavior, OscillationBehavior, PlanetaryGravityBehavior, VortexBehavior } from "./Behaviours";
 import { BoxEmitter, ConeEmitter, CylinderEmitter, PointEmitter, RingEmitter, SphereEmitter } from "./Emitters";
 import { AttractorModifier, TurbulenceModifier } from "./Modifiers";
 import { ParticleSystem } from "./ParticleSystem";
@@ -834,44 +834,80 @@ export class ParticlePresets {
   }
 
   static createLaserBeamEffect(position: THREE.Vector3 = new THREE.Vector3()): ParticleSystem {
-    // Create main beam
+    // Create intense core beam
     const emitterPos = position.clone();
-    const emitter = new CylinderEmitter(emitterPos, 0.1, 5);
+    const coreEmitter = new CylinderEmitter(emitterPos, 0.02, 8); // Much narrower cylinder
     const system = new ParticleSystem({
-      count: 1000,
-      emitter,
+      count: 2000, // More particles for density
+      emitter: coreEmitter,
       behaviors: [
-        new DragBehavior(0.01),
-        new OscillationBehavior(0.05, 10), // High frequency, low amplitude
+        new DragBehavior(0.001), // Much less drag for faster movement
       ],
       appearance: {
-        startColor: new THREE.Color(1, 0.2, 0.2), // Bright red
-        endColor: new THREE.Color(1, 0, 0),
-        startSize: 0.2,
-        endSize: 0.1,
+        startColor: new THREE.Color(1, 1, 1), // Pure white core
+        endColor: new THREE.Color(1, 0.2, 0.2), // Fade to red
+        startSize: 0.05, // Very small particles
+        endSize: 0.02,
         startOpacity: 1,
-        endOpacity: 0.2,
+        endOpacity: 0.8, // Higher end opacity for more solid beam
         blending: THREE.AdditiveBlending,
       },
     });
 
-    // Add energy discharge effect
-    const dischargeSystem = new ParticleSystem({
-      count: 200,
-      emitter: new CylinderEmitter(emitterPos, 0.2, 5),
-      behaviors: [new TurbulenceModifier(0.2, 0.5), new DragBehavior(0.1)],
+    // Add inner glow
+    const innerGlowSystem = new ParticleSystem({
+      count: 1000,
+      emitter: new CylinderEmitter(emitterPos, 0.05, 8),
+      behaviors: [new DragBehavior(0.002)],
       appearance: {
-        startColor: new THREE.Color(1, 0.5, 0.5),
-        endColor: new THREE.Color(1, 0.2, 0.2),
-        startSize: 0.3,
+        startColor: new THREE.Color(1, 0.3, 0.3),
+        endColor: new THREE.Color(1, 0, 0),
+        startSize: 0.1,
+        endSize: 0.05,
+        startOpacity: 0.8,
+        endOpacity: 0.4,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    // Add subtle energy discharge
+    const dischargeSystem = new ParticleSystem({
+      count: 100,
+      emitter: new CylinderEmitter(emitterPos, 0.08, 8),
+      behaviors: [
+        new TurbulenceModifier(0.05, 0.2), // Subtle turbulence
+        new DragBehavior(0.05),
+      ],
+      appearance: {
+        startColor: new THREE.Color(1, 0.4, 0.4),
+        endColor: new THREE.Color(1, 0.1, 0.1),
+        startSize: 0.15,
         endSize: 0,
-        startOpacity: 0.6,
+        startOpacity: 0.4,
         endOpacity: 0,
         blending: THREE.AdditiveBlending,
       },
     });
 
+    // Add impact point glow
+    const impactSystem = new ParticleSystem({
+      count: 50,
+      emitter: new SphereEmitter(new THREE.Vector3(position.x, position.y, position.z + 8), 0.1),
+      behaviors: [new OscillationBehavior(0.2, 2)],
+      appearance: {
+        startColor: new THREE.Color(1, 0.8, 0.8),
+        endColor: new THREE.Color(1, 0.2, 0.2),
+        startSize: 0.3,
+        endSize: 0.1,
+        startOpacity: 1,
+        endOpacity: 0,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    system.add(innerGlowSystem);
     system.add(dischargeSystem);
+    system.add(impactSystem);
     return system;
   }
 
@@ -908,6 +944,651 @@ export class ParticlePresets {
     });
 
     system.add(rippleSystem);
+    return system;
+  }
+
+  static createBlackHoleEffect(position: THREE.Vector3 = new THREE.Vector3()): ParticleSystem {
+    // Create the main singularity
+    const system = new ParticleSystem({
+      count: 2000,
+      emitter: new SphereEmitter(position, 3),
+      behaviors: [
+        new VortexBehavior(4), // Strong inward spiral
+        new GravityBehavior(2), // Pull towards center
+        new TurbulenceModifier(0.8, 2), // Chaotic movement near event horizon
+      ],
+      appearance: {
+        startColor: new THREE.Color(0.1, 0, 0.2), // Deep purple
+        endColor: new THREE.Color(0, 0, 0), // Pure black
+        startSize: 0.8,
+        endSize: 0.1,
+        startOpacity: 1,
+        endOpacity: 0,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    // Add accretion disk
+    const accretionSystem = new ParticleSystem({
+      count: 1000,
+      emitter: new RingEmitter(position, 1, 4),
+      behaviors: [new VortexBehavior(2), new OscillationBehavior(0.5, 3)],
+      appearance: {
+        startColor: new THREE.Color(1, 0.4, 0), // Orange
+        endColor: new THREE.Color(0.6, 0, 0.3), // Dark red-purple
+        startSize: 1.2,
+        endSize: 0.2,
+        startOpacity: 1,
+        endOpacity: 0,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    system.add(accretionSystem);
+    return system;
+  }
+
+  static createDiscoInfernoEffect(position: THREE.Vector3 = new THREE.Vector3()): ParticleSystem {
+    // Create the main disco ball effect
+    const system = new ParticleSystem({
+      count: 1000,
+      emitter: new SphereEmitter(position, 2),
+      behaviors: [
+        new OscillationBehavior(1, 4), // Funky oscillation
+        new VortexBehavior(0.5), // Gentle spin
+      ],
+      appearance: {
+        startColor: new THREE.Color(Math.random(), Math.random(), Math.random()), // Random colors
+        endColor: new THREE.Color(Math.random(), Math.random(), Math.random()),
+        startSize: 0.4,
+        endSize: 0.2,
+        startOpacity: 1,
+        endOpacity: 0,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    // Add rotating light beams
+    const beamSystem = new ParticleSystem({
+      count: 500,
+      emitter: new CylinderEmitter(position, 0.1, 5),
+      behaviors: [new VortexBehavior(2), new OscillationBehavior(0.8, 2)],
+      appearance: {
+        startColor: new THREE.Color(1, 0, 0), // Start red
+        endColor: new THREE.Color(0, 1, 1), // End cyan
+        startSize: 0.6,
+        endSize: 0.3,
+        startOpacity: 0.8,
+        endOpacity: 0,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    system.add(beamSystem);
+    return system;
+  }
+
+  static createQuantumTangleEffect(position: THREE.Vector3 = new THREE.Vector3()): ParticleSystem {
+    // Create quantum particle system A
+    const system = new ParticleSystem({
+      count: 800,
+      emitter: new SphereEmitter(position, 1),
+      behaviors: [
+        new OscillationBehavior(0.4, 6), // Rapid oscillation
+        new TurbulenceModifier(0.5, 1), // Quantum uncertainty
+      ],
+      appearance: {
+        startColor: new THREE.Color(0, 1, 0.8), // Cyan
+        endColor: new THREE.Color(0.5, 0, 1), // Purple
+        startSize: 0.3,
+        endSize: 0.1,
+        startOpacity: 0.9,
+        endOpacity: 0,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    // Create entangled particle system B
+    const entangledSystem = new ParticleSystem({
+      count: 800,
+      emitter: new SphereEmitter(new THREE.Vector3(position.x + 2, position.y, position.z), 1),
+      behaviors: [
+        new OscillationBehavior(0.4, 6), // Matching oscillation
+        new TurbulenceModifier(0.5, 1), // Matching uncertainty
+      ],
+      appearance: {
+        startColor: new THREE.Color(0.5, 0, 1), // Opposite colors
+        endColor: new THREE.Color(0, 1, 0.8),
+        startSize: 0.3,
+        endSize: 0.1,
+        startOpacity: 0.9,
+        endOpacity: 0,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    // Add quantum tunneling effect
+    const tunnelSystem = new ParticleSystem({
+      count: 200,
+      emitter: new CylinderEmitter(new THREE.Vector3(position.x + 1, position.y, position.z), 0.2, 2),
+      behaviors: [new OscillationBehavior(0.2, 8)],
+      appearance: {
+        startColor: new THREE.Color(1, 1, 1),
+        endColor: new THREE.Color(0.5, 0.5, 1),
+        startSize: 0.1,
+        endSize: 0.05,
+        startOpacity: 0.5,
+        endOpacity: 0,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    system.add(entangledSystem);
+    system.add(tunnelSystem);
+    return system;
+  }
+
+  static createBubbleTeaEffect(position: THREE.Vector3 = new THREE.Vector3()): ParticleSystem {
+    // Create the tea swirl effect
+    const system = new ParticleSystem({
+      count: 1000,
+      emitter: new CylinderEmitter(position, 1.5, 3),
+      behaviors: [
+        new VortexBehavior(0.8), // Gentle swirl
+        new TurbulenceModifier(0.2, 1), // Liquid movement
+      ],
+      appearance: {
+        startColor: new THREE.Color(0.6, 0.4, 0.2), // Brown tea color
+        endColor: new THREE.Color(0.4, 0.2, 0.1),
+        startSize: 0.2,
+        endSize: 0.1,
+        startOpacity: 0.6,
+        endOpacity: 0,
+        blending: THREE.NormalBlending,
+      },
+    });
+
+    // Add bouncing boba pearls
+    const bobaSystem = new ParticleSystem({
+      count: 100,
+      emitter: new CylinderEmitter(position, 1.2, 2.8),
+      behaviors: [
+        new GravityBehavior(4),
+        new BounceBehavior(0, 0.8), // Bouncy pearls
+        new DragBehavior(0.3), // Liquid resistance
+      ],
+      appearance: {
+        startColor: new THREE.Color(0.2, 0.1, 0), // Dark brown pearls
+        endColor: new THREE.Color(0.15, 0.05, 0),
+        startSize: 0.4,
+        endSize: 0.3,
+        startOpacity: 1,
+        endOpacity: 0.8,
+        blending: THREE.NormalBlending,
+      },
+    });
+
+    system.add(bobaSystem);
+    return system;
+  }
+
+  static createGlitchEffect(position: THREE.Vector3 = new THREE.Vector3()): ParticleSystem {
+    // Create main glitch particles
+    const system = new ParticleSystem({
+      count: 1000,
+      emitter: new BoxEmitter(position, 2, 2, 2),
+      behaviors: [
+        new OscillationBehavior(2, 10), // Rapid, erratic oscillation
+        new TurbulenceModifier(1, 0.5), // Sharp, quick turbulence
+      ],
+      appearance: {
+        startColor: new THREE.Color(0, 1, 1), // Cyan
+        endColor: new THREE.Color(1, 0, 1), // Magenta
+        startSize: 0.2,
+        endSize: 0.1,
+        startOpacity: 0.8,
+        endOpacity: 0,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    // Add digital artifacts
+    const artifactSystem = new ParticleSystem({
+      count: 200,
+      emitter: new BoxEmitter(position, 2.2, 2.2, 2.2),
+      behaviors: [new OscillationBehavior(4, 8), new TurbulenceModifier(2, 0.2)],
+      appearance: {
+        startColor: new THREE.Color(1, 1, 1),
+        endColor: new THREE.Color(0, 1, 0),
+        startSize: 0.4,
+        endSize: 0,
+        startOpacity: 1,
+        endOpacity: 0,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    system.add(artifactSystem);
+    return system;
+  }
+
+  static createCandyTornadoEffect(position: THREE.Vector3 = new THREE.Vector3()): ParticleSystem {
+    // Create the tornado spiral
+    const system = new ParticleSystem({
+      count: 1500,
+      emitter: new CylinderEmitter(position, 1, 5),
+      behaviors: [
+        new VortexBehavior(3), // Strong spiral
+        new GravityBehavior(-1), // Upward lift
+        new OscillationBehavior(0.5, 2), // Wobbly movement
+      ],
+      appearance: {
+        startColor: new THREE.Color(1, 0.6, 0.8), // Pink
+        endColor: new THREE.Color(0.8, 0.3, 0.5),
+        startSize: 0.4,
+        endSize: 0.2,
+        startOpacity: 0.9,
+        endOpacity: 0,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    // Add candy particles
+    const candySystem = new ParticleSystem({
+      count: 300,
+      emitter: new CylinderEmitter(position, 1.2, 5),
+      behaviors: [new VortexBehavior(2), new BounceBehavior(0, 0.6), new DragBehavior(0.1)],
+      appearance: {
+        startColor: new THREE.Color(Math.random(), Math.random(), Math.random()),
+        endColor: new THREE.Color(Math.random(), Math.random(), Math.random()),
+        startSize: 0.3,
+        endSize: 0.15,
+        startOpacity: 1,
+        endOpacity: 0.2,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    system.add(candySystem);
+    return system;
+  }
+
+  static createRainbowSerpentEffect(position: THREE.Vector3 = new THREE.Vector3()): ParticleSystem {
+    // Create the main serpent body
+    const system = new ParticleSystem({
+      count: 1000,
+      emitter: new CylinderEmitter(position, 0.5, 8),
+      behaviors: [
+        new VortexBehavior(0.8, new THREE.Vector3(0, 1, 0)),
+        new OscillationBehavior(0.3, 0.5, new THREE.Vector3(1, 0, 0)),
+        new OscillationBehavior(0.3, 0.7, new THREE.Vector3(0, 0, 1)),
+        new TurbulenceModifier(0.1, 1),
+      ],
+      appearance: {
+        startColor: new THREE.Color(
+          Math.sin(performance.now() * 0.001) * 0.5 + 0.5,
+          Math.sin(performance.now() * 0.002 + 2) * 0.5 + 0.5,
+          Math.sin(performance.now() * 0.003 + 4) * 0.5 + 0.5
+        ),
+        endColor: new THREE.Color(
+          Math.cos(performance.now() * 0.002) * 0.5 + 0.5,
+          Math.cos(performance.now() * 0.003 + 2) * 0.5 + 0.5,
+          Math.cos(performance.now() * 0.001 + 4) * 0.5 + 0.5
+        ),
+        startSize: 0.6,
+        endSize: 0.3,
+        startOpacity: 0.8,
+        endOpacity: 0,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    // Add shimmering scales
+    const scaleSystem = new ParticleSystem({
+      count: 500,
+      emitter: new CylinderEmitter(position, 0.6, 8),
+      behaviors: [new OscillationBehavior(0.5, 3), new VortexBehavior(0.5), new TurbulenceModifier(0.1, 0.5)],
+      appearance: {
+        startColor: new THREE.Color(1, 1, 1),
+        endColor: new THREE.Color(0.8, 0.8, 1),
+        startSize: 0.2,
+        endSize: 0.1,
+        startOpacity: 1,
+        endOpacity: 0,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    system.add(scaleSystem);
+    return system;
+  }
+
+  static createOrbitalChaosEffect(position: THREE.Vector3 = new THREE.Vector3()): ParticleSystem {
+    // Create multiple orbital systems with different centers
+    const system = new ParticleSystem({
+      count: 800,
+      emitter: new SphereEmitter(position, 2),
+      behaviors: [
+        new PlanetaryGravityBehavior(position, 5),
+        new VortexBehavior(0.5, new THREE.Vector3(1, 0, 0)), // X-axis vortex
+        new OscillationBehavior(0.3, 2, new THREE.Vector3(0, 1, 0)), // Y-axis oscillation
+      ],
+      appearance: {
+        startColor: new THREE.Color(0.2, 0.5, 1),
+        endColor: new THREE.Color(1, 0.2, 0.5),
+        startSize: 0.3,
+        endSize: 0.1,
+        startOpacity: 1,
+        endOpacity: 0,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    // Add secondary orbital system with different axis
+    const secondarySystem = new ParticleSystem({
+      count: 400,
+      emitter: new SphereEmitter(position, 1.5),
+      behaviors: [
+        new PlanetaryGravityBehavior(position, 3),
+        new VortexBehavior(0.8, new THREE.Vector3(0, 0, 1)), // Z-axis vortex
+      ],
+      appearance: {
+        startColor: new THREE.Color(1, 0.5, 0.2),
+        endColor: new THREE.Color(0.5, 0.2, 1),
+        startSize: 0.2,
+        endSize: 0.05,
+        startOpacity: 0.8,
+        endOpacity: 0,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    system.add(secondarySystem);
+    return system;
+  }
+
+  static createBouncingGalaxyEffect(position: THREE.Vector3 = new THREE.Vector3()): ParticleSystem {
+    // Create main galaxy disc
+    const system = new ParticleSystem({
+      count: 1500,
+      emitter: new CylinderEmitter(position, 3, 0.5),
+      behaviors: [
+        new VortexBehavior(2, new THREE.Vector3(0, 1, 0)),
+        new GravityBehavior(0.5),
+        new BounceBehavior(-2, 0.95), // High restitution for elastic bounces
+      ],
+      appearance: {
+        startColor: new THREE.Color(0.8, 0.4, 1),
+        endColor: new THREE.Color(0.4, 0.1, 0.8),
+        startSize: 0.4,
+        endSize: 0.2,
+        startOpacity: 1,
+        endOpacity: 0,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    // Add bouncing star clusters
+    const starSystem = new ParticleSystem({
+      count: 300,
+      emitter: new SphereEmitter(position, 2),
+      behaviors: [new GravityBehavior(1), new BounceBehavior(-2, 0.9), new OscillationBehavior(0.2, 3)],
+      appearance: {
+        startColor: new THREE.Color(1, 1, 0.8),
+        endColor: new THREE.Color(1, 0.8, 0.4),
+        startSize: 0.2,
+        endSize: 0.1,
+        startOpacity: 1,
+        endOpacity: 0,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    system.add(starSystem);
+    return system;
+  }
+
+  static createMultiAxisOscillatorEffect(position: THREE.Vector3 = new THREE.Vector3()): ParticleSystem {
+    // Create particles oscillating on multiple axes
+    const system = new ParticleSystem({
+      count: 1000,
+      emitter: new BoxEmitter(position, 1, 1, 1),
+      behaviors: [
+        new OscillationBehavior(1, 2, new THREE.Vector3(1, 0, 0)), // X-axis
+        new OscillationBehavior(1, 1.5, new THREE.Vector3(0, 1, 0)), // Y-axis
+        new OscillationBehavior(1, 1, new THREE.Vector3(0, 0, 1)), // Z-axis
+      ],
+      appearance: {
+        startColor: new THREE.Color(0.3, 1, 0.7),
+        endColor: new THREE.Color(0.7, 0.3, 1),
+        startSize: 0.3,
+        endSize: 0.1,
+        startOpacity: 0.8,
+        endOpacity: 0,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    // Add central core with different oscillation pattern
+    const coreSystem = new ParticleSystem({
+      count: 200,
+      emitter: new SphereEmitter(position, 0.5),
+      behaviors: [new OscillationBehavior(0.5, 4, new THREE.Vector3(1, 1, 1).normalize())],
+      appearance: {
+        startColor: new THREE.Color(1, 1, 1),
+        endColor: new THREE.Color(0.5, 1, 0.8),
+        startSize: 0.2,
+        endSize: 0.05,
+        startOpacity: 1,
+        endOpacity: 0,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    system.add(coreSystem);
+    return system;
+  }
+
+  static createPlanetaryRingSystem(position: THREE.Vector3 = new THREE.Vector3()): ParticleSystem {
+    // Create the central planet
+    const system = new ParticleSystem({
+      count: 200,
+      emitter: new SphereEmitter(position, 1),
+      behaviors: [new VortexBehavior(0.2), new OscillationBehavior(0.1, 0.5)],
+      appearance: {
+        startColor: new THREE.Color(0.8, 0.7, 0.6), // Warm planet color
+        endColor: new THREE.Color(0.6, 0.5, 0.4),
+        startSize: 1.5,
+        endSize: 1.2,
+        startOpacity: 1,
+        endOpacity: 0.8,
+        blending: THREE.NormalBlending,
+      },
+    });
+
+    // Create multiple ring layers
+    const createRingLayer = (radius: number, width: number, color: THREE.Color, particleCount: number) => {
+      return new ParticleSystem({
+        count: particleCount,
+        emitter: new RingEmitter(position, radius - width / 2, radius + width / 2),
+        behaviors: [
+          new PlanetaryGravityBehavior(position, 8),
+          new VortexBehavior(1, new THREE.Vector3(0, 1, 0)),
+          new OscillationBehavior(0.1, 0.5, new THREE.Vector3(0, 0, 1)),
+        ],
+        appearance: {
+          startColor: color,
+          endColor: color.clone().multiplyScalar(0.7),
+          startSize: 0.2,
+          endSize: 0.1,
+          startOpacity: 0.9,
+          endOpacity: 0.1,
+          blending: THREE.NormalBlending,
+        },
+      });
+    };
+
+    // Add multiple ring layers with different characteristics
+    system.add(createRingLayer(3, 0.5, new THREE.Color(0.9, 0.8, 0.7), 1000)); // Inner ring
+    system.add(createRingLayer(4, 0.8, new THREE.Color(0.8, 0.7, 0.6), 1500)); // Middle ring
+    system.add(createRingLayer(5, 0.3, new THREE.Color(0.7, 0.6, 0.5), 800)); // Outer ring
+
+    // Add some debris particles between rings
+    const debrisSystem = new ParticleSystem({
+      count: 500,
+      emitter: new RingEmitter(position, 2.5, 5.5),
+      behaviors: [new PlanetaryGravityBehavior(position, 6), new VortexBehavior(0.5, new THREE.Vector3(0, 1, 0)), new TurbulenceModifier(0.1, 1)],
+      appearance: {
+        startColor: new THREE.Color(0.6, 0.5, 0.4),
+        endColor: new THREE.Color(0.4, 0.3, 0.2),
+        startSize: 0.15,
+        endSize: 0.05,
+        startOpacity: 0.7,
+        endOpacity: 0,
+        blending: THREE.NormalBlending,
+      },
+    });
+
+    system.add(debrisSystem);
+    return system;
+  }
+
+  static createAtomicModelEffect(position: THREE.Vector3 = new THREE.Vector3()): ParticleSystem {
+    // Create nucleus
+    const system = new ParticleSystem({
+      count: 100,
+      emitter: new SphereEmitter(position, 0.2),
+      behaviors: [new OscillationBehavior(0.1, 1)],
+      appearance: {
+        startColor: new THREE.Color(1, 0.5, 0),
+        endColor: new THREE.Color(1, 0.3, 0),
+        startSize: 0.3,
+        endSize: 0.2,
+        startOpacity: 1,
+        endOpacity: 0.8,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    // Create electron shells with different orbital planes
+    const createShell = (radius: number, axis: THREE.Vector3, color: THREE.Color) => {
+      return new ParticleSystem({
+        count: 300,
+        emitter: new RingEmitter(position, radius - 0.1, radius + 0.1),
+        behaviors: [
+          new PlanetaryGravityBehavior(position, 2),
+          new VortexBehavior(2, axis),
+          new OscillationBehavior(0.2, 3, axis.clone().cross(new THREE.Vector3(0, 1, 0))),
+        ],
+        appearance: {
+          startColor: color,
+          endColor: color.clone().multiplyScalar(0.5),
+          startSize: 0.1,
+          endSize: 0.05,
+          startOpacity: 0.8,
+          endOpacity: 0,
+          blending: THREE.AdditiveBlending,
+        },
+      });
+    };
+
+    // Add three electron shells on different planes
+    system.add(createShell(1, new THREE.Vector3(0, 1, 0), new THREE.Color(0, 1, 1)));
+    system.add(createShell(1.5, new THREE.Vector3(1, 1, 0).normalize(), new THREE.Color(0, 0.5, 1)));
+    system.add(createShell(2, new THREE.Vector3(1, 0, 1).normalize(), new THREE.Color(0.5, 0, 1)));
+
+    return system;
+  }
+
+  static createSpringChainEffect(position: THREE.Vector3 = new THREE.Vector3()): ParticleSystem {
+    const system = new ParticleSystem({
+      count: 1000,
+      emitter: new BoxEmitter(position, 0.2, 4, 0.2),
+      behaviors: [new OscillationBehavior(1, 2, new THREE.Vector3(1, 0, 0)), new GravityBehavior(0.5), new DragBehavior(0.1)],
+      appearance: {
+        startColor: new THREE.Color(1, 0.5, 0.2),
+        endColor: new THREE.Color(1, 0.2, 0.5),
+        startSize: 0.2,
+        endSize: 0.1,
+        startOpacity: 1,
+        endOpacity: 0,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    // Add connected oscillating segments
+    for (let i = 1; i <= 3; i++) {
+      const segment = new ParticleSystem({
+        count: 300,
+        emitter: new BoxEmitter(new THREE.Vector3(position.x, position.y - i * 1.5, position.z), 0.2, 4, 0.2),
+        behaviors: [new OscillationBehavior(1, 2 / (i + 1), new THREE.Vector3(1, 0, 0)), new GravityBehavior(0.5), new DragBehavior(0.1 * i)],
+        appearance: {
+          startColor: new THREE.Color(0.2 + i * 0.2, 0.5, 1 - i * 0.2),
+          endColor: new THREE.Color(0.1 + i * 0.1, 0.2, 0.8 - i * 0.2),
+          startSize: 0.2,
+          endSize: 0.1,
+          startOpacity: 1,
+          endOpacity: 0,
+          blending: THREE.AdditiveBlending,
+        },
+      });
+      system.add(segment);
+    }
+
+    return system;
+  }
+
+  static createTidalWaveEffect(position: THREE.Vector3 = new THREE.Vector3()): ParticleSystem {
+    // Create main wave body
+    const system = new ParticleSystem({
+      count: 2000,
+      emitter: new BoxEmitter(position, 8, 4, 2),
+      behaviors: [new OscillationBehavior(1, 0.5, new THREE.Vector3(0, 1, 0)), new VortexBehavior(0.3, new THREE.Vector3(0, 0, 1)), new GravityBehavior(-0.2)],
+      appearance: {
+        startColor: new THREE.Color(0.2, 0.5, 1),
+        endColor: new THREE.Color(0.1, 0.3, 0.8),
+        startSize: 0.3,
+        endSize: 0.1,
+        startOpacity: 0.8,
+        endOpacity: 0,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    // Add foam particles
+    const foamSystem = new ParticleSystem({
+      count: 500,
+      emitter: new BoxEmitter(position, 8.5, 4.2, 2.2),
+      behaviors: [new OscillationBehavior(1, 0.5, new THREE.Vector3(0, 1, 0)), new BounceBehavior(-2, 0.8), new DragBehavior(0.2)],
+      appearance: {
+        startColor: new THREE.Color(1, 1, 1),
+        endColor: new THREE.Color(0.8, 0.9, 1),
+        startSize: 0.2,
+        endSize: 0.1,
+        startOpacity: 1,
+        endOpacity: 0,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    // Add spray particles
+    const spraySystem = new ParticleSystem({
+      count: 300,
+      emitter: new BoxEmitter(position, 9, 4.5, 2.5),
+      behaviors: [new GravityBehavior(1), new TurbulenceModifier(0.3, 1), new DragBehavior(0.1)],
+      appearance: {
+        startColor: new THREE.Color(0.8, 0.9, 1),
+        endColor: new THREE.Color(0.6, 0.8, 1),
+        startSize: 0.1,
+        endSize: 0.05,
+        startOpacity: 0.6,
+        endOpacity: 0,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    system.add(foamSystem);
+    system.add(spraySystem);
     return system;
   }
 }
