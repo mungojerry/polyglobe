@@ -87,6 +87,14 @@ export class ParticleExampleScene {
       { name: "Portal", creator: ParticlePresets.createPortalEffect },
       { name: "Poison Cloud", creator: ParticlePresets.createPoisonCloudEffect },
       { name: "Waterfall", creator: ParticlePresets.createWaterfallEffect },
+      { name: "Swarm", creator: ParticlePresets.createSwarmEffect },
+      { name: "Glow effect", creator: ParticlePresets.createLanternGlowEffect },
+      { name: "Trail", creator: ParticlePresets.createCometTrailEffect },
+      { name: "Electric arc", creator: ParticlePresets.createElectricArcEffect },
+      { name: "Sphere emitter", creator: ParticlePresets.createSphereEmitterEffect },
+      { name: "Box emitter", creator: ParticlePresets.createBoxEmitterEffect },
+      { name: "Ring emitter", creator: ParticlePresets.createRingEmitterEffect },
+      { name: "Cylinder emitter", creator: ParticlePresets.createCylinderEmitterEffect },
     ];
 
     const { rows, cols, spacing } = this.effectsGrid;
