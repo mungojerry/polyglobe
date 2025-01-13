@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { Particle } from "./Particle";
 export interface ParticleModifier {
   apply(particle: Particle): void;
+  update?(particle: Particle, deltaTime: number): void;
 }
 
 export interface ParticleAppearance {
@@ -129,6 +130,20 @@ export class AttractorModifier implements ParticleModifier {
       const force = (1 - distance / this.radius) * this.strength;
       particle.velocity.add(direction.multiplyScalar(force));
     }
+  }
+}
+
+export class RandomVelocityModifier implements ParticleModifier {
+  private minSpeed: number;
+  private maxSpeed: number;
+
+  constructor(minSpeed = 0, maxSpeed = 5) {
+    this.minSpeed = minSpeed;
+    this.maxSpeed = maxSpeed;
+  }
+
+  apply(particle: Particle): void {
+    particle.velocity.normalize().multiplyScalar(Math.random() * (this.maxSpeed - this.minSpeed) + this.minSpeed);
   }
 }
 

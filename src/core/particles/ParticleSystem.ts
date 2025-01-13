@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { ObjectPool } from "../utils/ObjectPool";
 import { GravityBehavior, ParticleBehavior, TrailBehavior } from "./Behaviors";
 import { ParticleEmitterShape, PointEmitter } from "./Emitters";
-import { AppearanceModifier, ParticleAppearance, ParticleModifier } from "./Modifiers";
+import { AppearanceModifier, ParticleAppearance, ParticleModifier, SubEmitterModifier } from "./Modifiers";
 import { Particle } from "./Particle";
 
 interface ParticleSystemOptions {
@@ -124,8 +124,8 @@ export class ParticleSystem extends THREE.Object3D {
 
     // Initialize sub-emitter support
     this.modifiers.forEach((modifier) => {
-      if (typeof (modifier as any).setParticleSystem === "function") {
-        (modifier as any).setParticleSystem(this);
+      if (modifier instanceof SubEmitterModifier) {
+        modifier.setParticleSystem(this);
       }
     });
 
@@ -284,10 +284,8 @@ export class ParticleSystem extends THREE.Object3D {
         if (particle.age >= particle.lifetime) {
           // Trigger death events before releasing
           this.modifiers.forEach((modifier) => {
-            if ("onDeath" in modifier) {
-              if ("onDeath" in modifier && typeof modifier.onDeath === "function") {
-                modifier.onDeath(particle);
-              }
+            if (modifier instanceof SubEmitterModifier) {
+              modifier.onDeath(particle);
             }
           });
           this.particlePool.release(particle);
@@ -301,15 +299,10 @@ export class ParticleSystem extends THREE.Object3D {
           // Apply appearance modifier update
           this.appearanceModifier.update(particle);
 
-          // Apply and update other modifiers
+          // update other modifiers
           this.modifiers.forEach((modifier) => {
-            if (modifier !== this.appearanceModifier) {
-              modifier.apply(particle);
-              if ("update" in modifier) {
-                if (typeof modifier.update === "function") {
-                  modifier.update(particle, deltaTime);
-                }
-              }
+            if (!(modifier instanceof AppearanceModifier)) {
+              modifier.update?.(particle, deltaTime);
             }
           });
 
@@ -320,13 +313,9 @@ export class ParticleSystem extends THREE.Object3D {
               particle.resolveCollision(other);
               // Trigger collision events
               this.modifiers.forEach((modifier) => {
-                if ("onCollision" in modifier) {
-                  if (typeof modifier.onCollision === "function") {
-                    modifier.onCollision(particle);
-                  }
-                  if (typeof modifier.onCollision === "function") {
-                    modifier.onCollision(other);
-                  }
+                if (modifier instanceof SubEmitterModifier) {
+                  modifier.onCollision(particle);
+                  modifier.onCollision(other);
                 }
               });
             }

@@ -4,7 +4,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise";
 import { DragBehavior, GravityBehavior } from "../particles/Behaviors";
 import { ConeEmitter } from "../particles/Emitters";
-import { TurbulenceModifier } from "../particles/Modifiers";
+import { RandomVelocityModifier, TurbulenceModifier } from "../particles/Modifiers";
 import { ParticleSystem } from "../particles/ParticleSystem";
 import { vectorPool } from "../utils/vectorPool";
 
@@ -223,6 +223,7 @@ export class ZarchFlyScene {
       count: 1000,
       emitter: this.emitter,
       behaviors: [new GravityBehavior({ gravity: 1 }), new DragBehavior({ dragCoefficient: 0.1 }), new TurbulenceModifier(0.2, 0.5)],
+      modifiers: [new RandomVelocityModifier(3, 5)],
       appearance: {
         startColor: new THREE.Color(1, 0.8, 0.3),
         endColor: new THREE.Color(1, 0.2, 0),
