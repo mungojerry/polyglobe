@@ -178,33 +178,9 @@ export class Particle {
     if (other.onCollision) other.onCollision(this);
   }
 
-  // Enhanced update method with improved trail handling
+  // Basic physics integration without trail handling
   integrate(deltaTime: number): void {
     if (!this.active) return;
-
-    // Always store position history for active particles
-    const currentPos = this.position.clone();
-
-    // Calculate interpolated position for smoother trails
-    if (this.velocity.lengthSq() > 0.001) {
-      // Add intermediate position for fast-moving particles
-      const intermediatePos = currentPos.clone().sub(this.velocity.clone().multiplyScalar(deltaTime * 0.5));
-      this.positionHistory.unshift(intermediatePos);
-    }
-
-    this.positionHistory.unshift(currentPos);
-
-    // Adjust trail length based on velocity
-    const speed = this.velocity.length();
-    const dynamicLength = Math.min(
-      this.maxTrailLength,
-      Math.floor(5 + speed * 2) // Dynamic trail length based on speed
-    );
-
-    // Trim history to dynamic length
-    while (this.positionHistory.length > dynamicLength) {
-      this.positionHistory.pop();
-    }
 
     // Update velocity with acceleration
     this.velocity.addScaledVector(this.acceleration, deltaTime);

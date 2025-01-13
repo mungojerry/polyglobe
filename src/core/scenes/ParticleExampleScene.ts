@@ -14,6 +14,14 @@ export class ParticleExampleScene {
   private effects: Map<string, THREE.Object3D>;
   private effectsGrid: { rows: number; cols: number; spacing: number };
 
+  private moveSpeed = 2;
+  private keys = {
+    w: false,
+    a: false,
+    s: false,
+    d: false,
+  };
+
   constructor() {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x000000);
@@ -30,14 +38,20 @@ export class ParticleExampleScene {
     this.controls.enableDamping = true;
     this.controls.enablePan = true;
     this.controls.enableZoom = true;
+    this.controls.keys = {
+      LEFT: "ArrowLeft", //left arrow
+      UP: "ArrowUp", // up arrow
+      RIGHT: "ArrowRight", // right arrow
+      BOTTOM: "ArrowDown", // down arrow
+    };
 
     this.clock = new THREE.Clock();
     this.effects = new Map();
 
     // Grid layout configuration
     this.effectsGrid = {
-      rows: 8,
-      cols: 8,
+      rows: 10,
+      cols: 10,
       spacing: 15,
     };
 
@@ -77,17 +91,17 @@ export class ParticleExampleScene {
   }
 
   private initEffects(): void {
-    // const effects = Object.getOwnPropertyNames(ParticlePresets)
-    //   .filter((name) => name.startsWith("create"))
-    //   .map((name) => {
-    //     console.log(name);
-    //     return { name: name.replace("create", "").replace("Effect", ""), creator: (ParticlePresets as any)[name] };
-    //   });
+    const effects = Object.getOwnPropertyNames(ParticlePresets)
+      .filter((name) => name.startsWith("create"))
+      .map((name) => {
+        console.log(name);
+        return { name: name.replace("create", "").replace("Effect", ""), creator: (ParticlePresets as any)[name] };
+      });
 
-    const effects = [
+    const effectSingle = [
       {
-        name: "Trails",
-        creator: ParticlePresets.createLightningStrikeEffect,
+        name: "Comet",
+        creator: ParticlePresets.createCometTrailEffect,
       },
     ];
 
@@ -101,7 +115,7 @@ export class ParticleExampleScene {
       const row = Math.floor(index / cols);
       const col = index % cols;
 
-      const position = new THREE.Vector3(col * spacing - offsetX, 0, row * spacing - offsetZ);
+      const position = new THREE.Vector3(col * spacing - offsetX, 10, row * spacing - offsetZ);
 
       const particleSystem = effect.creator(position);
       this.scene.add(particleSystem);
@@ -130,8 +144,8 @@ export class ParticleExampleScene {
     });
   }
 
-  private animate = (): void => {
-    requestAnimationFrame(this.animate);
+  public animate(): void {
+    requestAnimationFrame(() => this.animate());
 
     const deltaTime = this.clock.getDelta();
 
@@ -141,15 +155,12 @@ export class ParticleExampleScene {
     // Update all particle systems
     this.effects.forEach((effect) => {
       if (effect instanceof ParticleSystem) {
-        effect.emit(10);
+        // Very low emission rate for distinct trails
+        effect.emit(3);
         effect.update(deltaTime);
       }
     });
 
     this.renderer.render(this.scene, this.camera);
-  };
+  }
 }
-
-// Usage:
-// const container = document.getElementById('particle-demo');
-// const demo = new ParticleDemo(container);

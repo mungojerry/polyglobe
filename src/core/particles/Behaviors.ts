@@ -5,15 +5,18 @@ export interface ParticleBehavior {
   update(particle: Particle, deltaTime: number): void;
 }
 
+export interface GravityOptions {
+  gravity?: number;
+}
 // Particle behaviors
 export class GravityBehavior implements ParticleBehavior {
   private gravity: number;
   private gravityVector: THREE.Vector3;
   private force: THREE.Vector3;
 
-  constructor(gravity: number = 9.81) {
-    this.gravity = gravity;
-    this.gravityVector = new THREE.Vector3(0, -gravity, 0);
+  constructor(options: GravityOptions = {}) {
+    this.gravity = options.gravity ?? 9.81;
+    this.gravityVector = new THREE.Vector3(0, -this.gravity, 0);
     this.force = new THREE.Vector3();
   }
 
@@ -24,6 +27,10 @@ export class GravityBehavior implements ParticleBehavior {
   }
 }
 
+export interface VortexOptions {
+  strength?: number;
+  axis?: THREE.Vector3;
+}
 export class VortexBehavior implements ParticleBehavior {
   private strength: number;
   private axis: THREE.Vector3;
@@ -31,9 +38,9 @@ export class VortexBehavior implements ParticleBehavior {
   private force: THREE.Vector3;
   private rotationQuaternion: THREE.Quaternion;
 
-  constructor(strength: number = 1, axis: THREE.Vector3 = new THREE.Vector3(0, 0, 1)) {
-    this.strength = strength;
-    this.axis = axis.clone().normalize();
+  constructor(options: VortexOptions = {}) {
+    this.strength = options.strength ?? 1;
+    this.axis = options.axis ? options.axis.clone().normalize() : new THREE.Vector3(0, 0, 1).normalize();
     this.temp = new THREE.Vector3();
     this.force = new THREE.Vector3();
     this.rotationQuaternion = new THREE.Quaternion();
@@ -76,14 +83,16 @@ export class VortexBehavior implements ParticleBehavior {
     }
   }
 }
-
+export interface DragOptions {
+  dragCoefficient?: number;
+}
 // Additional Behaviors
 export class DragBehavior implements ParticleBehavior {
   private dragCoefficient: number;
   private force: THREE.Vector3;
 
-  constructor(dragCoefficient: number = 0.1) {
-    this.dragCoefficient = dragCoefficient;
+  constructor(options: DragOptions = {}) {
+    this.dragCoefficient = options.dragCoefficient ?? 0.1;
     this.force = new THREE.Vector3();
   }
 
@@ -135,20 +144,22 @@ export class BounceBehavior implements ParticleBehavior {
     }
   }
 }
-
+export interface OscillationOptions {
+  amplitude?: number;
+  frequency?: number;
+  axis?: THREE.Vector3;
+}
 export class OscillationBehavior implements ParticleBehavior {
   private amplitude: number;
   private frequency: number;
   private axis: THREE.Vector3;
   private force: THREE.Vector3;
-  private startTime: number;
 
-  constructor(amplitude: number = 1, frequency: number = 1, axis: THREE.Vector3 = new THREE.Vector3(0, 1, 0)) {
-    this.amplitude = amplitude;
-    this.frequency = frequency;
-    this.axis = axis.normalize();
+  constructor(options: OscillationOptions) {
+    this.amplitude = options.amplitude ?? 1;
+    this.frequency = options.frequency ?? 1;
+    this.axis = options.axis ? options.axis.normalize() : new THREE.Vector3(0, 1, 0).normalize();
     this.force = new THREE.Vector3();
-    this.startTime = performance.now() * 0.001;
   }
 
   update(particle: Particle, deltaTime: number): void {
@@ -172,6 +183,10 @@ export class OscillationBehavior implements ParticleBehavior {
   }
 }
 
+export interface PlanetaryGravityOptions {
+  center?: THREE.Vector3;
+  strength?: number;
+}
 export class PlanetaryGravityBehavior implements ParticleBehavior {
   private center: THREE.Vector3;
   private strength: number;
@@ -180,9 +195,9 @@ export class PlanetaryGravityBehavior implements ParticleBehavior {
   private minDistance: number;
   private maxForce: number;
 
-  constructor(center: THREE.Vector3, strength: number = 5) {
-    this.center = center.clone();
-    this.strength = strength;
+  constructor(options: PlanetaryGravityOptions = {}) {
+    this.center = options.center ? options.center.clone() : new THREE.Vector3();
+    this.strength = options.strength ?? 5;
     this.force = new THREE.Vector3();
     this.direction = new THREE.Vector3();
     this.minDistance = 0.1; // Minimum distance to prevent extreme forces
@@ -260,14 +275,17 @@ class SpatialGrid {
     return result;
   }
 }
-
+export interface CollisionOptions {
+  cellSize?: number;
+  maxCollisionRange?: number;
+}
 export class CollisionBehavior implements ParticleBehavior {
   private spatialGrid: SpatialGrid;
   private maxCollisionRange: number;
 
-  constructor(cellSize: number = 5, maxCollisionRange: number = 10) {
-    this.spatialGrid = new SpatialGrid(cellSize);
-    this.maxCollisionRange = maxCollisionRange;
+  constructor(options: CollisionOptions = {}) {
+    this.spatialGrid = new SpatialGrid(options.cellSize ?? 5);
+    this.maxCollisionRange = options.maxCollisionRange ?? 10;
   }
 
   update(particle: Particle, deltaTime: number): void {
@@ -299,7 +317,7 @@ export class TrailBehavior implements ParticleBehavior {
   private fade: number;
   private speedInfluence: boolean;
   private minLength: number;
-  private maxLength: number;
+  public maxLength: number;
 
   constructor(options: TrailOptions = {}) {
     this.length = options.length ?? 20;
@@ -317,26 +335,45 @@ export class TrailBehavior implements ParticleBehavior {
       particle.trailFade = this.fade;
     }
 
-    // Store current position
     const currentPos = particle.position.clone();
+    const speed = particle.velocity.length();
 
-    // Add intermediate position for fast-moving particles
-    if (this.speedInfluence && particle.velocity.lengthSq() > 0.001) {
-      const intermediatePos = currentPos.clone().sub(particle.velocity.clone().multiplyScalar(deltaTime * 0.5));
-      particle.positionHistory.unshift(intermediatePos);
-    }
-
+    // Always add current position first
     particle.positionHistory.unshift(currentPos);
 
-    // Calculate dynamic trail length based on speed
-    let targetLength = this.length;
-    if (this.speedInfluence) {
-      const speed = particle.velocity.length();
-      targetLength = Math.min(this.maxLength, Math.max(this.minLength, Math.floor(this.minLength + speed * 2)));
+    // Add intermediate positions for smoother trails
+    if (this.speedInfluence && speed > 0.5) {
+      // Lower speed threshold
+      // Calculate number of intermediate positions based on speed
+      const steps = Math.min(5, Math.ceil(speed / 2)); // More steps, lower division factor
+      const stepDelta = 1.0 / (steps + 1);
+
+      // Add interpolated positions with slight offset for thickness
+      for (let i = steps; i > 0; i--) {
+        const t = i * stepDelta;
+        const basePos = currentPos.clone().sub(particle.velocity.clone().multiplyScalar(deltaTime * t));
+
+        // Add slight perpendicular offset for visual thickness
+        const perpendicular = new THREE.Vector3(-particle.velocity.y, particle.velocity.x, 0).normalize().multiplyScalar(0.05);
+        const intermediatePos = basePos.clone().add(perpendicular);
+        particle.positionHistory.unshift(intermediatePos);
+
+        // Add opposite offset for thickness
+        const oppositePos = basePos.clone().sub(perpendicular);
+        particle.positionHistory.unshift(oppositePos);
+      }
     }
 
-    // Trim history to target length
-    while (particle.positionHistory.length > targetLength) {
+    // Smoothly adjust trail length based on speed with more gradual scaling
+    let targetLength = this.length;
+    if (this.speedInfluence) {
+      // Use smooth interpolation with slower falloff
+      const speedFactor = Math.min(1.0, Math.pow(speed / 4.0, 0.7));
+      targetLength = this.minLength + (this.maxLength - this.minLength) * speedFactor;
+    }
+
+    // Gradually adjust trail length
+    while (particle.positionHistory.length > Math.ceil(targetLength)) {
       particle.positionHistory.pop();
     }
   }

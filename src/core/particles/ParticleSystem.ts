@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { ObjectPool } from "../utils/ObjectPool";
-import { GravityBehavior, ParticleBehavior } from "./Behaviours";
+import { GravityBehavior, ParticleBehavior, TrailBehavior } from "./Behaviors";
 import { ParticleEmitterShape, PointEmitter } from "./Emitters";
 import { AppearanceModifier, ParticleAppearance, ParticleModifier } from "./Modifiers";
 import { Particle } from "./Particle";
@@ -21,6 +21,14 @@ export class ParticleSystem extends THREE.Object3D {
   private points!: THREE.Points<THREE.BufferGeometry<THREE.NormalBufferAttributes>, THREE.ShaderMaterial>;
   private appearanceModifier: AppearanceModifier;
 
+  // Trail rendering properties - initialized only when needed
+  private trailGeometry?: THREE.BufferGeometry;
+  private trailMaterial?: THREE.LineBasicMaterial;
+  private trails?: THREE.LineSegments;
+  private trailPositions?: Float32Array;
+  private trailColors?: Float32Array;
+  private hasTrailBehavior: boolean = false;
+
   private emitter: ParticleEmitterShape;
   private behaviors: ParticleBehavior[];
   private modifiers: ParticleModifier[];
@@ -31,8 +39,40 @@ export class ParticleSystem extends THREE.Object3D {
   private scales!: Float32Array;
   private opacities!: Float32Array;
 
+  private getTrailBehavior(): TrailBehavior | undefined {
+    return this.behaviors.find((b): b is TrailBehavior => b instanceof TrailBehavior);
+  }
+
+  private initializeTrailRendering(count: number) {
+    const trailBehavior = this.getTrailBehavior();
+    if (!trailBehavior) return;
+
+    const maxTrailLength = trailBehavior.maxLength ?? 40;
+    // Double the buffer size to ensure smooth connections between segments
+    this.trailPositions = new Float32Array(count * maxTrailLength * 6); // *6 for doubled vertices
+    this.trailColors = new Float32Array(count * maxTrailLength * 6);
+
+    this.trailGeometry = new THREE.BufferGeometry();
+    this.trailGeometry.setAttribute("position", new THREE.BufferAttribute(this.trailPositions, 3));
+    this.trailGeometry.setAttribute("color", new THREE.BufferAttribute(this.trailColors, 3));
+
+    this.trailMaterial = new THREE.LineBasicMaterial({
+      vertexColors: true,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      opacity: 1.0, // Full opacity, we'll control fade in colors
+      depthWrite: false,
+      depthTest: true,
+      linewidth: 3, // Thicker lines for better visibility
+    });
+
+    this.trails = new THREE.LineSegments(this.trailGeometry, this.trailMaterial);
+    this.add(this.trails);
+  }
+
   constructor(options: ParticleSystemOptions = {}) {
     super();
+    this.hasTrailBehavior = options.behaviors?.some((b) => b instanceof TrailBehavior) ?? false;
 
     const {
       count = 10000,
@@ -80,6 +120,10 @@ export class ParticleSystem extends THREE.Object3D {
     this.rotations = new Float32Array(count * 3);
     this.scales = new Float32Array(count);
     this.opacities = new Float32Array(count);
+
+    if (this.hasTrailBehavior) {
+      this.initializeTrailRendering(count);
+    }
   }
 
   private initializeMaterial(appearance: ParticleAppearance): void {
@@ -276,6 +320,8 @@ export class ParticleSystem extends THREE.Object3D {
           this.scales[activeIndex] = particle.scale;
           this.opacities[activeIndex] = particle.opacity;
 
+          this.updateTrail(particle, activeIndex);
+
           activeIndex++;
         }
       }
@@ -283,6 +329,12 @@ export class ParticleSystem extends THREE.Object3D {
 
     // Update geometry draw range
     this.geometry.setDrawRange(0, activeIndex);
+
+    // Update trail geometry if it exists
+    if (this.trailGeometry && this.trailPositions && this.trailColors) {
+      this.trailGeometry.attributes.position.needsUpdate = true;
+      this.trailGeometry.attributes.color.needsUpdate = true;
+    }
 
     // Update geometry attributes
     this.geometry.attributes.position.needsUpdate = true;
@@ -292,8 +344,62 @@ export class ParticleSystem extends THREE.Object3D {
     this.geometry.attributes.opacity.needsUpdate = true;
   }
 
+  updateTrail(particle: Particle, activeIndex: number) {
+    const trailBehavior = this.hasTrailBehavior ? this.getTrailBehavior() : undefined;
+
+    // Update trail buffers if trail behavior exists
+    if (trailBehavior && particle.positionHistory) {
+      const history = particle.positionHistory;
+      const maxTrailLength = trailBehavior.maxLength ?? 40;
+      const trailLength = Math.min(history.length, maxTrailLength);
+
+      // Ensure we have valid trail buffers
+      if (this.trailPositions && this.trailColors) {
+        const positions = this.trailPositions;
+        const colors = this.trailColors;
+
+        // Calculate base index for this particle's trail
+        const baseIndex = activeIndex * maxTrailLength * 6;
+
+        // Create line segments with proper fade
+        for (let i = 0; i < trailLength - 1; i++) {
+          const segmentIndex = baseIndex + i * 6;
+
+          // Set positions
+          const currentPos = history[i];
+          const nextPos = history[i + 1];
+          currentPos.toArray(positions, segmentIndex);
+          nextPos.toArray(positions, segmentIndex + 3);
+
+          // Calculate fade values with slower falloff
+          const alpha = Math.pow(1 - i / (trailLength - 1), 1.5);
+          const nextAlpha = Math.pow(1 - (i + 1) / (trailLength - 1), 1.5);
+
+          // Set colors with proper fade
+          const { r, g, b } = particle.color;
+          colors[segmentIndex] = r * alpha;
+          colors[segmentIndex + 1] = g * alpha;
+          colors[segmentIndex + 2] = b * alpha;
+          colors[segmentIndex + 3] = r * nextAlpha;
+          colors[segmentIndex + 4] = g * nextAlpha;
+          colors[segmentIndex + 5] = b * nextAlpha;
+        }
+
+        // Update trail geometry draw range
+        if (this.trailGeometry) {
+          const totalSegments = activeIndex * (trailLength - 1);
+          this.trailGeometry.setDrawRange(0, totalSegments * 2);
+        }
+      }
+    }
+  }
+
   addBehavior(behavior: ParticleBehavior): void {
     this.behaviors.push(behavior);
+    if (behavior instanceof TrailBehavior && !this.hasTrailBehavior) {
+      this.hasTrailBehavior = true;
+      this.initializeTrailRendering(this.particlePool["objects"].length);
+    }
   }
 
   addModifier(modifier: ParticleModifier): void {
@@ -311,6 +417,13 @@ export class ParticleSystem extends THREE.Object3D {
   dispose(): void {
     this.geometry.dispose();
     this.material.dispose();
+
+    if (this.trailGeometry) {
+      this.trailGeometry.dispose();
+    }
+    if (this.trailMaterial) {
+      this.trailMaterial.dispose();
+    }
 
     this.particlePool.clear();
   }
