@@ -244,7 +244,7 @@ export class ParticleSystem extends THREE.Object3D {
   }): Particle | null {
     const particle = this.particlePool.acquire();
     if (!particle) return null;
-
+    particle.active = true;
     particle.position.copy(props.position);
     particle.velocity.copy(props.velocity);
     if (props.color) particle.color.copy(props.color);
@@ -273,8 +273,7 @@ export class ParticleSystem extends THREE.Object3D {
   update(deltaTime: number): void {
     let activeIndex = 0;
 
-    const particles = this.particlePool["objects"]; // Access internal array for performance
-
+    const particles = this.particlePool.activeObjects; // Access internal array for performance
     // Update particle states
     for (let i = 0; i < particles.length; i++) {
       const particle = particles[i];
@@ -299,9 +298,10 @@ export class ParticleSystem extends THREE.Object3D {
           // Apply appearance modifier update
           this.appearanceModifier.update(particle);
 
-          // update other modifiers
+          // Apply and update other modifiers
           this.modifiers.forEach((modifier) => {
             if (!(modifier instanceof AppearanceModifier)) {
+              modifier.apply(particle);
               modifier.update?.(particle, deltaTime);
             }
           });
@@ -407,7 +407,7 @@ export class ParticleSystem extends THREE.Object3D {
     this.behaviors.push(behavior);
     if (behavior instanceof TrailBehavior && !this.hasTrailBehavior) {
       this.hasTrailBehavior = true;
-      this.initializeTrailRendering(this.particlePool["objects"].length);
+      this.initializeTrailRendering(this.particlePool.activeObjects.length);
     }
   }
 

@@ -1,37 +1,43 @@
-export interface Poolable {
-  reset(): void;
-  active: boolean;
-}
-
-export class ObjectPool<T extends Poolable> {
+export class ObjectPool<T> {
   private objects: T[];
+  public activeObjects: T[];
   private createObject: () => T;
   private expandAmount: number;
 
   constructor(initialSize: number, createFn: () => T, expandAmount: number = Math.floor(initialSize * 0.5)) {
     this.createObject = createFn;
     this.expandAmount = expandAmount;
-    this.objects = Array(initialSize).fill(null).map(() => this.createObject());
+    this.activeObjects = [];
+    this.objects = Array(initialSize)
+      .fill(null)
+      .map(() => this.createObject());
   }
 
   acquire(): T {
-    // Find first inactive object
-    const object = this.objects.find(obj => !obj.active);
-    
+    const object = this.objects.shift();
+
     if (object) {
-      object.active = true;
+      this.activeObjects.push(object);
       return object;
     }
 
     // Expand pool if no inactive objects found
     this.expand();
-    const newObject = this.objects[this.objects.length - 1];
-    newObject.active = true;
+    const newObject = this.objects.shift();
+    if (!newObject) {
+      throw new Error("Failed to acquire object from pool");
+    }
+    this.activeObjects.push(newObject);
     return newObject;
   }
 
   release(object: T): void {
-    object.reset();
+    const index = this.activeObjects.indexOf(object);
+    if (index === -1) {
+      throw new Error("Attempting to release an object that isn't active");
+    }
+    this.objects.push(object);
+    this.activeObjects.splice(index, 1); // More efficient than filter
   }
 
   private expand(): void {
@@ -42,14 +48,19 @@ export class ObjectPool<T extends Poolable> {
   }
 
   clear(): void {
-    this.objects.forEach(obj => obj.reset());
+    this.activeObjects.forEach((obj) => this.objects.push(obj));
+    this.activeObjects = [];
   }
 
   getActiveCount(): number {
-    return this.objects.filter(obj => obj.active).length;
+    return this.activeObjects.length;
   }
 
   getTotalCount(): number {
-    return this.objects.length;
+    return this.objects.length + this.activeObjects.length;
+  }
+
+  isActive(object: T): boolean {
+    return this.activeObjects.includes(object);
   }
 }

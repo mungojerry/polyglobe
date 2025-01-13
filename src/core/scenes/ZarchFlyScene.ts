@@ -222,7 +222,7 @@ export class ZarchFlyScene {
     return new ParticleSystem({
       count: 1000,
       emitter: this.emitter,
-      behaviors: [new GravityBehavior({ gravity: 1 }), new DragBehavior({ dragCoefficient: 0.1 }), new TurbulenceModifier(0.2, 0.5)],
+      behaviors: [new GravityBehavior({ gravity: 9.8 }), new DragBehavior({ dragCoefficient: 0.1 }), new TurbulenceModifier(0.2, 0.5)],
       modifiers: [new RandomVelocityModifier(3, 5)],
       appearance: {
         startColor: new THREE.Color(1, 0.8, 0.3),

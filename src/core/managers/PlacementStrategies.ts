@@ -7,9 +7,9 @@ import { ProgressCallback } from "../utils/utils";
 import { CachedLandVertex, ModelGroup, ModelType, SpatialHashGrid } from "./models";
 
 // Pools and constants
-const vectorPool = new ObjectPool(() => new THREE.Vector3(), 10);
-const matrixPool = new ObjectPool(() => new THREE.Matrix4(), 10);
-const quaternionPool = new ObjectPool(() => new THREE.Quaternion(), 10);
+const vectorPool = new ObjectPool<THREE.Vector3>(10, () => new THREE.Vector3(), 10);
+const matrixPool = new ObjectPool<THREE.Matrix4>(10, () => new THREE.Matrix4(), 10);
+const quaternionPool = new ObjectPool<THREE.Quaternion>(10, () => new THREE.Quaternion(), 10);
 const upVector = new THREE.Vector3(0, 1, 0);
 
 // Types for specialized placement parameters
