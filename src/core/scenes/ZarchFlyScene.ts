@@ -2,7 +2,10 @@ import RAPIER from "@dimforge/rapier3d";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise";
-import { BoxEmitter, ParticleSystem } from "../particles/ParticleSystem";
+import { DragBehavior, GravityBehavior } from "../particles/Behaviors";
+import { ConeEmitter } from "../particles/Emitters";
+import { TurbulenceModifier } from "../particles/Modifiers";
+import { ParticleSystem } from "../particles/ParticleSystem";
 import { vectorPool } from "../utils/vectorPool";
 
 // Constants
@@ -42,7 +45,6 @@ export class ZarchFlyScene {
   private crosshair: HTMLDivElement;
   private cursorX: number = 0;
   private cursorY: number = 0;
-  private thrustParticles: ParticleSystem;
 
   constructor() {
     this.scene = new THREE.Scene();
@@ -78,40 +80,7 @@ export class ZarchFlyScene {
     pointLight1.position.set(2000, 0, 0);
     this.scene.add(pointLight1);
 
-    // Create thrust particles with GPU acceleration
-    this.thrustParticles = new ParticleSystem({
-      maxParticles: 2000,
-      useGPUCompute: true,
-      renderer: this.renderer,
-      renderOptions: {
-        useCustomShader: true,
-        sortMode: "distance",
-        frustumCulled: true,
-      },
-      simulation: {
-        substeps: 2, // Increased for smoother motion
-        fixedTimeStep: 1 / 60,
-      },
-    });
-
     // Create and configure emitter for thrust
-    const thrustEmitter = new BoxEmitter(0.5, 0.1, 0.5);
-    this.thrustParticles.addEmitter(thrustEmitter);
-
-    // Add particle modifier for thrust behavior
-    this.thrustParticles.addModifier({
-      updateParticle: (position, velocity, age, lifetime, deltaTime) => {
-        // Slow down particles over time
-        velocity.multiplyScalar(0.98);
-
-        // Add some turbulence
-        position.x += (Math.random() - 0.5) * 0.1;
-        position.y += (Math.random() - 0.5) * 0.1;
-        position.z += (Math.random() - 0.5) * 0.1;
-      },
-    });
-
-    this.scene.add(this.thrustParticles);
 
     this.world = new RAPIER.World({ x: 0, y: 0, z: 0 });
 
@@ -201,6 +170,8 @@ export class ZarchFlyScene {
     });
   }
 
+  particleSystem: ParticleSystem | null = null;
+
   private async createShip(): Promise<void> {
     return new Promise((resolve, reject) => {
       const loader = new GLTFLoader();
@@ -230,11 +201,37 @@ export class ZarchFlyScene {
             .setRestitution(0.9);
 
           this.world.createCollider(shipCollider, this.shipBody);
+
+          this.particleSystem = this.createThrustEffect();
+          this.scene.add(this.particleSystem);
           resolve();
         },
         undefined,
         reject
       );
+    });
+  }
+
+  emitter!: ConeEmitter;
+  createThrustEffect(position: THREE.Vector3 = new THREE.Vector3()): ParticleSystem {
+    // Create emitter at position and point downward
+    const emitterPos = position.clone();
+    this.emitter = new ConeEmitter(emitterPos, 0.15, 15);
+    const direction = new THREE.Vector3(0, -1, 0);
+    this.emitter.setDirection(direction);
+    return new ParticleSystem({
+      count: 1000,
+      emitter: this.emitter,
+      behaviors: [new GravityBehavior({ gravity: 1 }), new DragBehavior({ dragCoefficient: 0.1 }), new TurbulenceModifier(0.2, 0.5)],
+      appearance: {
+        startColor: new THREE.Color(1, 0.8, 0.3),
+        endColor: new THREE.Color(1, 0.2, 0),
+        startSize: 0.5,
+        endSize: 0.1,
+        startOpacity: 1,
+        endOpacity: 0,
+        blending: THREE.AdditiveBlending,
+      },
     });
   }
 
@@ -413,43 +410,21 @@ export class ZarchFlyScene {
     const rotation = this.shipBody.rotation();
     this.shipModel.position.set(translation.x, translation.y, translation.z);
     this.shipModel.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
-
+    // this.particleSystem
     // Update thrust particles with new system
     if (this.shipModel) {
       // Calculate spawn point at ship's bottom
       const shipBottom = this.shipModel.position.clone();
       const thrustDirection = new THREE.Vector3(-1, 0, 0).applyQuaternion(this.shipModel.quaternion);
       shipBottom.addScaledVector(thrustDirection, 1.5);
-
-      // Update particle system position and rotation
-      this.thrustParticles.position.copy(shipBottom);
-      this.thrustParticles.rotation.setFromRotationMatrix(new THREE.Matrix4().lookAt(new THREE.Vector3(), thrustDirection, new THREE.Vector3(0, 1, 0)));
-
-      // Emit particles when thrust is active
+      this.particleSystem?.position.copy(this.shipModel.position);
+      const direction = new THREE.Vector3(0, -1, 0).applyQuaternion(this.shipModel.quaternion);
+      this.emitter.setDirection(direction); // Emit particles when thrust is active
       if (this.thrustActive) {
-        // Create new particles with appropriate properties
-        for (let i = 0; i < 5; i++) {
-          const particle = {
-            position: new THREE.Vector3(),
-            velocity: thrustDirection.clone().multiplyScalar(-10),
-            acceleration: new THREE.Vector3(),
-            rotation: Math.random() * Math.PI * 2,
-            angularVelocity: (Math.random() - 0.5) * 2,
-            size: 12.5,
-            color: new THREE.Color(0xff4400),
-            age: 0,
-            lifetime: 1.2,
-            active: true,
-          };
-          // The particle system will handle adding this to its internal array
-          this.thrustParticles.addParticle(particle);
-        }
+        this.particleSystem?.emit(1);
       }
-
-      // Update particle simulation
-      this.thrustParticles.update(1 / 60);
     }
-
+    this.particleSystem?.update(1 / 60);
     this.updateCamera(this.shipModel.position.clone());
     this.world.step();
     this.renderer.render(this.scene, this.camera);

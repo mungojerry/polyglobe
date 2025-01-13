@@ -1542,7 +1542,7 @@ export class ParticlePresets {
         behaviors: [
           new PlanetaryGravityBehavior({ strength: 2, center: position }),
           new VortexBehavior({ strength: 2, axis }),
-          new OscillationBehavior({ amplitude: 0.2, frequency: 3, axis: axis.clone().cross(new THREE.Vector3(0, 1, 0)) }),
+          new OscillationBehavior({ amplitude: 0.2, frequency: 2, axis: axis.clone().cross(new THREE.Vector3(0, 1, 0)) }),
         ],
         appearance: {
           startColor: color,
@@ -1556,10 +1556,16 @@ export class ParticlePresets {
       });
     };
 
+    const subSystems = [
+      createShell(1, new THREE.Vector3(0, 1, 0), new THREE.Color(0, 1, 1)),
+      createShell(1.5, new THREE.Vector3(1, 1, 0).normalize(), new THREE.Color(1, 0, 1)),
+      createShell(2, new THREE.Vector3(1, 0, 1).normalize(), new THREE.Color(0, 1, 1)),
+    ];
+
     // Add three electron shells on different planes
-    system.add(createShell(1, new THREE.Vector3(0, 1, 0), new THREE.Color(0, 1, 1)));
-    system.add(createShell(1.5, new THREE.Vector3(1, 1, 0).normalize(), new THREE.Color(0, 0.5, 1)));
-    system.add(createShell(2, new THREE.Vector3(1, 0, 1).normalize(), new THREE.Color(0.5, 0, 1)));
+    // system.add(...subSystems);
+
+    system.setChildren(subSystems);
 
     return system;
   }

@@ -33,6 +33,8 @@ export class ParticleSystem extends THREE.Object3D {
   private behaviors: ParticleBehavior[];
   private modifiers: ParticleModifier[];
 
+  private childen: ParticleSystem[] = [];
+
   private positions!: Float32Array;
   private colors!: Float32Array;
   private rotations!: Float32Array;
@@ -41,6 +43,24 @@ export class ParticleSystem extends THREE.Object3D {
 
   private getTrailBehavior(): TrailBehavior | undefined {
     return this.behaviors.find((b): b is TrailBehavior => b instanceof TrailBehavior);
+  }
+
+  public setChildren(child: ParticleSystem | ParticleSystem[]) {
+    if (Array.isArray(child)) {
+      this.childen.push(...child);
+      this.add(...child);
+    } else {
+      this.childen.push(child);
+      this.add(child);
+    }
+  }
+
+  public hasChildren() {
+    return this.childen.length > 0;
+  }
+
+  public getChildren() {
+    return this.childen;
   }
 
   private initializeTrailRendering(count: number) {

@@ -101,15 +101,53 @@ export class ParticleExampleScene {
     const effectSingle = [
       {
         name: "Comet",
-        creator: ParticlePresets.createCometTrailEffect,
+        creator: ParticlePresets.createAtomicModelEffect,
       },
     ];
-
+    const currentEffects = effectSingle;
     const { rows, cols, spacing } = this.effectsGrid;
-    const offsetX = ((cols - 1) * spacing) / 2;
-    const offsetZ = ((rows - 1) * spacing) / 2;
 
-    effects.forEach((effect, index) => {
+    const totalEffects = currentEffects.length;
+    const gridSize = Math.ceil(Math.sqrt(totalEffects));
+    const newRows = gridSize;
+    const newCols = gridSize;
+
+    const offsetX = ((newCols - 1) * spacing) / 2;
+    const offsetZ = ((newRows - 1) * spacing) / 2;
+
+    currentEffects.forEach((effect, index) => {
+      const row = Math.floor(index / newCols);
+      const col = index % newCols;
+
+      const position = new THREE.Vector3(col * spacing - offsetX, 10, row * spacing - offsetZ);
+
+      const particleSystem = effect.creator(position);
+      this.scene.add(particleSystem);
+      this.effects.set(effect.name, particleSystem);
+
+      // Add text label
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+      canvas.width = 256;
+      canvas.height = 64;
+
+      if (context) {
+        context.fillStyle = "#ffffff";
+        context.font = "24px Arial";
+        context.textAlign = "center";
+        context.fillText(effect.name, canvas.width / 2, canvas.height / 2);
+      }
+
+      const texture = new THREE.CanvasTexture(canvas);
+      const labelMaterial = new THREE.SpriteMaterial({ map: texture });
+      const label = new THREE.Sprite(labelMaterial);
+      label.position.copy(position);
+      label.position.y += 3;
+      label.scale.set(5, 1.25, 1);
+      this.scene.add(label);
+    });
+
+    effectSingle.forEach((effect, index) => {
       const accordion = controlManager.addAccordion(effect.name, effect.name);
 
       const row = Math.floor(index / cols);
@@ -118,6 +156,7 @@ export class ParticleExampleScene {
       const position = new THREE.Vector3(col * spacing - offsetX, 10, row * spacing - offsetZ);
 
       const particleSystem = effect.creator(position);
+
       this.scene.add(particleSystem);
       this.effects.set(effect.name, particleSystem);
 
@@ -158,6 +197,15 @@ export class ParticleExampleScene {
         // Very low emission rate for distinct trails
         effect.emit(3);
         effect.update(deltaTime);
+
+        if (effect.hasChildren()) {
+          effect.children.forEach((child) => {
+            if (child instanceof ParticleSystem) {
+              child.emit(3);
+              child.update(deltaTime);
+            }
+          });
+        }
       }
     });
 

@@ -1,9 +1,9 @@
-import { ParticleExampleScene } from "./core/scenes/ParticleExampleScene";
+import { ZarchFlyScene } from "./core/scenes/ZarchFlyScene";
 import "./style.css";
 
 console.log("starting...");
 // Create a test scene
 // const testScene = new FBXViewerScene();
 // const testScene = new GameScene();
-const testScene = new ParticleExampleScene();
+new ZarchFlyScene();
 console.log("should be running");
