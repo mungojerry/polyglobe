@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { BounceBehavior, DragBehavior, GravityBehavior, OscillationBehavior, PlanetaryGravityBehavior, VortexBehavior } from "./Behaviours";
+import { BounceBehavior, DragBehavior, GravityBehavior, OscillationBehavior, PlanetaryGravityBehavior, TrailBehavior, VortexBehavior } from "./Behaviours";
 import { BoxEmitter, ConeEmitter, CylinderEmitter, PointEmitter, RingEmitter, SphereEmitter } from "./Emitters";
 import { AttractorModifier, TurbulenceModifier } from "./Modifiers";
 import { ParticleSystem } from "./ParticleSystem";
@@ -501,37 +501,83 @@ export class ParticlePresets {
   }
 
   static createCometTrailEffect(position: THREE.Vector3 = new THREE.Vector3()): ParticleSystem {
-    return new ParticleSystem({
-      count: 500,
+    const system = new ParticleSystem({
+      count: 300, // Reduced for better performance
       emitter: new PointEmitter(position),
-      behaviors: [new GravityBehavior(1)],
+      behaviors: [new GravityBehavior(1), new DragBehavior(0.02)], // Added slight drag
       appearance: {
         startColor: new THREE.Color(1, 1, 1),
-        endColor: new THREE.Color(0.7, 0.7, 0.7),
-        startSize: 3,
+        endColor: new THREE.Color(0.7, 0.7, 1), // Added blue tint
+        startSize: 2,
         endSize: 0.1,
         startOpacity: 1,
         endOpacity: 0,
         blending: THREE.AdditiveBlending,
       },
     });
+
+    // Add trail behavior for comet effect
+    system.addBehavior(
+      new TrailBehavior({
+        length: 25,
+        fade: 0.98,
+        speedInfluence: true,
+        minLength: 20,
+        maxLength: 30,
+      })
+    );
+
+    // Configure initial velocities
+    const particles = system.particlePool["objects"];
+    particles.forEach((particle) => {
+      if (particle) {
+        particle.velocity.set(5, 0, 0); // Initial velocity for immediate trail effect
+      }
+    });
+
+    return system;
   }
 
   static createElectricArcEffect(position: THREE.Vector3 = new THREE.Vector3()): ParticleSystem {
-    return new ParticleSystem({
-      count: 300,
+    const system = new ParticleSystem({
+      count: 200, // Reduced count for better performance
       emitter: new SphereEmitter(position, 0.5),
-      behaviors: [new VortexBehavior(3)],
+      behaviors: [
+        new VortexBehavior(2), // Reduced for more controlled arcs
+        new TurbulenceModifier(0.3, 0.5), // Added for arc-like movement
+      ],
       appearance: {
-        startColor: new THREE.Color(0, 0.8, 1),
-        endColor: new THREE.Color(0, 0.3, 0.6),
-        startSize: 2,
-        endSize: 0.5,
+        startColor: new THREE.Color(0.3, 0.8, 1), // Brighter blue
+        endColor: new THREE.Color(0, 0.4, 1),
+        startSize: 1.5,
+        endSize: 0.3,
         startOpacity: 1,
         endOpacity: 0,
         blending: THREE.AdditiveBlending,
       },
     });
+
+    // Add trail behavior for electric arcs
+    system.addBehavior(
+      new TrailBehavior({
+        length: 15,
+        fade: 0.96,
+        speedInfluence: true,
+        minLength: 10,
+        maxLength: 20,
+      })
+    );
+
+    // Configure initial velocities
+    const particles = system.particlePool["objects"];
+    particles.forEach((particle) => {
+      if (particle) {
+        // Random initial velocity for varied arcs
+        particle.velocity.set(Math.random() * 4 - 2, Math.random() * 4 - 2, Math.random() * 4 - 2);
+      }
+    });
+
+    return system;
   }
 
   static createBoxEmitterEffect(position: THREE.Vector3 = new THREE.Vector3()): ParticleSystem {
@@ -854,11 +900,11 @@ export class ParticlePresets {
       },
     });
 
-    // Add inner glow
+    // Enhanced inner glow with trails
     const innerGlowSystem = new ParticleSystem({
-      count: 1000,
+      count: 800,
       emitter: new CylinderEmitter(emitterPos, 0.05, 8),
-      behaviors: [new DragBehavior(0.002)],
+      behaviors: [new DragBehavior(0.001)],
       appearance: {
         startColor: new THREE.Color(1, 0.3, 0.3),
         endColor: new THREE.Color(1, 0, 0),
@@ -1389,7 +1435,7 @@ export class ParticlePresets {
     return system;
   }
 
-  static createPlanetaryRingSystem(position: THREE.Vector3 = new THREE.Vector3()): ParticleSystem {
+  static createPlanetaryRingSystemEffect(position: THREE.Vector3 = new THREE.Vector3()): ParticleSystem {
     // Create the central planet
     const system = new ParticleSystem({
       count: 200,
@@ -1736,6 +1782,214 @@ export class ParticlePresets {
 
     system.add(foamSystem);
     system.add(spraySystem);
+    return system;
+  }
+
+  static createLightningStrikeEffect(position: THREE.Vector3 = new THREE.Vector3()): ParticleSystem {
+    const system = new ParticleSystem({
+      count: 100,
+      emitter: new PointEmitter(position),
+      behaviors: [
+        new GravityBehavior(0.1),
+        new TurbulenceModifier(0.2, 1),
+        new TrailBehavior({
+          length: 30,
+          fade: 0.98,
+          speedInfluence: true,
+          minLength: 20,
+          maxLength: 40,
+        }),
+      ],
+      appearance: {
+        startColor: new THREE.Color(0.9, 0.9, 1),
+        endColor: new THREE.Color(0.6, 0.8, 1),
+        startSize: 0.4,
+        endSize: 0.2,
+        startOpacity: 1,
+        endOpacity: 0,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    // Configure collision properties
+    const particle = system.particlePool["objects"][0];
+    if (particle) {
+      particle.radius = 0.2;
+      particle.elasticity = 0.8;
+      particle.subEmitOnCollision = true;
+      particle.subEmitCount = 5;
+      // Initialize with high velocity for better trail effects
+      particle.velocity.set(0, -10, 0);
+    }
+
+    // Add branching lightning
+    const branchSystem = new ParticleSystem({
+      count: 50,
+      emitter: new PointEmitter(position),
+      behaviors: [new GravityBehavior(0.05), new TurbulenceModifier(0.3, 0.5)],
+      appearance: {
+        startColor: new THREE.Color(0.8, 0.9, 1),
+        endColor: new THREE.Color(0.5, 0.7, 1),
+        startSize: 0.2,
+        endSize: 0.1,
+        startOpacity: 0.8,
+        endOpacity: 0,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    system.add(branchSystem);
+    return system;
+  }
+
+  static createBilliardBallsEffect(position: THREE.Vector3 = new THREE.Vector3()): ParticleSystem {
+    const system = new ParticleSystem({
+      count: 8, // Reduced count for better performance
+      emitter: new BoxEmitter(position, 3, 0.1, 3),
+      behaviors: [
+        new GravityBehavior(0),
+        new DragBehavior(0.05), // Increased drag for more realistic table friction
+        new BounceBehavior(0, 0.85), // Reduced bounce for more realistic behavior
+      ],
+      appearance: {
+        startColor: new THREE.Color(1, 1, 1),
+        endColor: new THREE.Color(1, 1, 1),
+        startSize: 0.3, // Smaller size for better scale
+        endSize: 0.3,
+        startOpacity: 1,
+        endOpacity: 1,
+        blending: THREE.NormalBlending,
+      },
+    });
+
+    // Add trail behavior for billiard balls
+    system.addBehavior(
+      new TrailBehavior({
+        length: 15,
+        fade: 0.97,
+        speedInfluence: true,
+        minLength: 10,
+        maxLength: 20,
+      })
+    );
+
+    // Configure collision properties
+    const particles = system.particlePool["objects"];
+    particles.forEach((particle, i) => {
+      if (particle) {
+        particle.radius = 0.15;
+        particle.elasticity = 0.8;
+        particle.friction = 0.4;
+        particle.subEmitOnCollision = true;
+        particle.subEmitCount = 2;
+        particle.color.setHSL(i / particles.length, 0.8, 0.5);
+      }
+    });
+
+    // Minimal collision effect system
+    const collisionSystem = new ParticleSystem({
+      count: 50, // Reduced count
+      emitter: new SphereEmitter(position, 0.1),
+      behaviors: [new GravityBehavior(0.2), new DragBehavior(0.2)],
+      appearance: {
+        startColor: new THREE.Color(1, 1, 0.8),
+        endColor: new THREE.Color(1, 0.8, 0.4),
+        startSize: 0.05,
+        endSize: 0,
+        startOpacity: 0.6,
+        endOpacity: 0,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    system.add(collisionSystem);
+    return system;
+  }
+
+  static createFireworksEffect(position: THREE.Vector3 = new THREE.Vector3()): ParticleSystem {
+    // Launch system with fewer particles
+    const system = new ParticleSystem({
+      count: 10, // Reduced count
+      emitter: new ConeEmitter(position, 0.1, 15), // Narrower cone for more directed launches
+      behaviors: [
+        new GravityBehavior(-4), // Stronger upward force
+        new DragBehavior(0.02), // Less drag for faster movement
+      ],
+      appearance: {
+        startColor: new THREE.Color(1, 0.6, 0.2),
+        endColor: new THREE.Color(1, 0.4, 0.1),
+        startSize: 0.2,
+        endSize: 0.1,
+        startOpacity: 1,
+        endOpacity: 0.8,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    // Add trail behavior for firework launches
+    system.addBehavior(
+      new TrailBehavior({
+        length: 20,
+        fade: 0.98,
+        speedInfluence: true,
+        minLength: 15,
+        maxLength: 25,
+      })
+    );
+
+    // Configure launch particles
+    const particles = system.particlePool["objects"];
+    particles.forEach((particle, i) => {
+      if (particle) {
+        particle.subEmitOnDeath = true;
+        particle.subEmitCount = 20;
+        particle.subEmitVelocityFactor = 1.2;
+        particle.subEmitInheritColor = true;
+        particle.lifetime = 1.5 + Math.random() * 0.5;
+        particle.color.setHSL(i / particles.length, 1, 0.5);
+      }
+    });
+
+    // More efficient explosion system
+    const explosionSystem = new ParticleSystem({
+      count: 400, // Reduced count
+      emitter: new SphereEmitter(position, 0.1),
+      behaviors: [
+        new GravityBehavior(1),
+        new DragBehavior(0.1),
+        new OscillationBehavior(0.5, 2), // Add sparkle effect
+      ],
+      appearance: {
+        startColor: new THREE.Color(1, 1, 1),
+        endColor: new THREE.Color(1, 0.8, 0.4),
+        startSize: 0.15,
+        endSize: 0,
+        startOpacity: 1,
+        endOpacity: 0,
+        blending: THREE.AdditiveBlending,
+      },
+    });
+
+    // Add trail behavior for explosion particles
+    explosionSystem.addBehavior(
+      new TrailBehavior({
+        length: 8,
+        fade: 0.95,
+        speedInfluence: true,
+        minLength: 5,
+        maxLength: 10,
+      })
+    );
+
+    // Configure explosion particles
+    const sparkles = explosionSystem.particlePool["objects"];
+    sparkles.forEach((particle) => {
+      if (particle) {
+        particle.lifetime = 0.8 + Math.random() * 0.4; // Shorter, varied lifetimes
+      }
+    });
+
+    system.add(explosionSystem);
     return system;
   }
 }

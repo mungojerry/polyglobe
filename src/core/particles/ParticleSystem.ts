@@ -15,7 +15,7 @@ interface ParticleSystemOptions {
 
 // Enhanced ParticleSystem class
 export class ParticleSystem extends THREE.Object3D {
-  private particlePool: ObjectPool<Particle>;
+  public particlePool: ObjectPool<Particle>;
   private geometry!: THREE.BufferGeometry<THREE.NormalBufferAttributes>;
   private material!: THREE.ShaderMaterial;
   private points!: THREE.Points<THREE.BufferGeometry<THREE.NormalBufferAttributes>, THREE.ShaderMaterial>;
@@ -61,6 +61,13 @@ export class ParticleSystem extends THREE.Object3D {
     // Create and add the appearance modifier
     this.appearanceModifier = new AppearanceModifier(appearance);
     this.modifiers = [...modifiers, this.appearanceModifier];
+
+    // Initialize sub-emitter support
+    this.modifiers.forEach((modifier) => {
+      if (typeof (modifier as any).setParticleSystem === "function") {
+        (modifier as any).setParticleSystem(this);
+      }
+    });
 
     this.initializeBuffers(count);
     this.initializeMaterial(appearance);
@@ -149,37 +156,59 @@ export class ParticleSystem extends THREE.Object3D {
   }
 
   private initializeGeometry(): void {
+    // Initialize particle geometry
     this.geometry = new THREE.BufferGeometry();
-
     this.geometry.setAttribute("position", new THREE.BufferAttribute(this.positions, 3));
     this.geometry.setAttribute("color", new THREE.BufferAttribute(this.colors, 3));
     this.geometry.setAttribute("rotation", new THREE.BufferAttribute(this.rotations, 3));
     this.geometry.setAttribute("scale", new THREE.BufferAttribute(this.scales, 1));
     this.geometry.setAttribute("opacity", new THREE.BufferAttribute(this.opacities, 1));
-
     this.points = new THREE.Points(this.geometry, this.material);
+
+    // Add points to the scene
     this.add(this.points);
+  }
+
+  // Helper method to create a particle with specific properties
+  createParticle(props: {
+    position: THREE.Vector3;
+    velocity: THREE.Vector3;
+    color?: THREE.Color;
+    lifetime?: number;
+    scale?: number;
+    parentParticle?: Particle;
+  }): Particle | null {
+    const particle = this.particlePool.acquire();
+    if (!particle) return null;
+
+    particle.position.copy(props.position);
+    particle.velocity.copy(props.velocity);
+    if (props.color) particle.color.copy(props.color);
+    particle.lifetime = props.lifetime ?? 2 + Math.random();
+    particle.scale = props.scale ?? 1;
+    particle.age = 0;
+    particle.parentParticle = props.parentParticle;
+
+    this.modifiers.forEach((modifier) => modifier.apply(particle));
+    return particle;
   }
 
   emit(count: number): void {
     for (let i = 0; i < count; i++) {
-      const particle = this.particlePool.acquire();
       const emissionPoint = this.emitter.getEmissionPoint();
       const direction = this.emitter.getEmissionDirection();
-
-      particle.position.copy(emissionPoint);
-      // Randomize initial velocity slightly for more natural variation
       const speed = 1.5 + Math.random() * 0.5; // Speed between 1.5 and 2
-      particle.velocity.copy(direction).multiplyScalar(speed);
-      particle.lifetime = 2 + Math.random();
-      particle.age = 0;
 
-      this.modifiers.forEach((modifier) => modifier.apply(particle));
+      this.createParticle({
+        position: emissionPoint,
+        velocity: direction.multiplyScalar(speed),
+      });
     }
   }
 
   update(deltaTime: number): void {
     let activeIndex = 0;
+
     const particles = this.particlePool["objects"]; // Access internal array for performance
 
     // Update particle states
@@ -189,6 +218,14 @@ export class ParticleSystem extends THREE.Object3D {
         particle.age += deltaTime;
 
         if (particle.age >= particle.lifetime) {
+          // Trigger death events before releasing
+          this.modifiers.forEach((modifier) => {
+            if ("onDeath" in modifier) {
+              if ("onDeath" in modifier && typeof modifier.onDeath === "function") {
+                modifier.onDeath(particle);
+              }
+            }
+          });
           this.particlePool.release(particle);
         } else {
           // Apply behaviors first to accumulate forces
@@ -200,19 +237,42 @@ export class ParticleSystem extends THREE.Object3D {
           // Apply appearance modifier update
           this.appearanceModifier.update(particle);
 
-          // Apply other modifiers
+          // Apply and update other modifiers
           this.modifiers.forEach((modifier) => {
             if (modifier !== this.appearanceModifier) {
               modifier.apply(particle);
+              if ("update" in modifier) {
+                if (typeof modifier.update === "function") {
+                  modifier.update(particle, deltaTime);
+                }
+              }
             }
           });
 
-          // Update buffers (only for active particles)
+          // Check for collisions
+          for (let j = i + 1; j < particles.length; j++) {
+            const other = particles[j];
+            if (particle.checkCollision(other)) {
+              particle.resolveCollision(other);
+              // Trigger collision events
+              this.modifiers.forEach((modifier) => {
+                if ("onCollision" in modifier) {
+                  if (typeof modifier.onCollision === "function") {
+                    modifier.onCollision(particle);
+                  }
+                  if (typeof modifier.onCollision === "function") {
+                    modifier.onCollision(other);
+                  }
+                }
+              });
+            }
+          }
+
+          // Update particle buffers
           const idx = activeIndex * 3;
           particle.position.toArray(this.positions, idx);
           particle.color.toArray(this.colors, idx);
           particle.rotation.toArray(this.rotations, idx);
-
           this.scales[activeIndex] = particle.scale;
           this.opacities[activeIndex] = particle.opacity;
 
@@ -251,6 +311,7 @@ export class ParticleSystem extends THREE.Object3D {
   dispose(): void {
     this.geometry.dispose();
     this.material.dispose();
+
     this.particlePool.clear();
   }
 

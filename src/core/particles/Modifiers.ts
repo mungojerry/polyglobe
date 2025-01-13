@@ -152,3 +152,102 @@ export class VelocityColorModifier implements ParticleModifier {
     particle.color.copy(this.coldColor).lerp(this.hotColor, t);
   }
 }
+
+// Configuration for sub-emitter behavior
+export interface SubEmitterConfig {
+  onCollision?: boolean;
+  onDeath?: boolean;
+  periodic?: boolean;
+  interval?: number;
+  count?: number;
+  velocityFactor?: number;
+  inheritColor?: boolean;
+  lifetime?: number;
+  scale?: number;
+}
+
+// Handles spawning of child particles
+export class SubEmitterModifier implements ParticleModifier {
+  private config: Required<SubEmitterConfig>;
+  private particleSystem: any; // Will be set by ParticleSystem
+  private currentTime: number;
+
+  constructor(config: SubEmitterConfig = {}) {
+    this.config = {
+      onCollision: config.onCollision ?? false,
+      onDeath: config.onDeath ?? false,
+      periodic: config.periodic ?? false,
+      interval: config.interval ?? 0.1,
+      count: config.count ?? 5,
+      velocityFactor: config.velocityFactor ?? 0.5,
+      inheritColor: config.inheritColor ?? true,
+      lifetime: config.lifetime ?? 1.0,
+      scale: config.scale ?? 0.5,
+    };
+    this.currentTime = 0;
+  }
+
+  setParticleSystem(system: any): void {
+    this.particleSystem = system;
+  }
+
+  apply(particle: Particle): void {
+    // Configure particle for sub-emission
+    particle.subEmitOnCollision = this.config.onCollision;
+    particle.subEmitOnDeath = this.config.onDeath;
+    particle.subEmitPeriodically = this.config.periodic;
+    particle.subEmitInterval = this.config.interval;
+    particle.subEmitCount = this.config.count;
+    particle.subEmitVelocityFactor = this.config.velocityFactor;
+    particle.subEmitInheritColor = this.config.inheritColor;
+  }
+
+  update(particle: Particle, deltaTime: number): void {
+    if (!this.particleSystem) return;
+
+    this.currentTime += deltaTime;
+
+    // Check for periodic emission
+    if (particle.shouldEmit(this.currentTime)) {
+      this.emitParticles(particle);
+    }
+  }
+
+  // Called by ParticleSystem when a particle collides
+  onCollision(particle: Particle): void {
+    if (particle.subEmitOnCollision) {
+      this.emitParticles(particle);
+    }
+  }
+
+  // Called by ParticleSystem when a particle dies
+  onDeath(particle: Particle): void {
+    if (particle.subEmitOnDeath) {
+      this.emitParticles(particle);
+    }
+  }
+
+  private emitParticles(parent: Particle): void {
+    if (!this.particleSystem) return;
+
+    for (let i = 0; i < parent.subEmitCount; i++) {
+      const { position, velocity, color } = parent.getSubParticleProperties();
+
+      // Create sub-particle through the particle system
+      const subParticle = this.particleSystem.createParticle({
+        position,
+        velocity,
+        color,
+        lifetime: this.config.lifetime,
+        scale: this.config.scale,
+        parentParticle: parent,
+      });
+
+      if (subParticle) {
+        // Additional customization for sub-particle
+        subParticle.mass = parent.mass * 0.5;
+        subParticle.radius = parent.radius * 0.5;
+      }
+    }
+  }
+}

@@ -28,6 +28,8 @@ export class ParticleExampleScene {
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
+    this.controls.enablePan = true;
+    this.controls.enableZoom = true;
 
     this.clock = new THREE.Clock();
     this.effects = new Map();
@@ -75,12 +77,19 @@ export class ParticleExampleScene {
   }
 
   private initEffects(): void {
-    const effects = Object.getOwnPropertyNames(ParticlePresets)
-      .filter((name) => name.startsWith("create"))
-      .map((name) => {
-        console.log(name);
-        return { name: name.replace("create", "").replace("Effect", ""), creator: (ParticlePresets as any)[name] };
-      });
+    // const effects = Object.getOwnPropertyNames(ParticlePresets)
+    //   .filter((name) => name.startsWith("create"))
+    //   .map((name) => {
+    //     console.log(name);
+    //     return { name: name.replace("create", "").replace("Effect", ""), creator: (ParticlePresets as any)[name] };
+    //   });
+
+    const effects = [
+      {
+        name: "Trails",
+        creator: ParticlePresets.createLightningStrikeEffect,
+      },
+    ];
 
     const { rows, cols, spacing } = this.effectsGrid;
     const offsetX = ((cols - 1) * spacing) / 2;
