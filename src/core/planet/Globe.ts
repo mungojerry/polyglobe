@@ -238,6 +238,16 @@ export class Globe {
   /** Land generation */
   private async buildLandGeometry(onProgress: ProgressCallback) {
     const landWorker = new LandGeometryGenerator();
+    // landWorker.addPrefabPlacement(generateRandomPosition(globeConfig.radius), 10);
+    // landWorker.addPrefabPlacement(generateRandomPosition(globeConfig.radius), 10);
+    // landWorker.addPrefabPlacement(generateRandomPosition(globeConfig.radius), 10);
+    // landWorker.addPrefabPlacement(generateRandomPosition(globeConfig.radius), 10);
+    // landWorker.addPrefabPlacement(generateRandomPosition(globeConfig.radius), 10);
+    // landWorker.addPrefabPlacement(generateRandomPosition(globeConfig.radius), 10);
+    // landWorker.addPrefabPlacement(generateRandomPosition(globeConfig.radius), 10);
+    // landWorker.addPrefabPlacement(generateRandomPosition(globeConfig.radius), 10);
+    // landWorker.addPrefabPlacement(generateRandomPosition(globeConfig.radius), 10);
+
     const geometry = await landWorker.generateLand(globeConfig.radius, globeConfig.detail, Math.random(), this.noise, onProgress);
 
     geometry.computeBoundingSphere();
