@@ -212,7 +212,6 @@ export class ZarchFlyScene {
   }
 
   emitter!: ConeEmitter;
-  private gravityBehavior!: PlanetaryGravityBehavior;
 
   createThrustEffect(position: THREE.Vector3 = new THREE.Vector3()): ParticleSystem {
     // Create emitter at position and point downward
@@ -220,25 +219,22 @@ export class ZarchFlyScene {
     // Even narrower cone angle (5 degrees) and faster initial velocity
     this.emitter = new ConeEmitter(
       emitterPos,
-      0.01, // Narrower spread
-      2, // Smaller cone angle
-      () => Math.random() * 3 + 2 // Faster initial velocity
+      0.1, // Narrower spread
+      3, // Smaller cone angle
+      () => Math.random() * 3 + 5 // Faster initial velocity
     );
     const direction = new THREE.Vector3(0, -1, 0);
     this.emitter.setDirection(direction);
-
-    // Create and store gravity behavior reference
-    this.gravityBehavior = new PlanetaryGravityBehavior({
-      center: new THREE.Vector3(0, 0, 0),
-      strength: 9.8, // Reduced gravity effect for better visibility
-    });
 
     return new ParticleSystem({
       count: 1000,
       emitter: this.emitter,
       behaviors: [
-        this.gravityBehavior,
-        new DragBehavior({ dragCoefficient: 0.05 }), // Less drag for longer trails
+        new PlanetaryGravityBehavior({
+          center: new THREE.Vector3(0, 0, 0),
+          strength: 9.8, // Reduced gravity effect for better visibility
+        }),
+        new DragBehavior({ dragCoefficient: 0.1 }), // Less drag for longer trails
       ],
       appearance: {
         startColor: new THREE.Color(1, 0.8, 0.3),
@@ -299,6 +295,7 @@ export class ZarchFlyScene {
 
     this.world.createCollider(colliderDesc, this.planetBody);
   }
+
   private updateRotation(): void {
     if (!this.shipBody) return;
 
@@ -306,9 +303,10 @@ export class ZarchFlyScene {
     const pos = this.shipBody.translation();
     const planetUp = new THREE.Vector3(pos.x, pos.y, pos.z).normalize();
 
-    // Update pitch and roll based on mouse input
-    this.currentPitch = THREE.MathUtils.lerp(this.currentPitch, -this.mouseY * MAX_PITCH, ROTATION_RATE);
-    this.currentRoll = THREE.MathUtils.lerp(this.currentRoll, this.mouseX * MAX_ROLL, ROTATION_RATE);
+    // Update pitch and roll based on mouse input, but invert based on hemisphere
+    const upDot = planetUp.y; // dot product with world up to determine hemisphere
+    this.currentPitch = THREE.MathUtils.lerp(this.currentPitch, this.mouseY * MAX_PITCH * Math.sign(upDot), ROTATION_RATE);
+    this.currentRoll = THREE.MathUtils.lerp(this.currentRoll, this.mouseX * MAX_ROLL * Math.sign(upDot), ROTATION_RATE);
 
     // Start with base orientation aligned to planet surface
     const baseQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), planetUp);
