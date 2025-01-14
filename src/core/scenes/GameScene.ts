@@ -98,7 +98,7 @@ export class GameScene {
     this.world = new World(new Vector3(0, 0, 0));
     this.eventQueue = new EventQueue(false);
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 40000);
+    this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 4000);
     this.renderer = new THREE.WebGLRenderer();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.toneMapping = THREE.CineonToneMapping;
@@ -137,7 +137,7 @@ export class GameScene {
     this.cameraAttachedTo = this.player.getObject();
 
     this.dynamicBodies.push({ body: this.player.getBody(), mesh: this.player.getObject() });
-    this.camera.position.set(0, this.player.getPosition().y, 0);
+    this.camera.position.set(0, this.globe.getRadius() * 2, 0);
 
     this.debugMesh = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xffffff, vertexColors: true }));
     this.debugMesh.frustumCulled = false;

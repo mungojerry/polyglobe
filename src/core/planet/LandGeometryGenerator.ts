@@ -7,40 +7,34 @@ import { BaseNoise } from "./noise/BaseNoise";
 import { terrainHelper } from "./terrainHelper";
 
 interface PrefabPlacement {
-  position: THREE.Vector3; // Position in spherical coordinates
-  radius: number; // Radius of the flat area
+  direction: THREE.Vector3;
+  radius: number;
+  innerRadius: number; // radius of fully flat area
+  outerRadius: number; // radius of blend zone
 }
 
 export class LandGeometryGenerator {
   private prefabs: PrefabPlacement[] = [];
-  constructor() {}
+  private paintItRed: boolean = true;
+
   public addPrefabPlacement(position: THREE.Vector3, radius: number) {
-    // Normalize the position to ensure it's on the sphere surface
-    const normalized = position.clone().normalize();
-    this.prefabs.push({ position: normalized, radius });
+    this.prefabs.push({
+      direction: position.clone().normalize(),
+      radius,
+      innerRadius: radius * 0.7, // Core flat area
+      outerRadius: radius, // Full influence radius
+    });
   }
 
-  private isInPrefabArea(nx: number, ny: number, nz: number): PrefabPlacement | null {
-    const point = new THREE.Vector3(nx, ny, nz);
+  private computeBlendFactor(distance: number, innerRadius: number, outerRadius: number): number {
+    if (distance <= innerRadius) return 1.0;
+    if (distance >= outerRadius) return 0.0;
 
-    for (const prefab of this.prefabs) {
-      // Calculate angular distance between point and prefab center
-      const angle = Math.acos(point.dot(prefab.position));
-
-      // If within prefab radius (converted to radians), return the prefab
-      if (angle < prefab.radius / prefab.position.length()) {
-        return prefab;
-      }
-    }
-
-    return null;
+    // Smooth step function for better transition
+    const x = (distance - innerRadius) / (outerRadius - innerRadius);
+    return 1 - x * x * (3 - 2 * x);
   }
 
-  private smoothStepToFlat(distance: number, radius: number): number {
-    // Create a smooth transition from normal terrain to flat area
-    const t = Math.max(0, Math.min(1, distance / radius));
-    return t * t * (3 - 2 * t);
-  }
   public async generateLand(radius: number, detail: number, seed: number, noise: BaseNoise, onProgress?: ProgressCallback): Promise<BufferGeometry> {
     const start = performance.now();
     const geometry = new BufferGeometry();
@@ -67,40 +61,67 @@ export class LandGeometryGenerator {
         const y = posArray[idx + 1];
         const z = posArray[idx + 2];
 
-        const length = Math.sqrt(x * x + y * y + z * z);
-        const nx = x / length;
-        const ny = y / length;
-        const nz = z / length;
-        const latitude = Math.asin(ny);
+        const point = new THREE.Vector3(x, y, z);
+        const direction = point.clone().normalize();
+        const latitude = Math.asin(direction.y);
 
-        // Check if point is in a prefab area
-        const prefab = this.isInPrefabArea(x, y, z);
-        let elevation;
-        let height = terrainHelper.computeSurfaceHeight(nx, ny, nz);
+        // Get the normal terrain height
+        const normalHeight = terrainHelper.computeSurfaceHeight(direction.x, direction.y, direction.z);
+        let finalHeight = normalHeight;
+        let totalWeight = 0;
+        let maxBlendFactor = 0;
 
-        if (prefab) {
-          // For prefab areas, use a fixed elevation based on the prefab's position
-          height = terrainHelper.computeSurfaceHeight(prefab.position.x, prefab.position.y, prefab.position.z);
-          const point = new THREE.Vector3(x, y, z);
-          const angle = Math.acos(point.dot(prefab.position));
-          const blend = this.smoothStepToFlat(angle, prefab.radius / prefab.position.length());
+        // Process all prefab influences
+        for (const prefab of this.prefabs) {
+          const angle = direction.angleTo(prefab.direction);
+          const surfaceDistance = angle * radius;
 
-          const normalElevation = terrainHelper.computeSurfaceHeight(nx, ny, nz);
-          elevation = terrainHelper.computeElevationMultiplier(normalElevation * blend + height * (1 - blend));
-        } else {
-          // Normal terrain generation
-          elevation = terrainHelper.computeElevationMultiplier(height);
+          if (surfaceDistance < prefab.outerRadius) {
+            const blendFactor = this.computeBlendFactor(surfaceDistance, prefab.innerRadius, prefab.outerRadius);
+
+            if (blendFactor > 0) {
+              // For flat areas, we want the height at the center of the prefab
+              const prefabHeight = terrainHelper.computeSurfaceHeight(prefab.direction.x, prefab.direction.y, prefab.direction.z);
+
+              totalWeight += blendFactor;
+              finalHeight = finalHeight * (1 - blendFactor) + prefabHeight * blendFactor;
+              maxBlendFactor = Math.max(maxBlendFactor, blendFactor);
+            }
+          }
         }
 
+        // Normalize if we have multiple influences
+        if (totalWeight > 1) {
+          finalHeight = normalHeight * (1 - totalWeight) + finalHeight;
+        }
+
+        // Calculate final elevation multiplier
+        const elevation = terrainHelper.computeElevationMultiplier(finalHeight);
+
+        // Color handling
+        if (maxBlendFactor > 0) {
+          // Blend between terrain color and flattened area color
+          const terrainColor = getTerrainColor(normalHeight, latitude);
+          if (this.paintItRed) {
+            colors[idx] = 1;
+            colors[idx + 1] = 0;
+            colors[idx + 2] = 0;
+          } else {
+            colors[idx] = terrainColor.r * (1 - maxBlendFactor) + 0.8 * maxBlendFactor;
+            colors[idx + 1] = terrainColor.g * (1 - maxBlendFactor) + 0.7 * maxBlendFactor;
+            colors[idx + 2] = terrainColor.b * (1 - maxBlendFactor) + 0.7 * maxBlendFactor;
+          }
+        } else {
+          const color = getTerrainColor(normalHeight, latitude);
+          colors[idx] = color.r;
+          colors[idx + 1] = color.g;
+          colors[idx + 2] = color.b;
+        }
+
+        // Apply final position
         vertices[idx] = x * elevation;
         vertices[idx + 1] = y * elevation;
         vertices[idx + 2] = z * elevation;
-
-        // const height = elevation / (radius + 0.2);
-        const color = getTerrainColor(height, latitude);
-        colors[idx] = color.r;
-        colors[idx + 1] = color.g;
-        colors[idx + 2] = color.b;
 
         indices[j] = j;
       }
@@ -116,7 +137,6 @@ export class LandGeometryGenerator {
 
     const end = performance.now();
     debugManager.set("landGeometry", "land geometry time: " + (end - start).toFixed(4));
-    console.log("land geometry generator complete");
     return geometry;
   }
 
@@ -126,8 +146,6 @@ export class LandGeometryGenerator {
     }
 
     debugManager.set("landProgress", `Land: ${progress.toFixed(1)}%`);
-
-    /// this does await the timeout!!!
     await yieldToMainThread();
   }
 }

@@ -12,7 +12,7 @@ export class Cloud {
     this.cloudMesh = new THREE.Group();
 
     // Set random size and position for each cloud
-    this.scaleFactor = scaleFactor * (3 + Math.random() * 9);
+    this.scaleFactor = scaleFactor * (5 + Math.random() * 9);
     this.distance = radius + 10 + Math.random() * 140;
 
     // Random initial spherical coordinates

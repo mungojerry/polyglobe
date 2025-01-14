@@ -5,7 +5,7 @@ import { mergeVertices } from "three-stdlib";
 import { Water } from "../effects/Water";
 import { debugManager } from "../managers/debugManager";
 import { pseudoRandom } from "../utils/PseudoRandom";
-import { ProgressCallback } from "../utils/utils";
+import { generateRandomPosition, ProgressCallback } from "../utils/utils";
 import { GlobeChunk } from "./GlobeChunk";
 import { GlobeChunkGenerator } from "./GlobeChunkGenerator";
 import { Infection } from "./Infection";
@@ -197,7 +197,7 @@ export class Globe {
 
   private buildWater() {
     this.water = new Water(this.waterLevel, Math.round(globeConfig.detail / 3));
-    this.object.add(this.water.getObject());
+    // this.object.add(this.water.getObject());
   }
 
   private buildEquatorWall() {
@@ -238,7 +238,8 @@ export class Globe {
   /** Land generation */
   private async buildLandGeometry(onProgress: ProgressCallback) {
     const landWorker = new LandGeometryGenerator();
-    // landWorker.addPrefabPlacement(generateRandomPosition(globeConfig.radius), 10);
+    landWorker.addPrefabPlacement(generateRandomPosition(globeConfig.radius * 1), 100);
+    landWorker.addPrefabPlacement(new THREE.Vector3(), 100);
     // landWorker.addPrefabPlacement(generateRandomPosition(globeConfig.radius), 10);
     // landWorker.addPrefabPlacement(generateRandomPosition(globeConfig.radius), 10);
     // landWorker.addPrefabPlacement(generateRandomPosition(globeConfig.radius), 10);
