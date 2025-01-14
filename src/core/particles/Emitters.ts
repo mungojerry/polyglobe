@@ -3,7 +3,10 @@ import * as THREE from "three";
 export interface ParticleEmitterShape {
   getEmissionPoint(): THREE.Vector3;
   getEmissionDirection(): THREE.Vector3;
+  getEmissionSpeed(): number;
 }
+
+const DEFAULT_SPEED = () => 1.5 + Math.random() * 0.5;
 
 // Cone emitter for directional particle emission
 export class ConeEmitter implements ParticleEmitterShape {
@@ -15,9 +18,10 @@ export class ConeEmitter implements ParticleEmitterShape {
   private direction: THREE.Vector3;
   private quat: THREE.Quaternion;
 
-  constructor(position: THREE.Vector3 = new THREE.Vector3(), radius: number = 1, angle: number = 30) {
+  constructor(position: THREE.Vector3 = new THREE.Vector3(), emissionSpeed: () => number = DEFAULT_SPEED, radius: number = 1, angle: number = 30) {
     this.position = position.clone();
     this.radius = radius;
+    this.getEmissionSpeed = emissionSpeed;
     this.angle = (angle * Math.PI) / 180; // Convert to radians
 
     this.quat = new THREE.Quaternion();
@@ -69,13 +73,18 @@ export class ConeEmitter implements ParticleEmitterShape {
     // Rotate to align with emission direction
     return v.applyQuaternion(this.quat);
   }
+
+  getEmissionSpeed() {
+    return 1.5 + Math.random() * 0.5;
+  }
 }
 
 export class PointEmitter implements ParticleEmitterShape {
   private position: THREE.Vector3;
 
-  constructor(position: THREE.Vector3 = new THREE.Vector3()) {
+  constructor(position: THREE.Vector3 = new THREE.Vector3(), emissionSpeed: () => number = DEFAULT_SPEED) {
     this.position = position.clone();
+    this.getEmissionSpeed = emissionSpeed;
   }
 
   getEmissionPoint(): THREE.Vector3 {
@@ -84,6 +93,10 @@ export class PointEmitter implements ParticleEmitterShape {
 
   getEmissionDirection(): THREE.Vector3 {
     return new THREE.Vector3((Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2).normalize();
+  }
+
+  getEmissionSpeed() {
+    return 1.5 + Math.random() * 0.5;
   }
 }
 
@@ -109,6 +122,10 @@ export class SphereEmitter implements ParticleEmitterShape {
   getEmissionDirection(): THREE.Vector3 {
     // Get direction from center to emission point
     return this.tempVector.clone().sub(this.position).normalize();
+  }
+
+  getEmissionSpeed() {
+    return 1.5 + Math.random() * 0.5;
   }
 }
 
@@ -136,6 +153,10 @@ export class BoxEmitter implements ParticleEmitterShape {
 
   getEmissionDirection(): THREE.Vector3 {
     return new THREE.Vector3((Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2).normalize();
+  }
+
+  getEmissionSpeed() {
+    return 1.5 + Math.random() * 0.5;
   }
 }
 
@@ -165,6 +186,10 @@ export class CylinderEmitter implements ParticleEmitterShape {
   getEmissionDirection(): THREE.Vector3 {
     return new THREE.Vector3((Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2).normalize();
   }
+
+  getEmissionSpeed() {
+    return 1.5 + Math.random() * 0.5;
+  }
 }
 
 export class RingEmitter implements ParticleEmitterShape {
@@ -191,5 +216,9 @@ export class RingEmitter implements ParticleEmitterShape {
   getEmissionDirection(): THREE.Vector3 {
     // Emit outward from the ring center
     return this.tempVector.clone().sub(this.position).normalize();
+  }
+
+  getEmissionSpeed() {
+    return 1.5 + Math.random() * 0.5;
   }
 }

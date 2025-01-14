@@ -2,9 +2,8 @@ import RAPIER from "@dimforge/rapier3d";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise";
-import { DragBehavior, GravityBehavior } from "../particles/Behaviors";
+import { PlanetaryGravityBehavior } from "../particles/Behaviors";
 import { ConeEmitter } from "../particles/Emitters";
-import { RandomVelocityModifier, TurbulenceModifier } from "../particles/Modifiers";
 import { ParticleSystem } from "../particles/ParticleSystem";
 import { vectorPool } from "../utils/vectorPool";
 
@@ -216,14 +215,14 @@ export class ZarchFlyScene {
   createThrustEffect(position: THREE.Vector3 = new THREE.Vector3()): ParticleSystem {
     // Create emitter at position and point downward
     const emitterPos = position.clone();
-    this.emitter = new ConeEmitter(emitterPos, 0.15, 15);
+    this.emitter = new ConeEmitter(emitterPos, () => Math.random() * 3 + 2, 0.05, 15);
     const direction = new THREE.Vector3(0, -1, 0);
     this.emitter.setDirection(direction);
     return new ParticleSystem({
       count: 1000,
       emitter: this.emitter,
-      behaviors: [new GravityBehavior({ gravity: 9.8 }), new DragBehavior({ dragCoefficient: 0.1 }), new TurbulenceModifier(0.2, 0.5)],
-      modifiers: [new RandomVelocityModifier(3, 5)],
+      behaviors: [new PlanetaryGravityBehavior({ strength: 19.8 })], //, new DragBehavior({ dragCoefficient: 0.1 }), new TurbulenceModifier(0.2, 0.5)],
+
       appearance: {
         startColor: new THREE.Color(1, 0.8, 0.3),
         endColor: new THREE.Color(1, 0.2, 0),

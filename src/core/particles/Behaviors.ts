@@ -190,36 +190,34 @@ export interface PlanetaryGravityOptions {
 export class PlanetaryGravityBehavior implements ParticleBehavior {
   private center: THREE.Vector3;
   private strength: number;
-  private force: THREE.Vector3;
-  private direction: THREE.Vector3;
   private minDistance: number;
   private maxForce: number;
 
   constructor(options: PlanetaryGravityOptions = {}) {
     this.center = options.center ? options.center.clone() : new THREE.Vector3();
     this.strength = options.strength ?? 5;
-    this.force = new THREE.Vector3();
-    this.direction = new THREE.Vector3();
     this.minDistance = 0.1; // Minimum distance to prevent extreme forces
     this.maxForce = 100; // Maximum force cap to prevent instability
   }
 
   update(particle: Particle, deltaTime: number): void {
-    // Calculate direction to center
-    this.direction.subVectors(this.center, particle.position);
-    const distanceSquared = this.direction.lengthSq();
+    // Calculate direction from center to particle (was reversed in original)
+    const direction = this.center.clone().sub(particle.position);
+    const distanceSquared = direction.lengthSq();
 
     if (distanceSquared === 0) return;
 
     // Use clamped distance to prevent extreme forces near center
     const clampedDistanceSquared = Math.max(distanceSquared, this.minDistance * this.minDistance);
 
-    // Calculate force magnitude using inverse square law (like real gravity)
-    const forceMagnitude = Math.min((this.strength * particle.mass) / clampedDistanceSquared, this.maxForce * particle.mass);
-
+    // Calculate force magnitude using inverse square law
+    const forceMagnitude = (this.strength * particle.mass) / clampedDistanceSquared;
+    console.log(forceMagnitude);
     // Apply force towards center
-    this.force.copy(this.direction).normalize().multiplyScalar(forceMagnitude);
-    particle.applyForce(this.force);
+
+    const v = direction.clone().normalize().multiplyScalar(forceMagnitude);
+
+    particle.applyForce(v);
   }
 }
 

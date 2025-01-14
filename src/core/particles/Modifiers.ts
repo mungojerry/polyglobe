@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { Particle } from "./Particle";
+import { ParticleSystem } from "./ParticleSystem";
 export interface ParticleModifier {
   apply(particle: Particle): void;
   update?(particle: Particle, deltaTime: number): void;
@@ -133,20 +134,6 @@ export class AttractorModifier implements ParticleModifier {
   }
 }
 
-export class RandomVelocityModifier implements ParticleModifier {
-  private minSpeed: number;
-  private maxSpeed: number;
-
-  constructor(minSpeed = 0, maxSpeed = 5) {
-    this.minSpeed = minSpeed;
-    this.maxSpeed = maxSpeed;
-  }
-
-  apply(particle: Particle): void {
-    particle.velocity.normalize().multiplyScalar(Math.random() * (this.maxSpeed - this.minSpeed) + this.minSpeed);
-  }
-}
-
 // Modifies particle color based on velocity
 export class VelocityColorModifier implements ParticleModifier {
   private minSpeed: number;
@@ -184,7 +171,7 @@ export interface SubEmitterConfig {
 // Handles spawning of child particles
 export class SubEmitterModifier implements ParticleModifier {
   private config: Required<SubEmitterConfig>;
-  private particleSystem: any; // Will be set by ParticleSystem
+  private particleSystem: ParticleSystem | undefined; // Will be set by ParticleSystem
   private currentTime: number;
 
   constructor(config: SubEmitterConfig = {}) {
@@ -228,14 +215,12 @@ export class SubEmitterModifier implements ParticleModifier {
     }
   }
 
-  // Called by ParticleSystem when a particle collides
   onCollision(particle: Particle): void {
     if (particle.subEmitOnCollision) {
       this.emitParticles(particle);
     }
   }
 
-  // Called by ParticleSystem when a particle dies
   onDeath(particle: Particle): void {
     if (particle.subEmitOnDeath) {
       this.emitParticles(particle);

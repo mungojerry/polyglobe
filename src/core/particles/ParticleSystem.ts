@@ -261,7 +261,7 @@ export class ParticleSystem extends THREE.Object3D {
     for (let i = 0; i < count; i++) {
       const emissionPoint = this.emitter.getEmissionPoint();
       const direction = this.emitter.getEmissionDirection();
-      const speed = 1.5 + Math.random() * 0.5; // Speed between 1.5 and 2
+      const speed = this.emitter.getEmissionSpeed();
 
       this.createParticle({
         position: emissionPoint,
