@@ -2,7 +2,7 @@ import RAPIER from "@dimforge/rapier3d";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise";
-import { PlanetaryGravityBehavior } from "../particles/Behaviors";
+import { DragBehavior, PlanetaryGravityBehavior } from "../particles/Behaviors";
 import { ConeEmitter } from "../particles/Emitters";
 import { ParticleSystem } from "../particles/ParticleSystem";
 import { vectorPool } from "../utils/vectorPool";
@@ -212,23 +212,40 @@ export class ZarchFlyScene {
   }
 
   emitter!: ConeEmitter;
+  private gravityBehavior!: PlanetaryGravityBehavior;
+
   createThrustEffect(position: THREE.Vector3 = new THREE.Vector3()): ParticleSystem {
     // Create emitter at position and point downward
     const emitterPos = position.clone();
-    this.emitter = new ConeEmitter(emitterPos, () => Math.random() * 3 + 2, 0.05, 15);
+    // Even narrower cone angle (5 degrees) and faster initial velocity
+    this.emitter = new ConeEmitter(
+      emitterPos,
+      0.01, // Narrower spread
+      2, // Smaller cone angle
+      () => Math.random() * 3 + 2 // Faster initial velocity
+    );
     const direction = new THREE.Vector3(0, -1, 0);
     this.emitter.setDirection(direction);
+
+    // Create and store gravity behavior reference
+    this.gravityBehavior = new PlanetaryGravityBehavior({
+      center: new THREE.Vector3(0, 0, 0),
+      strength: 9.8, // Reduced gravity effect for better visibility
+    });
+
     return new ParticleSystem({
       count: 1000,
       emitter: this.emitter,
-      behaviors: [new PlanetaryGravityBehavior({ strength: 19.8 })], //, new DragBehavior({ dragCoefficient: 0.1 }), new TurbulenceModifier(0.2, 0.5)],
-
+      behaviors: [
+        this.gravityBehavior,
+        new DragBehavior({ dragCoefficient: 0.05 }), // Less drag for longer trails
+      ],
       appearance: {
         startColor: new THREE.Color(1, 0.8, 0.3),
         endColor: new THREE.Color(1, 0.2, 0),
-        startSize: 0.5,
+        startSize: 0.5, // Increased initial size
         endSize: 0.1,
-        startOpacity: 1,
+        startOpacity: 0.8, // Slightly reduced initial opacity
         endOpacity: 0,
         blending: THREE.AdditiveBlending,
       },
@@ -411,17 +428,19 @@ export class ZarchFlyScene {
     this.shipModel.position.set(translation.x, translation.y, translation.z);
     this.shipModel.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
     // this.particleSystem
-    // Update thrust particles with new system
+    // Update thrust particles
     if (this.shipModel) {
-      // Calculate spawn point at ship's bottom
-      const shipBottom = this.shipModel.position.clone();
-      const thrustDirection = new THREE.Vector3(-1, 0, 0).applyQuaternion(this.shipModel.quaternion);
-      shipBottom.addScaledVector(thrustDirection, 1.5);
+      // Update particle system position and gravity center
       this.particleSystem?.position.copy(this.shipModel.position);
-      const direction = new THREE.Vector3(0, -1, 0).applyQuaternion(this.shipModel.quaternion);
-      this.emitter.setDirection(direction); // Emit particles when thrust is active
+
+      // Calculate emission direction based on ship's orientation
+      const rotation = this.shipModel.quaternion;
+      const direction = new THREE.Vector3(0, -1, 0).applyQuaternion(rotation);
+      this.emitter.setDirection(direction);
+
+      // Emit particles when thrust is active
       if (this.thrustActive) {
-        this.particleSystem?.emit(1);
+        this.particleSystem?.emit(2); // Increased emission rate
       }
     }
     this.particleSystem?.update(1 / 60);

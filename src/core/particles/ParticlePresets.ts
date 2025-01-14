@@ -15,7 +15,7 @@ export class ParticlePresets {
       count: 1000,
       emitter,
       behaviors: [
-        new GravityBehavior({ gravity: -2 }), // Strong upward force
+        new GravityBehavior({ strength: -2 }), // Strong upward force
         new DragBehavior({ dragCoefficient: 0.1 }), // Air resistance
         new TurbulenceModifier(0.2, 0.5), // Slight turbulence
       ],
@@ -42,7 +42,7 @@ export class ParticlePresets {
       emitter,
       behaviors: [
         new VortexBehavior({ strength: 0.2 }), // Reduced strength for more stable swirling
-        new GravityBehavior({ gravity: -1.5 }),
+        new GravityBehavior({ strength: -1.5 }),
         new DragBehavior({ dragCoefficient: 0.15 }), // Increased drag to stabilize motion
       ],
       appearance: {
@@ -60,7 +60,7 @@ export class ParticlePresets {
     const emberSystem = new ParticleSystem({
       count: 200,
       emitter: new SphereEmitter(position, 0.2),
-      behaviors: [new GravityBehavior({ gravity: -0.5 }), new VortexBehavior({ strength: 0.2 }), new OscillationBehavior({ amplitude: 0.2, frequency: 2 })],
+      behaviors: [new GravityBehavior({ strength: -0.5 }), new VortexBehavior({ strength: 0.2 }), new OscillationBehavior({ amplitude: 0.2, frequency: 2 })],
       appearance: {
         startColor: new THREE.Color(1, 1, 0.3),
         endColor: new THREE.Color(1, 0.3, 0),
@@ -85,7 +85,7 @@ export class ParticlePresets {
     return new ParticleSystem({
       count: 300,
       emitter,
-      behaviors: [new GravityBehavior({ gravity: -0.15 }), new DragBehavior({ dragCoefficient: 0.02 }), new TurbulenceModifier(0.1, 0.3)],
+      behaviors: [new GravityBehavior({ strength: -0.15 }), new DragBehavior({ dragCoefficient: 0.02 }), new TurbulenceModifier(0.1, 0.3)],
       appearance: {
         startColor: new THREE.Color(0.8, 0.8, 0.8),
         endColor: new THREE.Color(0.2, 0.2, 0.2),
@@ -103,7 +103,7 @@ export class ParticlePresets {
       count: 150,
       emitter: new SphereEmitter(position, 1),
       behaviors: [
-        new GravityBehavior({ gravity: 0.3 }),
+        new GravityBehavior({ strength: 0.3 }),
         new OscillationBehavior({ amplitude: 0.2, frequency: 4 }),
         new DragBehavior({ dragCoefficient: 0.01 }),
       ],
@@ -124,7 +124,7 @@ export class ParticlePresets {
       count: 2000,
       emitter: new BoxEmitter(position, 20, 0.1, 20), // Wide area rain
       behaviors: [
-        new GravityBehavior({ gravity: 9.81 }),
+        new GravityBehavior({ strength: 9.81 }),
         new DragBehavior({ dragCoefficient: 0.1 }), // Air resistance
       ],
       appearance: {
@@ -142,7 +142,7 @@ export class ParticlePresets {
     const splashSystem = new ParticleSystem({
       count: 500,
       emitter: new RingEmitter(new THREE.Vector3(0, 0, 0), 0.1, 0.3),
-      behaviors: [new GravityBehavior({ gravity: 3 }), new DragBehavior({ dragCoefficient: 0.2 })],
+      behaviors: [new GravityBehavior({ strength: 3 }), new DragBehavior({ dragCoefficient: 0.2 })],
       appearance: {
         startColor: new THREE.Color(0.8, 0.8, 1),
         endColor: new THREE.Color(0.7, 0.7, 1),
@@ -163,7 +163,7 @@ export class ParticlePresets {
       count: 1000,
       emitter: new BoxEmitter(position, 20, 0.1, 20),
       behaviors: [
-        new GravityBehavior({ gravity: 0.3 }),
+        new GravityBehavior({ strength: 0.3 }),
         new VortexBehavior({ strength: 0.08 }), // Reduced for gentler swirling
         new DragBehavior({ dragCoefficient: 0.15 }), // Increased for more floating effect
         new OscillationBehavior({ amplitude: 0.2, frequency: 0.3 }), // Gentler oscillation
@@ -190,7 +190,7 @@ export class ParticlePresets {
       count: 1000,
       emitter,
       behaviors: [
-        new GravityBehavior({ gravity: -0.5 }),
+        new GravityBehavior({ strength: -0.5 }),
         new DragBehavior({ dragCoefficient: 0.05 }),
         new OscillationBehavior({ amplitude: 0.1, frequency: 3 }),
       ],
@@ -269,7 +269,7 @@ export class ParticlePresets {
     const system = new ParticleSystem({
       count: 1500,
       emitter: new SphereEmitter(position, 0.1),
-      behaviors: [new GravityBehavior({ gravity: 1 }), new DragBehavior({ dragCoefficient: 0.05 }), new TurbulenceModifier(0.3, 1)],
+      behaviors: [new GravityBehavior({ strength: 1 }), new DragBehavior({ dragCoefficient: 0.05 }), new TurbulenceModifier(0.3, 1)],
       appearance: {
         startColor: new THREE.Color(1, 0.8, 0.2),
         endColor: new THREE.Color(1, 0.2, 0),
@@ -285,7 +285,7 @@ export class ParticlePresets {
     const shockwaveSystem = new ParticleSystem({
       count: 200,
       emitter: new RingEmitter(position, 0, 0.1),
-      behaviors: [new GravityBehavior({ gravity: 0 }), new DragBehavior({ dragCoefficient: 0.01 })],
+      behaviors: [new GravityBehavior({ strength: 0 }), new DragBehavior({ dragCoefficient: 0.01 })],
       appearance: {
         startColor: new THREE.Color(1, 1, 1),
         endColor: new THREE.Color(1, 0.5, 0),
@@ -301,7 +301,7 @@ export class ParticlePresets {
     const debrisSystem = new ParticleSystem({
       count: 300,
       emitter: new SphereEmitter(position, 0.2),
-      behaviors: [new GravityBehavior({ gravity: 9.81 }), new DragBehavior({ dragCoefficient: 0.1 }), new BounceBehavior(0, 0.6)],
+      behaviors: [new GravityBehavior({ strength: 9.81 }), new DragBehavior({ dragCoefficient: 0.1 }), new BounceBehavior(0, 0.6)],
       appearance: {
         startColor: new THREE.Color(0.6, 0.6, 0.6),
         endColor: new THREE.Color(0.3, 0.3, 0.3),
@@ -322,7 +322,7 @@ export class ParticlePresets {
     const system = new ParticleSystem({
       count: 300,
       emitter: new SphereEmitter(position, 1),
-      behaviors: [new GravityBehavior({ gravity: -0.3 }), new VortexBehavior({ strength: 0.8 }), new OscillationBehavior({ amplitude: 0.5, frequency: 2 })],
+      behaviors: [new GravityBehavior({ strength: -0.3 }), new VortexBehavior({ strength: 0.8 }), new OscillationBehavior({ amplitude: 0.5, frequency: 2 })],
       appearance: {
         startColor: new THREE.Color(0.8, 0.2, 1),
         endColor: new THREE.Color(0.2, 0.8, 1),
@@ -358,7 +358,7 @@ export class ParticlePresets {
     return new ParticleSystem({
       count: 300,
       emitter: new SphereEmitter(position, 1),
-      behaviors: [new GravityBehavior({ gravity: -0.1 }), new VortexBehavior({ strength: 0.2 })],
+      behaviors: [new GravityBehavior({ strength: -0.1 }), new VortexBehavior({ strength: 0.2 })],
       appearance: {
         startColor: new THREE.Color(0.3, 1, 0),
         endColor: new THREE.Color(0.1, 0.3, 0),
@@ -375,7 +375,7 @@ export class ParticlePresets {
     const system = new ParticleSystem({
       count: 2000,
       emitter: new BoxEmitter(position, 2, 0.1, 0.5),
-      behaviors: [new GravityBehavior({ gravity: 9.81 }), new DragBehavior({ dragCoefficient: 0.1 }), new TurbulenceModifier(0.05, 0.5)],
+      behaviors: [new GravityBehavior({ strength: 9.81 }), new DragBehavior({ dragCoefficient: 0.1 }), new TurbulenceModifier(0.05, 0.5)],
       appearance: {
         startColor: new THREE.Color(0.6, 0.8, 1),
         endColor: new THREE.Color(0.4, 0.6, 1),
@@ -391,7 +391,7 @@ export class ParticlePresets {
     const mistSystem = new ParticleSystem({
       count: 500,
       emitter: new BoxEmitter(new THREE.Vector3(position.x, position.y - 2, position.z), 3, 1, 1),
-      behaviors: [new GravityBehavior({ gravity: -0.1 }), new VortexBehavior({ strength: 0.2 }), new TurbulenceModifier(0.1, 0.3)],
+      behaviors: [new GravityBehavior({ strength: -0.1 }), new VortexBehavior({ strength: 0.2 }), new TurbulenceModifier(0.1, 0.3)],
       appearance: {
         startColor: new THREE.Color(0.8, 0.9, 1),
         endColor: new THREE.Color(0.7, 0.8, 1),
@@ -407,7 +407,7 @@ export class ParticlePresets {
     const splashSystem = new ParticleSystem({
       count: 300,
       emitter: new RingEmitter(new THREE.Vector3(position.x, position.y - 2, position.z), 0.2, 1),
-      behaviors: [new GravityBehavior({ gravity: 4 }), new DragBehavior({ dragCoefficient: 0.2 })],
+      behaviors: [new GravityBehavior({ strength: 4 }), new DragBehavior({ dragCoefficient: 0.2 })],
       appearance: {
         startColor: new THREE.Color(0.7, 0.8, 1),
         endColor: new THREE.Color(0.6, 0.7, 1),
@@ -598,7 +598,7 @@ export class ParticlePresets {
     return new ParticleSystem({
       count: 500,
       emitter: new BoxEmitter(position, 2, 2, 2),
-      behaviors: [new GravityBehavior({ gravity: -0.2 })],
+      behaviors: [new GravityBehavior({ strength: -0.2 })],
       appearance: {
         startColor: new THREE.Color(0.2, 0.7, 1),
         endColor: new THREE.Color(0, 0, 0.8),
@@ -615,7 +615,7 @@ export class ParticlePresets {
     return new ParticleSystem({
       count: 600,
       emitter: new CylinderEmitter(position, 1, 3),
-      behaviors: [new GravityBehavior({ gravity: 0.3 })],
+      behaviors: [new GravityBehavior({ strength: 0.3 })],
       appearance: {
         startColor: new THREE.Color(1, 0.3, 0.3),
         endColor: new THREE.Color(1, 0, 0),
@@ -707,7 +707,7 @@ export class ParticlePresets {
       emitter: new CylinderEmitter(position, 2, 4),
       behaviors: [
         new VortexBehavior({ strength: 2 }), // Strong vortex force
-        new GravityBehavior({ gravity: -0.5 }), // Slight upward pull
+        new GravityBehavior({ strength: -0.5 }), // Slight upward pull
         new TurbulenceModifier(0.4, 1), // Chaotic movement
       ],
       appearance: {
@@ -725,7 +725,7 @@ export class ParticlePresets {
     const debrisSystem = new ParticleSystem({
       count: 300,
       emitter: new CylinderEmitter(position, 2.2, 4.2),
-      behaviors: [new VortexBehavior({ strength: 1.5 }), new GravityBehavior({ gravity: 0.2 }), new BounceBehavior(0, 0.4)],
+      behaviors: [new VortexBehavior({ strength: 1.5 }), new GravityBehavior({ strength: 0.2 }), new BounceBehavior(0, 0.4)],
       appearance: {
         startColor: new THREE.Color(0.4, 0.3, 0.2), // Brown
         endColor: new THREE.Color(0.2, 0.15, 0.1),
@@ -746,7 +746,7 @@ export class ParticlePresets {
       count: 500,
       emitter: new SphereEmitter(position, 0.1),
       behaviors: [
-        new GravityBehavior({ gravity: 5 }),
+        new GravityBehavior({ strength: 5 }),
         new BounceBehavior(0, 0.8), // High bounce factor
         new DragBehavior({ dragCoefficient: 0.05 }),
       ],
@@ -765,7 +765,7 @@ export class ParticlePresets {
     const sparkleSystem = new ParticleSystem({
       count: 200,
       emitter: new SphereEmitter(position, 0.2),
-      behaviors: [new GravityBehavior({ gravity: 4 }), new OscillationBehavior({ amplitude: 0.8, frequency: 4 })],
+      behaviors: [new GravityBehavior({ strength: 4 }), new OscillationBehavior({ amplitude: 0.8, frequency: 4 })],
       appearance: {
         startColor: new THREE.Color(1, 1, 1),
         endColor: new THREE.Color(0.7, 0.9, 1),
@@ -786,7 +786,7 @@ export class ParticlePresets {
       count: 600,
       emitter: new SphereEmitter(position, 1),
       behaviors: [
-        new GravityBehavior({ gravity: -0.1 }), // Gentle upward drift
+        new GravityBehavior({ strength: -0.1 }), // Gentle upward drift
         new OscillationBehavior({ amplitude: 0.2, frequency: 1 }), // Gentle wave motion
         new VortexBehavior({ strength: 0.15 }), // Very slight spin
       ],
@@ -805,7 +805,7 @@ export class ParticlePresets {
     const symbolSystem = new ParticleSystem({
       count: 100,
       emitter: new SphereEmitter(position, 1.2),
-      behaviors: [new GravityBehavior({ gravity: -0.2 }), new OscillationBehavior({ amplitude: 0.3, frequency: 2 })],
+      behaviors: [new GravityBehavior({ strength: -0.2 }), new OscillationBehavior({ amplitude: 0.3, frequency: 2 })],
       appearance: {
         startColor: new THREE.Color(1, 1, 0.8), // Warm white
         endColor: new THREE.Color(0.7, 1, 0.8), // Pale green
@@ -861,7 +861,7 @@ export class ParticlePresets {
     const system = new ParticleSystem({
       count: 400,
       emitter: new SphereEmitter(position, 1),
-      behaviors: [new VortexBehavior({ strength: 0.4 }), new GravityBehavior({ gravity: -0.1 }), new OscillationBehavior({ amplitude: 0.3, frequency: 3 })],
+      behaviors: [new VortexBehavior({ strength: 0.4 }), new GravityBehavior({ strength: -0.1 }), new OscillationBehavior({ amplitude: 0.3, frequency: 3 })],
       appearance: {
         startColor: new THREE.Color(1, 0.9, 0.6), // Warm gold
         endColor: new THREE.Color(1, 0.7, 0.9), // Pink tint
@@ -1014,7 +1014,7 @@ export class ParticlePresets {
       emitter: new SphereEmitter(position, 3),
       behaviors: [
         new VortexBehavior({ strength: 4 }), // Strong inward spiral
-        new GravityBehavior({ gravity: 2 }), // Pull towards center
+        new GravityBehavior({ strength: 2 }), // Pull towards center
         new TurbulenceModifier(0.8, 2), // Chaotic movement near event horizon
       ],
       appearance: {
@@ -1173,7 +1173,7 @@ export class ParticlePresets {
       count: 100,
       emitter: new CylinderEmitter(position, 1.2, 2.8),
       behaviors: [
-        new GravityBehavior({ gravity: 4 }),
+        new GravityBehavior({ strength: 4 }),
         new BounceBehavior(0, 0.8), // Bouncy pearls
         new DragBehavior({ dragCoefficient: 0.3 }), // Liquid resistance
       ],
@@ -1239,7 +1239,7 @@ export class ParticlePresets {
       emitter: new CylinderEmitter(position, 1, 5),
       behaviors: [
         new VortexBehavior({ strength: 3 }), // Strong spiral
-        new GravityBehavior({ gravity: -1 }), // Upward lift
+        new GravityBehavior({ strength: -1 }), // Upward lift
         new OscillationBehavior({ amplitude: 0.5, frequency: 2 }), // Wobbly movement
       ],
       appearance: {
@@ -1374,7 +1374,7 @@ export class ParticlePresets {
       emitter: new CylinderEmitter(position, 3, 0.5),
       behaviors: [
         new VortexBehavior({ strength: 2, axis: new THREE.Vector3(0, 1, 0) }),
-        new GravityBehavior({ gravity: 0.5 }),
+        new GravityBehavior({ strength: 0.5 }),
         new BounceBehavior(-2, 0.95), // High restitution for elastic bounces
       ],
       appearance: {
@@ -1392,7 +1392,7 @@ export class ParticlePresets {
     const starSystem = new ParticleSystem({
       count: 300,
       emitter: new SphereEmitter(position, 2),
-      behaviors: [new GravityBehavior({ gravity: 1 }), new BounceBehavior(-2, 0.9), new OscillationBehavior({ amplitude: 0.2, frequency: 3 })],
+      behaviors: [new GravityBehavior({ strength: 1 }), new BounceBehavior(-2, 0.9), new OscillationBehavior({ amplitude: 0.2, frequency: 3 })],
       appearance: {
         startColor: new THREE.Color(1, 1, 0.8),
         endColor: new THREE.Color(1, 0.8, 0.4),
@@ -1576,7 +1576,7 @@ export class ParticlePresets {
       emitter: new BoxEmitter(position, 0.2, 4, 0.2),
       behaviors: [
         new OscillationBehavior({ amplitude: 1, frequency: 2, axis: new THREE.Vector3(1, 0, 0) }),
-        new GravityBehavior({ gravity: 0.5 }),
+        new GravityBehavior({ strength: 0.5 }),
         new DragBehavior({ dragCoefficient: 0.1 }),
       ],
       appearance: {
@@ -1597,7 +1597,7 @@ export class ParticlePresets {
         emitter: new BoxEmitter(new THREE.Vector3(position.x, position.y - i * 1.5, position.z), 0.2, 4, 0.2),
         behaviors: [
           new OscillationBehavior({ amplitude: 1, frequency: 2 / (i + 1), axis: new THREE.Vector3(1, 0, 0) }),
-          new GravityBehavior({ gravity: 0.5 }),
+          new GravityBehavior({ strength: 0.5 }),
           new DragBehavior({ dragCoefficient: 0.1 * i }),
         ],
         appearance: {
@@ -1621,7 +1621,7 @@ export class ParticlePresets {
     const system = new ParticleSystem({
       count: 500,
       emitter: new ConeEmitter(position, 0.5, 30),
-      behaviors: [new GravityBehavior({ gravity: -0.5 }), new DragBehavior({ dragCoefficient: 0.1 })],
+      behaviors: [new GravityBehavior({ strength: -0.5 }), new DragBehavior({ dragCoefficient: 0.1 })],
       appearance: {
         startColor: new THREE.Color(1, 0.2, 0.5),
         endColor: new THREE.Color(0.5, 0.1, 0.2),
@@ -1685,7 +1685,7 @@ export class ParticlePresets {
     const cylinderSystem = new ParticleSystem({
       count: 400,
       emitter: new CylinderEmitter(new THREE.Vector3(position.x, position.y - 3, position.z), 0.5, 2),
-      behaviors: [new VortexBehavior({ strength: 0.8 }), new GravityBehavior({ gravity: -0.2 })],
+      behaviors: [new VortexBehavior({ strength: 0.8 }), new GravityBehavior({ strength: -0.2 })],
       appearance: {
         startColor: new THREE.Color(0.2, 0.5, 1),
         endColor: new THREE.Color(0.1, 0.2, 0.5),
@@ -1726,7 +1726,7 @@ export class ParticlePresets {
     const system = new ParticleSystem({
       count: 800,
       emitter: new CylinderEmitter(position, 1, 4),
-      behaviors: [new GravityBehavior({ gravity: -0.2 }), new VortexBehavior({ strength: 0.3 }), new OscillationBehavior({ amplitude: 0.2, frequency: 1 })],
+      behaviors: [new GravityBehavior({ strength: -0.2 }), new VortexBehavior({ strength: 0.3 }), new OscillationBehavior({ amplitude: 0.2, frequency: 1 })],
       appearance: {
         startColor: new THREE.Color(1, 0.2, 0),
         endColor: new THREE.Color(0.8, 0.1, 0),
@@ -1746,7 +1746,7 @@ export class ParticlePresets {
           new THREE.Vector3(position.x + Math.sin((i * Math.PI * 2) / 3) * 0.3, position.y + i - 1, position.z + Math.cos((i * Math.PI * 2) / 3) * 0.3),
           0.4
         ),
-        behaviors: [new GravityBehavior({ gravity: -0.1 - Math.random() * 0.2 }), new OscillationBehavior({ amplitude: 0.1, frequency: 0.5 })],
+        behaviors: [new GravityBehavior({ strength: -0.1 - Math.random() * 0.2 }), new OscillationBehavior({ amplitude: 0.1, frequency: 0.5 })],
         appearance: {
           startColor: new THREE.Color(1, 0.3, 0),
           endColor: new THREE.Color(0.9, 0.2, 0),
@@ -1771,7 +1771,7 @@ export class ParticlePresets {
       behaviors: [
         new OscillationBehavior({ amplitude: 1, frequency: 0.5, axis: new THREE.Vector3(0, 1, 0) }),
         new VortexBehavior({ strength: 0.3, axis: new THREE.Vector3(0, 0, 1) }),
-        new GravityBehavior({ gravity: -0.2 }),
+        new GravityBehavior({ strength: -0.2 }),
       ],
       appearance: {
         startColor: new THREE.Color(0.2, 0.5, 1),
@@ -1808,7 +1808,7 @@ export class ParticlePresets {
     const spraySystem = new ParticleSystem({
       count: 300,
       emitter: new BoxEmitter(position, 9, 4.5, 2.5),
-      behaviors: [new GravityBehavior({ gravity: 1 }), new TurbulenceModifier(0.3, 1), new DragBehavior({ dragCoefficient: 0.1 })],
+      behaviors: [new GravityBehavior({ strength: 1 }), new TurbulenceModifier(0.3, 1), new DragBehavior({ dragCoefficient: 0.1 })],
       appearance: {
         startColor: new THREE.Color(0.8, 0.9, 1),
         endColor: new THREE.Color(0.6, 0.8, 1),
@@ -1830,7 +1830,7 @@ export class ParticlePresets {
       count: 20, // Reduced count for more distinct bolts
       emitter: new PointEmitter(position),
       behaviors: [
-        new GravityBehavior({ gravity: 0.05 }), // Reduced gravity
+        new GravityBehavior({ strength: 0.05 }), // Reduced gravity
         new TurbulenceModifier(0.4, 0.5), // Increased turbulence, smaller scale
         new TrailBehavior({
           length: 30,
@@ -1872,7 +1872,7 @@ export class ParticlePresets {
       count: 30,
       emitter: new PointEmitter(position),
       behaviors: [
-        new GravityBehavior({ gravity: 0.05 }),
+        new GravityBehavior({ strength: 0.05 }),
         new TurbulenceModifier(0.5, 0.3),
         new TrailBehavior({
           length: 15,
@@ -1918,7 +1918,7 @@ export class ParticlePresets {
       count: 8, // Reduced count for better performance
       emitter: new BoxEmitter(position, 3, 0.1, 3),
       behaviors: [
-        new GravityBehavior({ gravity: 0 }),
+        new GravityBehavior({ strength: 0 }),
         new DragBehavior({ dragCoefficient: 0.05 }), // Increased drag for more realistic table friction
         new BounceBehavior(0, 0.85), // Reduced bounce for more realistic behavior
       ],
@@ -1961,7 +1961,7 @@ export class ParticlePresets {
     const collisionSystem = new ParticleSystem({
       count: 50, // Reduced count
       emitter: new SphereEmitter(position, 0.1),
-      behaviors: [new GravityBehavior({ gravity: 0.2 }), new DragBehavior({ dragCoefficient: 0.2 })],
+      behaviors: [new GravityBehavior({ strength: 0.2 }), new DragBehavior({ dragCoefficient: 0.2 })],
       appearance: {
         startColor: new THREE.Color(1, 1, 0.8),
         endColor: new THREE.Color(1, 0.8, 0.4),
@@ -1983,7 +1983,7 @@ export class ParticlePresets {
       count: 10, // Reduced count
       emitter: new ConeEmitter(position, 0.1, 15), // Narrower cone for more directed launches
       behaviors: [
-        new GravityBehavior({ gravity: -4 }), // Stronger upward force
+        new GravityBehavior({ strength: -4 }), // Stronger upward force
         new DragBehavior({ dragCoefficient: 0.02 }), // Less drag for faster movement
       ],
       appearance: {
@@ -2026,7 +2026,7 @@ export class ParticlePresets {
       count: 400, // Reduced count
       emitter: new SphereEmitter(position, 0.1),
       behaviors: [
-        new GravityBehavior({ gravity: 1 }),
+        new GravityBehavior({ strength: 1 }),
         new DragBehavior({ dragCoefficient: 0.1 }),
         new OscillationBehavior({ amplitude: 0.5, frequency: 2 }), // Add sparkle effect
       ],

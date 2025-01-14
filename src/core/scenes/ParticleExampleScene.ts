@@ -104,7 +104,7 @@ export class ParticleExampleScene {
         creator: ParticlePresets.createAtomicModelEffect,
       },
     ];
-    const currentEffects = effectSingle;
+    const currentEffects = effects;
     const { rows, cols, spacing } = this.effectsGrid;
 
     const totalEffects = currentEffects.length;

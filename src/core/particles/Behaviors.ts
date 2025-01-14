@@ -2,11 +2,11 @@ import * as THREE from "three";
 import { Particle } from "./Particle";
 
 export interface ParticleBehavior {
-  update(particle: Particle, deltaTime: number): void;
+  update(particle: Particle, deltaTime: number, worldPostion?: THREE.Vector3): void;
 }
 
 export interface GravityOptions {
-  gravity?: number;
+  strength?: number;
 }
 // Particle behaviors
 export class GravityBehavior implements ParticleBehavior {
@@ -15,7 +15,7 @@ export class GravityBehavior implements ParticleBehavior {
   private force: THREE.Vector3;
 
   constructor(options: GravityOptions = {}) {
-    this.gravity = options.gravity ?? 9.81;
+    this.gravity = options.strength ?? 9.81;
     this.gravityVector = new THREE.Vector3(0, -this.gravity, 0);
     this.force = new THREE.Vector3();
   }
@@ -191,33 +191,22 @@ export class PlanetaryGravityBehavior implements ParticleBehavior {
   private center: THREE.Vector3;
   private strength: number;
   private minDistance: number;
-  private maxForce: number;
 
   constructor(options: PlanetaryGravityOptions = {}) {
     this.center = options.center ? options.center.clone() : new THREE.Vector3();
     this.strength = options.strength ?? 5;
     this.minDistance = 0.1; // Minimum distance to prevent extreme forces
-    this.maxForce = 100; // Maximum force cap to prevent instability
   }
 
-  update(particle: Particle, deltaTime: number): void {
-    // Calculate direction from center to particle (was reversed in original)
-    const direction = this.center.clone().sub(particle.position);
+  update(particle: Particle, deltaTime: number, worldPosition: THREE.Vector3): void {
+    const particleWorldPos = particle.position.clone().add(worldPosition);
+    const direction = particleWorldPos.sub(this.center);
     const distanceSquared = direction.lengthSq();
-
     if (distanceSquared === 0) return;
 
-    // Use clamped distance to prevent extreme forces near center
-    const clampedDistanceSquared = Math.max(distanceSquared, this.minDistance * this.minDistance);
-
-    // Calculate force magnitude using inverse square law
-    const forceMagnitude = (this.strength * particle.mass) / clampedDistanceSquared;
-    console.log(forceMagnitude);
-    // Apply force towards center
-
-    const v = direction.clone().normalize().multiplyScalar(forceMagnitude);
-
-    particle.applyForce(v);
+    const forceMagnitude = this.strength * particle.mass; // / clampedDistanceSquared;
+    const force = direction.normalize().multiplyScalar(-forceMagnitude);
+    particle.applyForce(force);
   }
 }
 

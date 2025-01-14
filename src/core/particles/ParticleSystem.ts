@@ -11,6 +11,7 @@ interface ParticleSystemOptions {
   behaviors?: ParticleBehavior[];
   modifiers?: ParticleModifier[];
   appearance?: ParticleAppearance;
+  debugVelocities?: boolean;
 }
 
 // Enhanced ParticleSystem class
@@ -29,6 +30,10 @@ export class ParticleSystem extends THREE.Object3D {
   private trailColors?: Float32Array;
   private hasTrailBehavior: boolean = false;
 
+  private velocityPositions?: Float32Array;
+  private velocityGeometry?: THREE.BufferGeometry;
+  private velocityLine?: THREE.LineSegments;
+
   private emitter: ParticleEmitterShape;
   private behaviors: ParticleBehavior[];
   private modifiers: ParticleModifier[];
@@ -40,6 +45,8 @@ export class ParticleSystem extends THREE.Object3D {
   private rotations!: Float32Array;
   private scales!: Float32Array;
   private opacities!: Float32Array;
+
+  private debugVelocities: boolean = false;
 
   private getTrailBehavior(): TrailBehavior | undefined {
     return this.behaviors.find((b): b is TrailBehavior => b instanceof TrailBehavior);
@@ -90,10 +97,21 @@ export class ParticleSystem extends THREE.Object3D {
     this.add(this.trails);
   }
 
+  private initializeVelocityRendering(count: number) {
+    // Each particle has 2 points (start + end) => 6 floats per particle
+    this.velocityPositions = new Float32Array(count * 6);
+    this.velocityGeometry = new THREE.BufferGeometry();
+    this.velocityGeometry.setAttribute("position", new THREE.BufferAttribute(this.velocityPositions, 3));
+
+    const material = new THREE.LineBasicMaterial({ color: 0xff0000 });
+    this.velocityLine = new THREE.LineSegments(this.velocityGeometry, material);
+    this.add(this.velocityLine);
+  }
+
   constructor(options: ParticleSystemOptions = {}) {
     super();
     this.hasTrailBehavior = options.behaviors?.some((b) => b instanceof TrailBehavior) ?? false;
-
+    this.debugVelocities = options.debugVelocities ?? false;
     const {
       count = 10000,
       emitter = new PointEmitter(),
@@ -143,6 +161,9 @@ export class ParticleSystem extends THREE.Object3D {
 
     if (this.hasTrailBehavior) {
       this.initializeTrailRendering(count);
+    }
+    if (this.debugVelocities) {
+      this.initializeVelocityRendering(count);
     }
   }
 
@@ -258,14 +279,20 @@ export class ParticleSystem extends THREE.Object3D {
   }
 
   emit(count: number): void {
+    // Get world transform matrix
+    const worldMatrix = this.matrixWorld;
+    const worldRotation = new THREE.Quaternion();
+    worldMatrix.decompose(new THREE.Vector3(), worldRotation, new THREE.Vector3());
+
     for (let i = 0; i < count; i++) {
-      const emissionPoint = this.emitter.getEmissionPoint();
-      const direction = this.emitter.getEmissionDirection();
+      // Get emission data in local space
+      const localEmissionPoint = this.emitter.getEmissionPoint();
+      const localDirection = this.emitter.getEmissionDirection();
       const speed = this.emitter.getEmissionSpeed();
 
       this.createParticle({
-        position: emissionPoint,
-        velocity: direction.multiplyScalar(speed),
+        position: localEmissionPoint,
+        velocity: localDirection.multiplyScalar(speed),
       });
     }
   }
@@ -274,6 +301,7 @@ export class ParticleSystem extends THREE.Object3D {
     let activeIndex = 0;
 
     const particles = this.particlePool.activeObjects; // Access internal array for performance
+    let velIdx = 0;
     // Update particle states
     for (let i = 0; i < particles.length; i++) {
       const particle = particles[i];
@@ -290,7 +318,7 @@ export class ParticleSystem extends THREE.Object3D {
           this.particlePool.release(particle);
         } else {
           // Apply behaviors first to accumulate forces
-          this.behaviors.forEach((behavior) => behavior.update(particle, deltaTime));
+          this.behaviors.forEach((behavior) => behavior.update(particle, deltaTime, this.getWorldPosition(this.position)));
 
           // Integrate physics
           particle.integrate(deltaTime);
@@ -331,6 +359,17 @@ export class ParticleSystem extends THREE.Object3D {
 
           this.updateTrail(particle, activeIndex);
 
+          if (this.debugVelocities) {
+            // Update velocity line segment positions
+            this.velocityPositions![velIdx] = particle.position.x;
+            this.velocityPositions![velIdx + 1] = particle.position.y;
+            this.velocityPositions![velIdx + 2] = particle.position.z;
+            this.velocityPositions![velIdx + 3] = particle.position.x + particle.velocity.x;
+            this.velocityPositions![velIdx + 4] = particle.position.y + particle.velocity.y;
+            this.velocityPositions![velIdx + 5] = particle.position.z + particle.velocity.z;
+            velIdx += 6;
+          }
+
           activeIndex++;
         }
       }
@@ -351,6 +390,11 @@ export class ParticleSystem extends THREE.Object3D {
     this.geometry.attributes.rotation.needsUpdate = true;
     this.geometry.attributes.scale.needsUpdate = true;
     this.geometry.attributes.opacity.needsUpdate = true;
+
+    if (this.debugVelocities && this.velocityGeometry && this.velocityPositions) {
+      this.velocityGeometry.setDrawRange(0, velIdx / 3);
+      this.velocityGeometry.attributes.position.needsUpdate = true;
+    }
   }
 
   updateTrail(particle: Particle, activeIndex: number) {

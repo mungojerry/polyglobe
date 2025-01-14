@@ -18,7 +18,7 @@ export class ConeEmitter implements ParticleEmitterShape {
   private direction: THREE.Vector3;
   private quat: THREE.Quaternion;
 
-  constructor(position: THREE.Vector3 = new THREE.Vector3(), emissionSpeed: () => number = DEFAULT_SPEED, radius: number = 1, angle: number = 30) {
+  constructor(position: THREE.Vector3 = new THREE.Vector3(), radius: number = 1, angle: number = 30, emissionSpeed: () => number = DEFAULT_SPEED) {
     this.position = position.clone();
     this.radius = radius;
     this.getEmissionSpeed = emissionSpeed;

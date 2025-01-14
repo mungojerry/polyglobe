@@ -102,7 +102,6 @@ export class Particle {
   applyForce(force: THREE.Vector3): void {
     // F = ma -> a = F/m
     this.acceleration.add(force.clone().divideScalar(this.mass));
-    console.log(this.acceleration);
   }
 
   // Helper method to check if particle should emit based on time
