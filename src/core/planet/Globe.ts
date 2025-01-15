@@ -11,7 +11,7 @@ import { GlobeChunkGenerator } from "./GlobeChunkGenerator";
 import { Infection } from "./Infection";
 import { LandGeometryGenerator } from "./LandGeometryGenerator";
 import { BaseNoise } from "./noise/BaseNoise";
-import { DiamondSquareNoise } from "./noise/DiamonSquareNoise";
+import { TerrainNoise } from "./noise/TerrainNoise";
 import { TerrainDeformer } from "./TerrainDeformer";
 const globeConfig = {
   showWall: false,
@@ -45,7 +45,7 @@ export class Globe {
 
   public waterLevel: number = 0;
   public terrainClickAllowed: boolean = false;
-  public noise: BaseNoise = new DiamondSquareNoise();
+  public noise: BaseNoise = new TerrainNoise();
 
   private landGeometry!: THREE.BufferGeometry;
   private rigidBody!: RAPIER.RigidBody;
@@ -239,15 +239,15 @@ export class Globe {
   private async buildLandGeometry(onProgress: ProgressCallback) {
     const landWorker = new LandGeometryGenerator();
     landWorker.addPrefabPlacement(generateRandomPosition(globeConfig.radius * 1), 100);
-    landWorker.addPrefabPlacement(new THREE.Vector3(), 100);
-    // landWorker.addPrefabPlacement(generateRandomPosition(globeConfig.radius), 10);
-    // landWorker.addPrefabPlacement(generateRandomPosition(globeConfig.radius), 10);
-    // landWorker.addPrefabPlacement(generateRandomPosition(globeConfig.radius), 10);
-    // landWorker.addPrefabPlacement(generateRandomPosition(globeConfig.radius), 10);
-    // landWorker.addPrefabPlacement(generateRandomPosition(globeConfig.radius), 10);
-    // landWorker.addPrefabPlacement(generateRandomPosition(globeConfig.radius), 10);
-    // landWorker.addPrefabPlacement(generateRandomPosition(globeConfig.radius), 10);
-    // landWorker.addPrefabPlacement(generateRandomPosition(globeConfig.radius), 10);
+
+    landWorker.addPrefabPlacement(generateRandomPosition(globeConfig.radius), 100);
+    landWorker.addPrefabPlacement(generateRandomPosition(globeConfig.radius), 100);
+    landWorker.addPrefabPlacement(generateRandomPosition(globeConfig.radius), 100);
+    landWorker.addPrefabPlacement(generateRandomPosition(globeConfig.radius), 100);
+    landWorker.addPrefabPlacement(generateRandomPosition(globeConfig.radius), 100);
+    landWorker.addPrefabPlacement(generateRandomPosition(globeConfig.radius), 100);
+    landWorker.addPrefabPlacement(generateRandomPosition(globeConfig.radius), 100);
+    landWorker.addPrefabPlacement(generateRandomPosition(globeConfig.radius), 100);
 
     const geometry = await landWorker.generateLand(globeConfig.radius, globeConfig.detail, Math.random(), this.noise, onProgress);
 

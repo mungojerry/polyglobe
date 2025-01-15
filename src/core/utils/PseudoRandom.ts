@@ -1,11 +1,11 @@
-class PseudoRandomNumberGenerator {
+export class PseudoRandomNumberGenerator {
   private static instance: PseudoRandomNumberGenerator | null = null;
   private seed: number = 23000;
   private readonly a: number = 1664525; // Multiplier
   private readonly c: number = 1013904223; // Increment
   private readonly m: number = 4294967296; // Modulus (2^32)
 
-  private constructor(seed: number) {
+  constructor(seed: number) {
     this.seed = seed;
   }
 

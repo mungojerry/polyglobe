@@ -36,55 +36,53 @@ type BiomesMap = {
 export const BIOMES: BiomesMap = {
   [BiomeName.DeepOcean]: {
     name: BiomeName.DeepOcean,
-    color: new THREE.Color(0x000000),
+    color: new THREE.Color(0x001133), // Darker, deeper blue
     elevationMin: 0,
-    elevationMax: 0.1,
+    elevationMax: 0.15,
   },
   [BiomeName.Ocean]: {
     name: BiomeName.Ocean,
-    color: new THREE.Color(0x0066aa),
-    elevationMin: 0.1,
+    color: new THREE.Color(0x0055aa), // Rich medium blue
+    elevationMin: 0.15,
     elevationMax: 0.4,
   },
   [BiomeName.Beach]: {
     name: BiomeName.Beach,
-    color: new THREE.Color(0xffdd99),
+    color: new THREE.Color(0xf0e68c), // Khaki sand color
     elevationMin: 0.4,
-    elevationMax: 0.45,
+    elevationMax: 0.46,
   },
-
   [BiomeName.Land]: {
     name: BiomeName.Land,
-    color: new THREE.Color(0x44aa44),
-    elevationMin: 0.45,
-    elevationMax: 0.58,
+    color: new THREE.Color(0x567d46), // Muted green
+    elevationMin: 0.46,
+    elevationMax: 0.55,
   },
   [BiomeName.Forest]: {
     name: BiomeName.Forest,
-    color: new THREE.Color(0x228822),
-    elevationMin: 0.58,
-    elevationMax: 0.62,
+    color: new THREE.Color(0x1b4d2e), // Deep forest green
+    elevationMin: 0.55,
+    elevationMax: 0.65,
   },
   [BiomeName.Jungle]: {
     name: BiomeName.Jungle,
-    color: new THREE.Color(0x116611),
-    elevationMin: 0.62,
-    elevationMax: 0.65,
+    color: new THREE.Color(0x0b3b24), // Dark tropical green
+    elevationMin: 0.65,
+    elevationMax: 0.7,
   },
   [BiomeName.Mountain]: {
     name: BiomeName.Mountain,
-    color: new THREE.Color(0x996633),
-    elevationMin: 0.65,
-    elevationMax: 0.75,
+    color: new THREE.Color(0x8b7355), // Rich mountain brown
+    elevationMin: 0.7,
+    elevationMax: 0.85,
   },
   [BiomeName.Snow]: {
     name: BiomeName.Snow,
-    color: new THREE.Color(0xffffff),
-    elevationMin: 0.75,
+    color: new THREE.Color(0xf0f5fb), // Slightly blue-tinted snow
+    elevationMin: 0.85,
     elevationMax: 1.0,
   },
 };
-
 // Updated landBoundary to match new elevation ranges
 export const landBoundary = 0.45;
 
