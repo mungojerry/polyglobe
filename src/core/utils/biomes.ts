@@ -43,12 +43,12 @@ export const BIOMES: BiomesMap = {
     name: BiomeName.Ocean,
     color: new THREE.Color(0x0055aa), // Rich medium blue
     elevationMin: 0.15,
-    elevationMax: 0.4,
+    elevationMax: 0.42,
   },
   [BiomeName.Beach]: {
     name: BiomeName.Beach,
     color: new THREE.Color(0xf0e68c), // Khaki sand color
-    elevationMin: 0.4,
+    elevationMin: 0.42,
     elevationMax: 0.46,
   },
   [BiomeName.Land]: {

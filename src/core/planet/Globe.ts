@@ -21,6 +21,7 @@ const globeConfig = {
   radius: 1300,
   detail: 110,
   chunkSize: 20,
+  showChunks: true,
 };
 
 export class Globe {
@@ -164,7 +165,7 @@ export class Globe {
     this.landGeometry = BufferGeometryUtils.mergeVertices(geometry);
     this.landGeometry.computeVertexNormals();
     this.landMesh = new THREE.Mesh(this.landGeometry, this.landMaterial);
-
+    if (!globeConfig.showChunks) this.object.add(this.landMesh);
     this.terrainDeformer = new TerrainDeformer(this.landMesh, this.noise);
   }
   public landMesh!: THREE.Mesh;
@@ -321,7 +322,7 @@ export class Globe {
 
     this.chunks.forEach((row) => {
       row.forEach((chunk) => {
-        chunk.mesh.visible = this.frustum.intersectsObject(chunk.mesh);
+        chunk.mesh.visible = globeConfig.showChunks && this.frustum.intersectsObject(chunk.mesh);
         if (chunk.mesh.visible) chunksVisible++;
         numChunks++;
       });

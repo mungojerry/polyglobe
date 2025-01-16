@@ -1,5 +1,6 @@
 import * as THREE from "three";
-import { FBXLoader, OrbitControls } from "three-stdlib";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
+import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader";
 export class FBXViewerScene {
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;

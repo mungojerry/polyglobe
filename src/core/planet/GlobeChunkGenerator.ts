@@ -2,242 +2,160 @@ import * as THREE from "three";
 import { ProgressCallback, yieldToMainThread } from "../utils/utils";
 import { GlobeChunk } from "./GlobeChunk";
 
-interface GlobeChunkTask {
-  latIndex: number;
-  lonIndex: number;
-  lat: number;
-  lon: number;
-  chunkId: number;
-}
-
 export class GlobeChunkGenerator {
-  private totalChunks: number = 0;
-  private completedChunks: number = 0;
-  private readonly spherical: THREE.Spherical;
-  private vertexLatLonCache!: Float32Array;
+  private spherical = new THREE.Spherical();
 
-  constructor() {
-    this.spherical = new THREE.Spherical();
-  }
-
+  /**
+   * Splits a spherical geometry into chunks based on lat/lon grid
+   */
   public async generateChunks(
-    landGeometry: THREE.BufferGeometry,
-    landMaterial: THREE.Material,
-    parentObject: THREE.Object3D,
+    geometry: THREE.BufferGeometry,
+    material: THREE.Material,
+    parent: THREE.Object3D,
     chunkSize: number,
     onProgress?: ProgressCallback
   ): Promise<GlobeChunk[][]> {
-    const positionAttr = landGeometry.attributes.position;
-    const indexAttr = landGeometry.index;
-    if (!indexAttr) throw new Error("Geometry must have an index attribute");
-
-    // Precalculate lat/lon for all vertices
-    this.precalculateVertexPositions(positionAttr);
-
-    const chunks: GlobeChunk[][] = [];
-    const latChunks = Math.ceil(180 / chunkSize);
-    const lonChunks = Math.ceil(360 / chunkSize);
-    this.totalChunks = latChunks * lonChunks;
-
-    // Pre-allocate arrays
-    for (let i = 0; i < latChunks; i++) {
-      chunks[i] = new Array(lonChunks);
+    // Validate input geometry
+    if (!geometry.index) {
+      throw new Error("Geometry must have an index attribute");
     }
 
-    // Create and process tasks in parallel
-    const tasks = this.createTaskQueue(chunkSize);
-    const taskGroups = this.groupTasksByLocation(tasks, 4); // Group nearby chunks
+    // Calculate grid dimensions
+    const latChunks = Math.ceil(180 / chunkSize);
+    const lonChunks = Math.ceil(360 / chunkSize);
+    const totalChunks = latChunks * lonChunks;
+    let completedChunks = 0;
 
-    for (const group of taskGroups) {
-      const promises = group.map((task) => this.processChunk(task, landGeometry, landMaterial, parentObject, chunkSize, chunks, onProgress));
-      await Promise.all(promises);
-      // Allow UI update
-      await yieldToMainThread();
+    // Initialize chunks array
+    const chunks: GlobeChunk[][] = Array(latChunks)
+      .fill(null)
+      .map(() => Array(lonChunks).fill(null));
+
+    // Process each grid cell
+    for (let latIdx = 0; latIdx < latChunks; latIdx++) {
+      for (let lonIdx = 0; lonIdx < lonChunks; lonIdx++) {
+        const latStart = -90 + latIdx * chunkSize;
+        const lonStart = -180 + lonIdx * chunkSize;
+
+        // Extract geometry for this chunk
+        const chunkGeometry = this.extractChunkGeometry(geometry, latStart, latStart + chunkSize, lonStart, lonStart + chunkSize);
+
+        // Create chunk if we got valid geometry
+        if (chunkGeometry) {
+          const chunkMaterial = material.clone();
+          const chunk = new GlobeChunk(chunkGeometry, chunkMaterial);
+
+          chunk.latStart = latStart;
+          chunk.latEnd = latStart + chunkSize;
+          chunk.lonStart = lonStart;
+          chunk.lonEnd = lonStart + chunkSize;
+
+          chunk.mesh.layers.enable(1);
+          parent.add(chunk.mesh);
+
+          chunks[latIdx][lonIdx] = chunk;
+        }
+
+        // Update progress
+        completedChunks++;
+        if (onProgress) {
+          onProgress((completedChunks / totalChunks) * 100);
+        }
+
+        // Yield to prevent blocking
+        await yieldToMainThread();
+      }
     }
 
     return chunks;
   }
 
-  private precalculateVertexPositions(positionAttr: THREE.BufferAttribute | THREE.InterleavedBufferAttribute): void {
-    const positions = positionAttr.array as Float32Array;
-    this.vertexLatLonCache = new Float32Array((positions.length / 3) * 2);
-    const tempVec = new THREE.Vector3();
+  /**
+   * Extracts a portion of the geometry within given lat/lon bounds
+   */
+  private extractChunkGeometry(
+    sourceGeometry: THREE.BufferGeometry,
+    latMin: number,
+    latMax: number,
+    lonMin: number,
+    lonMax: number
+  ): THREE.BufferGeometry | null {
+    const positions = sourceGeometry.attributes.position.array as Float32Array;
+    const colors = sourceGeometry.attributes.color.array as Float32Array;
+    const indices = sourceGeometry.index!.array as Uint32Array;
 
-    for (let i = 0; i < positions.length; i += 3) {
-      tempVec.set(positions[i], positions[i + 1], positions[i + 2]);
-      this.spherical.setFromVector3(tempVec);
-
-      const idx = (i / 3) * 2;
-      this.vertexLatLonCache[idx] = Math.PI / 2 - this.spherical.phi;
-      this.vertexLatLonCache[idx + 1] = THREE.MathUtils.euclideanModulo(this.spherical.theta + Math.PI, Math.PI * 2) - Math.PI;
-    }
-  }
-
-  private groupTasksByLocation(tasks: GlobeChunkTask[], groupSize: number): GlobeChunkTask[][] {
-    const groups: GlobeChunkTask[][] = [];
-    let currentGroup: GlobeChunkTask[] = [];
-
-    for (const task of tasks) {
-      currentGroup.push(task);
-      if (currentGroup.length === groupSize) {
-        groups.push(currentGroup);
-        currentGroup = [];
-      }
-    }
-
-    if (currentGroup.length > 0) {
-      groups.push(currentGroup);
-    }
-
-    return groups;
-  }
-
-  private async processChunk(
-    task: GlobeChunkTask,
-    landGeometry: THREE.BufferGeometry,
-    landMaterial: THREE.Material,
-    parentObject: THREE.Object3D,
-    chunkSize: number,
-    chunks: GlobeChunk[][],
-    onProgress?: ProgressCallback
-  ): Promise<void> {
-    const geometry = await this.extractChunkGeometry(task.lat, task.lon, chunkSize, landGeometry);
-
-    if (geometry) {
-      if (typeof geometry.computeBoundsTree === "function") {
-        geometry.computeBoundsTree();
-      }
-
-      const chunk = new GlobeChunk(geometry, landMaterial.clone());
-      chunk.latStart = task.lat;
-      chunk.latEnd = task.lat + chunkSize;
-      chunk.lonStart = task.lon;
-      chunk.lonEnd = task.lon + chunkSize;
-      chunk.mesh.layers.enable(1);
-
-      parentObject.add(chunk.mesh);
-      chunks[task.latIndex][task.lonIndex] = chunk;
-    }
-
-    this.completedChunks++;
-    if (onProgress) {
-      onProgress((this.completedChunks / this.totalChunks) * 100);
-    }
-  }
-
-  private extractChunkGeometry(lat: number, lon: number, size: number, landGeometry: THREE.BufferGeometry): Promise<THREE.BufferGeometry | null> {
-    return new Promise((resolve) => {
-      const bounds = {
-        LAT_MIN: THREE.MathUtils.degToRad(lat),
-        LAT_MAX: THREE.MathUtils.degToRad(lat + size),
-        LON_MIN: THREE.MathUtils.degToRad(lon),
-        LON_MAX: THREE.MathUtils.degToRad(lon + size),
-      };
-
-      const positionAttr = landGeometry.attributes.position;
-      const indexAttr = landGeometry.index!;
-
-      const vertices = new Float32Array(positionAttr.count * 6);
-      const indices = new Uint32Array(indexAttr.count);
-      const vertexMap = new Int32Array(positionAttr.count);
-      vertexMap.fill(-1);
-
-      const result = this.filterGeometryData(bounds, vertices, indices, vertexMap, landGeometry);
-
-      if (!result.hasVertices) {
-        resolve(null);
-        return;
-      }
-
-      const geometry = new THREE.BufferGeometry();
-      const finalVertices = new Float32Array(vertices.buffer, 0, result.vertexCount * 6);
-      const buffer = new THREE.InterleavedBuffer(finalVertices, 6);
-
-      geometry.setAttribute("position", new THREE.InterleavedBufferAttribute(buffer, 3, 0));
-      geometry.setAttribute("color", new THREE.InterleavedBufferAttribute(buffer, 3, 3));
-
-      if (result.indexCount > 0) {
-        geometry.setIndex(new THREE.BufferAttribute(indices.slice(0, result.indexCount), 1));
-      }
-
-      geometry.computeVertexNormals();
-      resolve(geometry);
-    });
-  }
-
-  private filterGeometryData(
-    bounds: { LAT_MIN: number; LAT_MAX: number; LON_MIN: number; LON_MAX: number },
-    vertices: Float32Array,
-    indices: Uint32Array,
-    vertexMap: Int32Array,
-    geometry: THREE.BufferGeometry
-  ): { hasVertices: boolean; vertexCount: number; indexCount: number } {
-    let vertexCount = 0;
-    let indexCount = 0;
-    let hasVertices = false;
-
-    const posArray = geometry.attributes.position.array as Float32Array;
-    const colArray = geometry.attributes.color.array as Float32Array;
-    const indexArray = geometry.index!.array as Uint32Array;
-
-    const isVertexInBounds = (idx: number): boolean => {
-      const cacheIdx = idx * 2;
-      const lat = this.vertexLatLonCache[cacheIdx];
-      const lon = this.vertexLatLonCache[cacheIdx + 1];
-      return lat >= bounds.LAT_MIN && lat <= bounds.LAT_MAX && lon >= bounds.LON_MIN && lon <= bounds.LON_MAX;
+    // Convert bounds to radians and add small overlap
+    const OVERLAP = THREE.MathUtils.degToRad(1); // 1 degree overlap
+    const bounds = {
+      latMin: THREE.MathUtils.degToRad(latMin) - OVERLAP,
+      latMax: THREE.MathUtils.degToRad(latMax) + OVERLAP,
+      lonMin: THREE.MathUtils.degToRad(lonMin) - OVERLAP,
+      lonMax: THREE.MathUtils.degToRad(lonMax) + OVERLAP,
     };
 
-    // Process triangles in bulk
-    for (let i = 0; i < indexArray.length; i += 3) {
-      const a = indexArray[i];
-      const b = indexArray[i + 1];
-      const c = indexArray[i + 2];
+    // Arrays to store chunk data
+    const chunkPositions: number[] = [];
+    const chunkColors: number[] = [];
+    const chunkIndices: number[] = [];
+    const oldToNewIndex = new Map<number, number>();
 
-      if (isVertexInBounds(a) || isVertexInBounds(b) || isVertexInBounds(c)) {
-        hasVertices = true;
+    // Process each triangle
+    for (let i = 0; i < indices.length; i += 3) {
+      const a = indices[i];
+      const b = indices[i + 1];
+      const c = indices[i + 2];
 
+      // Check if any vertex is in bounds
+      const inBounds = [a, b, c].some((idx) => {
+        const pos = new THREE.Vector3(positions[idx * 3], positions[idx * 3 + 1], positions[idx * 3 + 2]);
+
+        this.spherical.setFromVector3(pos);
+
+        const lat = Math.PI / 2 - this.spherical.phi;
+        let lon = this.spherical.theta;
+        if (lon > Math.PI) lon -= Math.PI * 2;
+
+        // Handle date line crossing
+        const inLon = bounds.lonMin > bounds.lonMax ? lon >= bounds.lonMin || lon <= bounds.lonMax : lon >= bounds.lonMin && lon <= bounds.lonMax;
+
+        return lat >= bounds.latMin && lat <= bounds.latMax && inLon;
+      });
+
+      if (inBounds) {
+        // Add vertices if not already added
         for (const idx of [a, b, c]) {
-          if (vertexMap[idx] === -1) {
-            const srcPos = idx * 3;
-            const srcCol = idx * 3;
-            const dest = vertexCount * 6;
+          if (!oldToNewIndex.has(idx)) {
+            const newIdx = chunkPositions.length / 3;
+            oldToNewIndex.set(idx, newIdx);
 
-            // Bulk copy position and color
-            vertices.set(posArray.subarray(srcPos, srcPos + 3), dest);
-            vertices.set(colArray.subarray(srcCol, srcCol + 3), dest + 3);
+            // Add position
+            chunkPositions.push(positions[idx * 3], positions[idx * 3 + 1], positions[idx * 3 + 2]);
 
-            vertexMap[idx] = vertexCount++;
+            // Add color
+            chunkColors.push(colors[idx * 3], colors[idx * 3 + 1], colors[idx * 3 + 2]);
           }
         }
 
-        indices[indexCount++] = vertexMap[a];
-        indices[indexCount++] = vertexMap[b];
-        indices[indexCount++] = vertexMap[c];
+        // Add triangle indices
+        chunkIndices.push(oldToNewIndex.get(a)!, oldToNewIndex.get(b)!, oldToNewIndex.get(c)!);
       }
     }
 
-    return { hasVertices, vertexCount, indexCount };
-  }
-
-  private createTaskQueue(chunkSize: number): GlobeChunkTask[] {
-    const tasks: GlobeChunkTask[] = [];
-    const latChunks = Math.ceil(180 / chunkSize);
-    const lonChunks = Math.ceil(360 / chunkSize);
-
-    for (let latIndex = 0; latIndex < latChunks; latIndex++) {
-      const lat = -90 + latIndex * chunkSize;
-      for (let lonIndex = 0; lonIndex < lonChunks; lonIndex++) {
-        const lon = -180 + lonIndex * chunkSize;
-        tasks.push({
-          latIndex,
-          lonIndex,
-          lat,
-          lon,
-          chunkId: latIndex * lonChunks + lonIndex,
-        });
-      }
+    // Return null if no triangles were found
+    if (chunkIndices.length === 0) {
+      return null;
     }
 
-    return tasks;
+    // Create new geometry
+    const geometry = new THREE.BufferGeometry();
+
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(chunkPositions, 3));
+    geometry.setAttribute("color", new THREE.Float32BufferAttribute(chunkColors, 3));
+    geometry.setIndex(chunkIndices);
+
+    // geometry.computeVertexNormals();
+    geometry.computeBoundingSphere();
+
+    return geometry;
   }
 }

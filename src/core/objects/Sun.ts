@@ -11,7 +11,7 @@ export class Sun {
 
   constructor(globe: Globe, scene: THREE.Scene, private radius: number = 500) {
     // Directional light (sun)
-    this.directionalLight = new THREE.DirectionalLight(0xffffff, 3);
+    this.directionalLight = new THREE.DirectionalLight(0xffffff, 4);
     this.directionalLight.position.set(this.radius, 0, 0);
     this.directionalLight.target = globe.getObject();
     // .position.set(0, 0, 0);
@@ -19,8 +19,8 @@ export class Sun {
 
     // Configure shadow properties
     this.directionalLight.castShadow = true;
-    this.directionalLight.shadow.mapSize.width = 2048;
-    this.directionalLight.shadow.mapSize.height = 2048;
+    this.directionalLight.shadow.mapSize.width = 4096;
+    this.directionalLight.shadow.mapSize.height = 4096;
 
     const shadowCameraSize = radius;
     this.directionalLight.shadow.camera.left = -shadowCameraSize;
@@ -28,9 +28,9 @@ export class Sun {
     this.directionalLight.shadow.camera.top = shadowCameraSize;
     this.directionalLight.shadow.camera.bottom = -shadowCameraSize;
     this.directionalLight.shadow.camera.near = 0.1;
-    this.directionalLight.shadow.camera.far = 2500;
+    this.directionalLight.shadow.camera.far = 5000;
     this.directionalLight.shadow.bias = -0.0001;
-    this.directionalLight.shadow.normalBias = 0.05;
+    this.directionalLight.shadow.normalBias = 0.02;
 
     this.directionalLight.shadow.camera.updateProjectionMatrix();
     this.directionalLight.name = "sun";
