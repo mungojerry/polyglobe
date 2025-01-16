@@ -8,7 +8,6 @@ export enum BiomeName {
   "Land",
 
   "Forest", // New
-  "Jungle", // New
   "Mountain",
   "Snow",
 }
@@ -64,22 +63,17 @@ export const BIOMES: BiomesMap = {
     elevationMin: 0.55,
     elevationMax: 0.65,
   },
-  [BiomeName.Jungle]: {
-    name: BiomeName.Jungle,
-    color: new THREE.Color(0x0b3b24), // Dark tropical green
-    elevationMin: 0.65,
-    elevationMax: 0.7,
-  },
+
   [BiomeName.Mountain]: {
     name: BiomeName.Mountain,
     color: new THREE.Color(0x8b7355), // Rich mountain brown
-    elevationMin: 0.7,
-    elevationMax: 0.85,
+    elevationMin: 0.65,
+    elevationMax: 0.7,
   },
   [BiomeName.Snow]: {
     name: BiomeName.Snow,
-    color: new THREE.Color(0xf0f5fb), // Slightly blue-tinted snow
-    elevationMin: 0.85,
+    color: new THREE.Color(0xffffff),
+    elevationMin: 0.7,
     elevationMax: 1.0,
   },
 };
@@ -92,12 +86,34 @@ export function isLand(height: number) {
 
 const sortedBiomes = Object.values(BIOMES).sort((a, b) => a.elevationMin - b.elevationMin);
 
-export function getBiomeByElevation(elevation: number): Biome | undefined {
-  for (const biome of sortedBiomes) {
-    if (elevation >= biome.elevationMin && elevation < biome.elevationMax) {
-      return biome;
+export function getBiomeByElevation(elevation: number): { biome: Biome; color: THREE.Color } | undefined {
+  for (let i = 0; i < sortedBiomes.length - 1; i++) {
+    const currentBiome = sortedBiomes[i];
+    const nextBiome = sortedBiomes[i + 1];
+
+    if (elevation >= currentBiome.elevationMin && elevation < currentBiome.elevationMax) {
+      // Calculate how far we are between this biome and the next
+      const t = (elevation - currentBiome.elevationMin) / (currentBiome.elevationMax - currentBiome.elevationMin);
+
+      // Interpolate between current and next biome colors
+      const lerpedColor = currentBiome.color.clone().lerp(nextBiome.color, t);
+
+      return {
+        biome: currentBiome,
+        color: lerpedColor,
+      };
     }
   }
+
+  // Handle last biome
+  const lastBiome = sortedBiomes[sortedBiomes.length - 1];
+  if (elevation >= lastBiome.elevationMin && elevation < lastBiome.elevationMax) {
+    return {
+      biome: lastBiome,
+      color: lastBiome.color,
+    };
+  }
+
   return undefined;
 }
 

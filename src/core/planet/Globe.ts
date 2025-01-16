@@ -91,7 +91,7 @@ export class Globe {
 
     const modifier = new SimplifyModifier();
 
-    this.miniMapGeometry = modifier.modify(this.landGeometry, 10); // Reduce detail by a factor of 10
+    this.miniMapGeometry = modifier.modify(this.landGeometry, 40); // Reduce detail by a factor of 10
     this.miniMapGeometry.computeVertexNormals();
     this.buildPhysicsObject();
 
