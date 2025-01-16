@@ -155,7 +155,7 @@ export class GameScene {
     this.initialize();
 
     this.sun = new Sun(this.globe, this.scene, this.globe.getRadius() * 2.4);
-    // this.moon = new Moon(this.scene, this.globe.getRadius() * 2.4);
+    this.moon = new Moon(this.scene, this.globe.getRadius() * 2.4);
 
     this.setupControls();
 

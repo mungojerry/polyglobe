@@ -88,16 +88,19 @@ export class Globe {
 
     await this.buildLandGeometry(onProgress);
 
+    onProgress(95);
     // Create simplified geometry for mini-map
 
     const modifier = new SimplifyModifier();
 
     this.miniMapGeometry = modifier.modify(this.landGeometry, 40); // Reduce detail by a factor of 10
     this.miniMapGeometry.computeVertexNormals();
+    onProgress(97);
     this.buildPhysicsObject();
 
     const end = performance.now();
     debugManager.set("perf", "Generation time: " + (end - start).toFixed(4) + "ms");
+    onProgress(100);
   }
 
   private miniMapGeometry!: THREE.BufferGeometry;
@@ -162,6 +165,7 @@ export class Globe {
     const geometry = await landWorker.generateLand(globeConfig.radius, globeConfig.detail, Math.random(), this.noise, onProgress);
 
     geometry.computeBoundingSphere();
+
     this.landGeometry = BufferGeometryUtils.mergeVertices(geometry);
     this.landGeometry.computeVertexNormals();
     this.landMesh = new THREE.Mesh(this.landGeometry, this.landMaterial);

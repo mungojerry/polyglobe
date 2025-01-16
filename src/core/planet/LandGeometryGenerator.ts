@@ -126,7 +126,7 @@ export class LandGeometryGenerator {
         indices[j] = j;
       }
 
-      const progress = Math.min((end / totalVertices) * 100, 99);
+      const progress = Math.min((end / totalVertices) * 90, 99);
       await this.updateTotalProgress(progress, onProgress);
     }
 
