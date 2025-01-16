@@ -246,7 +246,7 @@ export class GameScene {
 
   private async initializeEnemys(): Promise<void> {
     const globeRadius = this.globe.getRadius();
-    const minDistance = globeRadius * 1.3;
+    const minDistance = globeRadius * 1.1;
     for (let i = 0; i < config.numUFOs; i++) {
       const position = generateRandomPosition(minDistance);
       const enemy = new Enemy(this.scene, this.world, position, this.globe, this.player);

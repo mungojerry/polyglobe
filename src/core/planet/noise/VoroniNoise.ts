@@ -27,7 +27,7 @@ export const DEFAULT_CONFIG: VoronoiNoiseConfig = {
   blendFactor: 0.5,
   octaves: 6,
   persistence: 0.4,
-  lacunarity: 2,
+  lacunarity: 1,
   warpStrength: 0.2,
   ridgeOffset: 0.6,
   turbulence: 0.15,

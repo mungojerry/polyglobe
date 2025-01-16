@@ -6,7 +6,7 @@ import { GlobeChunk } from "./GlobeChunk";
 export class Infection {
   private raycaster: THREE.Raycaster;
   private infectedVertices: Set<string> = new Set();
-  private infectionRadius: number = 10.0; // Very large radius
+  private infectionRadius: number = 20.0; // Very large radius
   private processedMeshes: Set<string> = new Set();
   private gridSize: number = this.infectionRadius;
 

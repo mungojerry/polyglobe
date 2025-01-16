@@ -1,7 +1,8 @@
 import RAPIER from "@dimforge/rapier3d";
 import * as THREE from "three";
 import { Vector3 } from "three";
-import { mergeVertices } from "three-stdlib";
+import { SimplifyModifier } from "three/examples/jsm/modifiers/SimplifyModifier";
+import * as BufferGeometryUtils from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { Water } from "../effects/Water";
 import { debugManager } from "../managers/debugManager";
 import { pseudoRandom } from "../utils/PseudoRandom";
@@ -71,101 +72,6 @@ export class Globe {
     return this.waterLevel;
   }
 
-  private simplifyGeometry(geometry: THREE.BufferGeometry, factor: number): THREE.BufferGeometry {
-    // Initialize new geometry
-    const simplifiedGeometry = new THREE.BufferGeometry();
-    const positions = geometry.attributes.position.array;
-    const colors = geometry.attributes.color?.array;
-    const indices = geometry.index?.array;
-
-    if (!indices) {
-      return geometry.clone();
-    }
-
-    // Calculate spherical coordinates grid
-    const gridSize = Math.ceil(Math.sqrt(positions.length / 3 / factor));
-    const sphereGrids: Map<
-      string,
-      {
-        pos: THREE.Vector3;
-        color: THREE.Vector3;
-        count: number;
-      }
-    > = new Map();
-
-    // Group vertices by spherical coordinates
-    for (let i = 0; i < positions.length; i += 3) {
-      const pos = new THREE.Vector3(positions[i], positions[i + 1], positions[i + 2]);
-      const spherical = new THREE.Spherical().setFromVector3(pos);
-
-      // Create grid cell key using rounded spherical coordinates
-      const key = `${Math.floor((spherical.phi * gridSize) / Math.PI)},${Math.floor((spherical.theta * gridSize) / (Math.PI * 2))}`;
-
-      if (!sphereGrids.has(key)) {
-        sphereGrids.set(key, {
-          pos: new THREE.Vector3(),
-          color: new THREE.Vector3(),
-          count: 0,
-        });
-      }
-
-      const cell = sphereGrids.get(key)!;
-      cell.pos.add(pos);
-      if (colors) {
-        cell.color.add(new THREE.Vector3(colors[i], colors[i + 1], colors[i + 2]));
-      }
-      cell.count++;
-    }
-
-    // Create new vertices and build triangles
-    const newPositions: number[] = [];
-    const newColors: number[] = [];
-    const newIndices: number[] = [];
-    const vertexMap = new Map<string, number>();
-
-    sphereGrids.forEach((cell, key) => {
-      // Average position and color
-      cell.pos.divideScalar(cell.count);
-      cell.pos.normalize().multiplyScalar(globeConfig.radius);
-      if (colors) {
-        cell.color.divideScalar(cell.count);
-      }
-
-      // Add vertex
-      const idx = newPositions.length / 3;
-      vertexMap.set(key, idx);
-      newPositions.push(cell.pos.x, cell.pos.y, cell.pos.z);
-      if (colors) {
-        newColors.push(cell.color.x, cell.color.y, cell.color.z);
-      }
-    });
-
-    // Rebuild triangles using nearest vertices
-    for (let i = 0; i < indices.length; i += 3) {
-      const points = [];
-      for (let j = 0; j < 3; j++) {
-        const idx = indices[i + j];
-        const pos = new THREE.Vector3(positions[idx * 3], positions[idx * 3 + 1], positions[idx * 3 + 2]);
-        const spherical = new THREE.Spherical().setFromVector3(pos);
-        const key = `${Math.floor((spherical.phi * gridSize) / Math.PI)},${Math.floor((spherical.theta * gridSize) / (Math.PI * 2))}`;
-        points.push(vertexMap.get(key)!);
-      }
-      if (points[0] !== points[1] && points[1] !== points[2] && points[0] !== points[2]) {
-        newIndices.push(...points);
-      }
-    }
-
-    // Set attributes
-    simplifiedGeometry.setAttribute("position", new THREE.Float32BufferAttribute(newPositions, 3));
-    if (newColors.length > 0) {
-      simplifiedGeometry.setAttribute("color", new THREE.Float32BufferAttribute(newColors, 3));
-    }
-    simplifiedGeometry.setIndex(newIndices);
-    simplifiedGeometry.computeVertexNormals();
-
-    return simplifiedGeometry;
-  }
-
   /** Initialization */
   public async initializeGlobe(seed: number = new Date().getTime(), onProgress: ProgressCallback) {
     const start = performance.now();
@@ -182,8 +88,11 @@ export class Globe {
     await this.buildLandGeometry(onProgress);
 
     // Create simplified geometry for mini-map
-    this.miniMapGeometry = this.simplifyGeometry(this.landGeometry, 10); // Reduce detail by a factor of 10
 
+    const modifier = new SimplifyModifier();
+
+    this.miniMapGeometry = modifier.modify(this.landGeometry, 10); // Reduce detail by a factor of 10
+    this.miniMapGeometry.computeVertexNormals();
     this.buildPhysicsObject();
 
     const end = performance.now();
@@ -197,7 +106,7 @@ export class Globe {
 
   private buildWater() {
     this.water = new Water(this.waterLevel, Math.round(globeConfig.detail / 3));
-    // this.object.add(this.water.getObject());
+    this.object.add(this.water.getObject());
   }
 
   private buildEquatorWall() {
@@ -252,7 +161,7 @@ export class Globe {
     const geometry = await landWorker.generateLand(globeConfig.radius, globeConfig.detail, Math.random(), this.noise, onProgress);
 
     geometry.computeBoundingSphere();
-    this.landGeometry = mergeVertices(geometry);
+    this.landGeometry = BufferGeometryUtils.mergeVertices(geometry);
     this.landGeometry.computeVertexNormals();
     this.landMesh = new THREE.Mesh(this.landGeometry, this.landMaterial);
 

@@ -3,16 +3,6 @@ import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise.js";
 import { BaseNoise } from "./BaseNoise";
 import { LRUCache } from "./LRUCache";
 
-/**
- * distortion: controls how much warping happens. A higher value means more warping, leading to more extreme terrain features.
- * distortionFrequency: Controls the scale/frequency of the distortion itself. Lower values make the distortion smoother, higher values make it more chaotic.
- * lacunarity: lacunarity controls how much the frequency increases each octave (usually 2.0).
- * gain: gain controls how much the amplitude decreases each octave.
- *
- * Using these gives you more control over the noise's appearance and is more efficient than just roughness. Often gain is the inverse of roughness.
- *
- */
-
 export type TerrainNoiseConfig = {
   octaves: number;
   roughness: number;
@@ -21,26 +11,37 @@ export type TerrainNoiseConfig = {
   distortionFrequency: number;
   lacunarity: number;
   gain: number;
+  erosionStrength: number;
+  erosionScale: number;
+  erosionOctaves: number;
+  erosionLacunarity: number;
+  erosionGain: number;
 };
 
 const DEFAULT_CONFIG: Readonly<TerrainNoiseConfig> = {
   octaves: 7,
   roughness: 0.4,
-  heightScale: 0.6,
+  heightScale: 0.7,
   distortion: 0.8,
   distortionFrequency: 0.5,
-  lacunarity: 2.0,
+  lacunarity: 1.6,
   gain: 0.5,
+  erosionStrength: 0.3,
+  erosionScale: 0.8,
+  erosionOctaves: 4,
+  erosionLacunarity: 2.0,
+  erosionGain: 0.5,
 };
 
 export class TerrainNoise implements BaseNoise {
   private simplexNoise: SimplexNoise;
+  private erosionNoise: SimplexNoise;
   private config: TerrainNoiseConfig;
   private cache: LRUCache<string, number>;
 
   constructor(config: Partial<TerrainNoiseConfig> = {}) {
-    const rng = new PseudoRandomNumberGenerator(231231);
-    this.simplexNoise = new SimplexNoise(rng);
+    this.simplexNoise = new SimplexNoise(new PseudoRandomNumberGenerator(231231));
+    this.erosionNoise = new SimplexNoise(new PseudoRandomNumberGenerator(654321));
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.cache = new LRUCache<string, number>(1000);
   }
@@ -59,8 +60,41 @@ export class TerrainNoise implements BaseNoise {
     }
   }
 
+  private getErosionNoise(x: number, y: number, z: number): number {
+    const length = Math.sqrt(x * x + y * y + z * z);
+    if (length === 0) return 0;
+
+    const nx = x / length;
+    const ny = y / length;
+    const nz = z / length;
+
+    let total = 0;
+    let amplitude = 1.0;
+    let frequency = this.config.erosionScale;
+    let maxValue = 0;
+
+    for (let i = 0; i < this.config.erosionOctaves; i++) {
+      const angle1 = i * 2.1 + 0.7;
+      const angle2 = i * 1.9 + 0.3;
+      const [rx1, ry1, rz1] = this.rotatePoint(nx, ny, nz, angle1, "y");
+      const [rx2, ry2, rz2] = this.rotatePoint(rx1, ry1, rz1, angle2, "x");
+
+      const value = this.erosionNoise.noise3d(rx2 * frequency, ry2 * frequency, rz2 * frequency);
+
+      total += value * amplitude;
+      maxValue += amplitude;
+      amplitude *= this.config.erosionGain;
+      frequency *= this.config.erosionLacunarity;
+    }
+
+    // Ensure we don't divide by zero
+    return maxValue > 0 ? total / maxValue : 0;
+  }
+
   private getNoise(x: number, y: number, z: number): number {
     const length = Math.sqrt(x * x + y * y + z * z);
+    if (length === 0) return 0;
+
     const nx = x / length;
     const ny = y / length;
     const nz = z / length;
@@ -99,7 +133,32 @@ export class TerrainNoise implements BaseNoise {
       frequency *= lacunarity;
     }
 
-    return (total / maxValue) * this.config.heightScale;
+    // Ensure we don't divide by zero
+    return maxValue > 0 ? (total / maxValue) * this.config.heightScale : 0;
+  }
+
+  private calculateErosion(x: number, y: number, z: number): number {
+    const baseNoise = this.getNoise(x, y, z);
+    const erosionValue = this.getErosionNoise(x, y, z);
+
+    // Calculate slope with safeguards against invalid values
+    const delta = 0.01;
+    const h0 = this.getNoise(x, y, z);
+    const hx = this.getNoise(x + delta, y, z);
+    const hy = this.getNoise(x, y + delta, z);
+    const hz = this.getNoise(x, y, z + delta);
+
+    // Calculate slope with bounds
+    const slope = Math.min(Math.sqrt(Math.pow(hx - h0, 2) + Math.pow(hy - h0, 2) + Math.pow(hz - h0, 2)) / delta, 1.0);
+
+    // Normalize erosion factors
+    const slopeFactor = Math.max(0, Math.min(slope * 2, 1));
+    const erosionFactor = Math.max(0, Math.min(erosionValue * slopeFactor * this.config.erosionStrength, 1));
+    const heightFactor = Math.max(0, Math.min(baseNoise, 1));
+
+    // Apply erosion with bounds checking
+    const erosionAmount = erosionFactor * heightFactor;
+    return Math.max(-1, Math.min(baseNoise - erosionAmount, 1));
   }
 
   public getValue(x: number, y: number, z: number): number {
@@ -107,7 +166,7 @@ export class TerrainNoise implements BaseNoise {
     let value = this.cache.get(key);
 
     if (value === undefined) {
-      value = this.getNoise(x, y, z);
+      value = this.calculateErosion(x, y, z);
       this.cache.set(key, value);
     }
 

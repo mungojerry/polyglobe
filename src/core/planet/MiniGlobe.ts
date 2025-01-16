@@ -59,10 +59,16 @@ export class MiniGlobe {
   private createGlobe(bufferGeometry: THREE.BufferGeometry): THREE.Mesh {
     const landGeometry = bufferGeometry.clone();
     const material = new THREE.MeshPhongMaterial({
-      side: THREE.FrontSide,
-      flatShading: true,
       vertexColors: true,
+      shininess: 0,
+      reflectivity: 0,
+      flatShading: true,
+      shadowSide: THREE.FrontSide,
+      clipShadows: false,
     });
+    const scale = 0.275;
+    landGeometry.scale(scale, scale, scale);
+    landGeometry.computeVertexNormals();
 
     const globe = new THREE.Mesh(landGeometry, material);
     landGeometry.computeVertexNormals();
@@ -73,7 +79,7 @@ export class MiniGlobe {
     this.scene.add(this.globe);
 
     const light = new THREE.DirectionalLight(0xffffff, 1);
-    light.position.set(5, 10, 7.5);
+    light.position.set(5, 2000, 7.5);
     this.scene.add(light);
     this.scene.add(new THREE.AmbientLight(0xffffff));
 
@@ -121,7 +127,7 @@ export class MiniGlobe {
     this.mainCamera.getWorldPosition(mainCameraPos);
     const normalizedPos = mainCameraPos.clone().normalize();
 
-    const miniGlobeRadius = 3000;
+    const miniGlobeRadius = 1000;
     this.camera.position.copy(normalizedPos.multiplyScalar(miniGlobeRadius));
     this.camera.up.set(0, 1, 0);
     this.camera.lookAt(0, 0, 0);

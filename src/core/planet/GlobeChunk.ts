@@ -13,8 +13,15 @@ export class GlobeChunk {
   private currentLOD: number = 0;
   private geometryLevels: THREE.BufferGeometry[] = [];
   private lodDistanceThresholds: number[] = [1000, 2000];
+  private modifier: SimplifyModifier;
+  private simplifiedGeometries: Map<number, THREE.BufferGeometry>;
+  private originalGeometry: THREE.BufferGeometry;
 
   constructor(geometry: THREE.BufferGeometry, material: THREE.Material) {
+    this.modifier = new SimplifyModifier();
+    this.simplifiedGeometries = new Map();
+    this.originalGeometry = geometry;
+
     // Generate LOD chain
     this.geometryLevels = this.generateLODLevels(geometry);
 
@@ -57,18 +64,71 @@ export class GlobeChunk {
   }
 
   private generateLODLevels(baseGeometry: THREE.BufferGeometry): THREE.BufferGeometry[] {
-    const levels: THREE.BufferGeometry[] = [baseGeometry];
+    if (!baseGeometry || !baseGeometry.attributes.position) {
+      throw new Error("Invalid base geometry");
+    }
+
+    const levels: THREE.BufferGeometry[] = [];
     const modifier = new SimplifyModifier();
-    const reductionFactors = [1, 0.5]; // Progressive vertex reduction
+
+    // Start with original
+    const originalVertexCount = baseGeometry.attributes.position.count;
+    levels.push(baseGeometry);
+
+    // Safe reduction factors
+    const reductionFactors = [0.75, 0.5, 0.25];
 
     for (const factor of reductionFactors) {
-      const vertexCount = Math.floor(baseGeometry.attributes.position.count * factor);
-      const simplifiedGeometry = modifier.modify(baseGeometry.clone(), vertexCount);
-      simplifiedGeometry.computeVertexNormals();
-      levels.push(simplifiedGeometry);
+      const targetVertices = Math.max(
+        4, // Minimum vertices
+        Math.floor(originalVertexCount * factor)
+      );
+
+      try {
+        const clonedGeometry = baseGeometry.clone();
+        const simplified = modifier.modify(clonedGeometry, targetVertices);
+
+        if (simplified && simplified.attributes.position.count > 0) {
+          simplified.computeVertexNormals();
+          levels.push(simplified);
+          this.simplifiedGeometries.set(targetVertices, simplified);
+        }
+      } catch (error) {
+        console.warn(`LOD generation failed for factor ${factor}:`, error);
+        continue;
+      }
     }
 
     return levels;
+  }
+
+  private simplifyGeometry(geometry: THREE.BufferGeometry, targetVertices: number): THREE.BufferGeometry {
+    if (!geometry || targetVertices <= 0) {
+      return geometry;
+    }
+
+    const cachedGeometry = this.simplifiedGeometries.get(targetVertices);
+    if (cachedGeometry) {
+      return cachedGeometry;
+    }
+
+    const modifier = new SimplifyModifier();
+    const simplified = modifier.modify(geometry.clone(), targetVertices);
+    this.simplifiedGeometries.set(targetVertices, simplified);
+
+    return simplified;
+  }
+
+  public getLODGeometry(distance: number): THREE.BufferGeometry {
+    // Define LOD thresholds
+    if (distance > 1000) {
+      return this.simplifyGeometry(this.originalGeometry, 100);
+    } else if (distance > 500) {
+      return this.simplifyGeometry(this.originalGeometry, 200);
+    } else if (distance > 250) {
+      return this.simplifyGeometry(this.originalGeometry, 400);
+    }
+    return this.originalGeometry;
   }
 
   public updateLOD(cameraDistance: number): void {
