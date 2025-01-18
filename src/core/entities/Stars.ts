@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { debugManager } from "../managers/debugManager";
+import { debugManager } from "../managers/DebugManager";
 
 export class Stars {
   private particles: THREE.Points;

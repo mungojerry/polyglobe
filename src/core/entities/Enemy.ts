@@ -1,7 +1,7 @@
 import RAPIER from "@dimforge/rapier3d";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { debugManager } from "../managers/debugManager";
+import { debugManager } from "../managers/DebugManager";
 import { Globe } from "../planet/Globe";
 import { terrainHelper } from "../planet/terrainHelper";
 import { vectorPool } from "../utils/vectorPool";

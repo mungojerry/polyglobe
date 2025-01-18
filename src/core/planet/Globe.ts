@@ -4,7 +4,7 @@ import { Vector3 } from "three";
 import { SimplifyModifier } from "three/examples/jsm/modifiers/SimplifyModifier";
 import * as BufferGeometryUtils from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { Water } from "../effects/Water";
-import { debugManager } from "../managers/debugManager";
+import { debugManager } from "../managers/DebugManager";
 import { pseudoRandom } from "../utils/PseudoRandom";
 import { generateRandomPosition, ProgressCallback } from "../utils/utils";
 import { GlobeChunk } from "./GlobeChunk";

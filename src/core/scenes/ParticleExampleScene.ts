@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
-import { controlManager } from "../managers/controlManager";
+import { controlManager } from "../managers/ControlManager";
 import { ParticlePresets } from "../particles/ParticlePresets";
 import { ParticleSystem } from "../particles/ParticleSystem";
 

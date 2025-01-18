@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { IGameObject } from "../objects/BaseGameObject";
+import { IGameObject } from "../entities/BaseGameObject";
 
 export interface Marker {
   mesh: THREE.Mesh;

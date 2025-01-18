@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { Enemy } from "../objects/Enemy";
+import { Enemy } from "../entities/Enemy";
 
 const cameraConfig = {
   snapToLevelFlight: false,

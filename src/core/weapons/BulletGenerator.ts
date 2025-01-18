@@ -1,7 +1,7 @@
 import RAPIER from "@dimforge/rapier3d";
 import * as THREE from "three";
-import { debugManager } from "../managers/debugManager";
-import { IGameObject } from "../objects/BaseGameObject";
+import { IGameObject } from "../entities/BaseGameObject";
+import { debugManager } from "../managers/DebugManager";
 import { colliderToGameObjectMap } from "../utils/colliderMap";
 import { Bullet } from "./Bullet";
 

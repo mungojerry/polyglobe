@@ -1,6 +1,6 @@
 import RAPIER from "@dimforge/rapier3d";
 import * as THREE from "three";
-import { IGameObject } from "../objects/BaseGameObject";
+import { IGameObject } from "../entities/BaseGameObject";
 import { colliderToGameObjectMap } from "../utils/colliderMap";
 
 export class Bullet implements IGameObject {
