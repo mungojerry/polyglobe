@@ -86,7 +86,7 @@ export function isLand(height: number) {
 
 const sortedBiomes = Object.values(BIOMES).sort((a, b) => a.elevationMin - b.elevationMin);
 
-export function getBiomeByElevation(elevation: number): { biome: Biome; color: THREE.Color } | undefined {
+export function getBiomeByElevation(elevation: number): { biome: Biome; color: THREE.Color } {
   for (let i = 0; i < sortedBiomes.length - 1; i++) {
     const currentBiome = sortedBiomes[i];
     const nextBiome = sortedBiomes[i + 1];
@@ -114,7 +114,10 @@ export function getBiomeByElevation(elevation: number): { biome: Biome; color: T
     };
   }
 
-  return undefined;
+  return {
+    biome: BIOMES[BiomeName.Ocean], // Default biome
+    color: BIOMES[BiomeName.Ocean].color, // Default color
+  };
 }
 
 export function getTerrainColor(elevation: number, latitude: number): THREE.Color {

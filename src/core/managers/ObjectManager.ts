@@ -64,7 +64,7 @@ export class ObjectManager {
           position: ObjectManager.tempVector.clone(), // Only clone when necessary
           normal: ObjectManager.tempNormal.clone(),
           cellKey: "",
-          biome,
+          biome: biome.biome,
         };
 
         this.landVertices.push(vertex);

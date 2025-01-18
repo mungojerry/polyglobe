@@ -7,7 +7,7 @@ export interface CachedLandVertex {
   position: THREE.Vector3;
   normal: THREE.Vector3;
   cellKey: string;
-  biome: Biome | undefined;
+  biome: Biome;
 }
 
 export class SpatialHashGrid {
