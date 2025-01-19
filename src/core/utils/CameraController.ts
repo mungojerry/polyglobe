@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { Enemy } from "../entities/Enemy";
+import { IEntity } from "../entities/Entity";
 
 const cameraConfig = {
   snapToLevelFlight: false,
@@ -54,10 +54,10 @@ export class CameraController {
     }
   }
 
-  private attachedTo!: Enemy;
+  private attachedTo!: IEntity;
 
-  public attachTo(object: Enemy) {
-    this.attachedTo = object;
+  public attachTo(entity: IEntity) {
+    this.attachedTo = entity;
   }
 
   public updateStaticCamera(objPosition: THREE.Vector3) {
@@ -82,15 +82,15 @@ export class CameraController {
   }
 
   private updateFollowCamera(objPosition: THREE.Vector3) {
-    if (!this.attachedTo.getObject().body) return;
+    if (!this.attachedTo.getBody()) return;
 
     // Get velocity directly from physics body
-    const objVelocity = this.attachedTo.getObject().body.velocity;
+    const objVelocity = this.attachedTo.getBody().linvel();
     const velocity = new THREE.Vector3(objVelocity.x, objVelocity.y, objVelocity.z).negate();
 
     // Use forward direction if velocity is too small
     if (velocity.lengthSq() < 0.01) {
-      velocity.copy(this.attachedTo.getForward());
+      velocity.copy(this.attachedTo.getForwardDirection());
     }
 
     // Get the horizontal component of velocity for camera direction

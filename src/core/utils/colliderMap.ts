@@ -1,4 +1,4 @@
 import RAPIER from "@dimforge/rapier3d";
-import { IGameObject } from "../entities/BaseGameObject";
+import { IEntity } from "../entities/Entity";
 
-export const colliderToGameObjectMap: WeakMap<RAPIER.Collider, IGameObject> = new WeakMap();
+export const colliderToGameObjectMap: WeakMap<RAPIER.Collider, IEntity> = new WeakMap();

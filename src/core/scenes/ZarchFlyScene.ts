@@ -5,7 +5,7 @@ import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise";
 import { DragBehavior, PlanetaryGravityBehavior } from "../particles/Behaviors";
 import { ConeEmitter } from "../particles/Emitters";
 import { ParticleSystem } from "../particles/ParticleSystem";
-import { vectorPool } from "../utils/vectorPool";
+import { vectorPool } from "../utils/VectorPool";
 
 // Constants
 const THRUST_FORCE = 10; // Increased for better control

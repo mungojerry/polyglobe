@@ -4,9 +4,9 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { debugManager } from "../managers/DebugManager";
 import { Globe } from "../planet/Globe";
 import { terrainHelper } from "../planet/terrainHelper";
-import { vectorPool } from "../utils/vectorPool";
-import { BaseGameObject, IGameObject } from "./BaseGameObject";
-import { Player } from "./Player";
+import { vectorPool } from "../utils/VectorPool";
+import { FlyingEntity, IFlyingEntity } from "./FlyingEntity";
+import { PlayerEntity } from "./PlayerEntity";
 
 const WAYPOINT_DISTANCE_THRESHOLD: number = 35;
 const ROTATION_THRESHOLD = 0.1; // Adjust as needed for sensitivity
@@ -18,7 +18,7 @@ enum Mode {
   Attack = "attack",
   Infect = "infect",
 }
-export class Enemy extends BaseGameObject implements IGameObject {
+export class EnemyEntity extends FlyingEntity implements IFlyingEntity {
   private mode: Mode = Mode.Infect;
   private attackRange = 50;
   private shootRange = 30;
@@ -33,7 +33,7 @@ export class Enemy extends BaseGameObject implements IGameObject {
   private waypointMarkers: THREE.Mesh[] = [];
   private debugMarkers: boolean = false;
 
-  private player: Player;
+  private player: PlayerEntity;
 
   private sphereGeometry = new THREE.SphereGeometry(5, 5, 5);
   private sphereMaterial = new THREE.MeshBasicMaterial({
@@ -46,9 +46,9 @@ export class Enemy extends BaseGameObject implements IGameObject {
   private lightOn: boolean = false;
   private lightBeam: THREE.Object3D;
 
-  constructor(scene: THREE.Scene, world: RAPIER.World, position: THREE.Vector3, globe: Globe, player: Player) {
-    super(scene, position, world, "flying_object");
-    this.tilt = false;
+  constructor(scene: THREE.Scene, world: RAPIER.World, position: THREE.Vector3, globe: Globe, player: PlayerEntity) {
+    super(scene, position, world, "enemy_entity");
+
     this.shootCooldown = 1000;
     this.globe = globe;
     this.globeRadius = globe.getRadius();
@@ -56,6 +56,8 @@ export class Enemy extends BaseGameObject implements IGameObject {
     this.movementForce = 0.2;
     this.thrustForce = 0.6;
 
+    const bodyDesc = RAPIER.RigidBodyDesc.dynamic().setTranslation(position.x, position.y, position.z);
+    this.body = world.createRigidBody(bodyDesc);
     this.body.setLinearDamping(0.8);
     this.body.setAngularDamping(0.8);
     const loader = new GLTFLoader();
@@ -310,7 +312,7 @@ export class Enemy extends BaseGameObject implements IGameObject {
     if (!hit) return false;
 
     const hitBody = hit.collider.parent();
-    return hitBody?.userData instanceof Player;
+    return hitBody?.userData instanceof PlayerEntity;
   }
 
   private toggleLightCone() {

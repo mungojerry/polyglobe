@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { getTerrainColor, isLand, landBoundary } from "../utils/biomes";
-import { vectorPool } from "../utils/vectorPool";
+import { vectorPool } from "../utils/VectorPool";
 import { BaseNoise } from "./noise/BaseNoise";
 export class TerrainHelper {
   private static instance: TerrainHelper;

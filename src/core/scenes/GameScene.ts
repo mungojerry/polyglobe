@@ -8,9 +8,9 @@ import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 import { SpeedShader } from "../effects/SpeedShader";
 import { UnderWaterShader } from "../effects/UnderWaterShader";
 import { Cloud } from "../entities/Cloud";
-import { Enemy } from "../entities/Enemy";
+import { EnemyEntity } from "../entities/EnemyEntity";
 import { Moon } from "../entities/Moon";
-import { Player } from "../entities/Player";
+import { PlayerEntity } from "../entities/PlayerEntity";
 import { Stars } from "../entities/Stars";
 import { Sun } from "../entities/Sun";
 import { ButtonElement, ColorElement, controlManager, SliderElement } from "../managers/ControlManager";
@@ -23,7 +23,7 @@ import { BaseNoise } from "../planet/noise/BaseNoise";
 import { TerrainHelper } from "../planet/terrainHelper";
 import { LoadingScreen } from "../ui/LoadingScreen";
 import { generateRandomPosition } from "../utils/utils";
-import { vectorPool } from "../utils/vectorPool";
+import { vectorPool } from "../utils/VectorPool";
 import { BulletGenerator } from "../weapons/BulletGenerator";
 
 // Add the extension functions for BVH
@@ -32,7 +32,7 @@ THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 const config = {
-  numUFOs: 10,
+  numUFOs: 0,
   dayNightCycle: {
     rotationSpeed: 0.00005,
     currentAngle: 0,
@@ -47,12 +47,11 @@ const config = {
     brightness: 1.2,
     luminanceThreshold: 0.8,
   },
-  orbitCoontrols: true,
+  orbitCoontrols: false,
 };
 
 export class GameScene {
   private readonly world: World;
-  private readonly dynamicBodies: { mesh: THREE.Object3D; body: RAPIER.RigidBody }[] = [];
   private readonly eventQueue: EventQueue;
   private readonly scene: THREE.Scene;
   private readonly camera: THREE.PerspectiveCamera;
@@ -63,7 +62,8 @@ export class GameScene {
   private underWaterPass: ShaderPass;
   private speedPass: ShaderPass;
   private isUnderwater: boolean = false;
-  private readonly player: Player;
+  private readonly player: PlayerEntity;
+  private enemies: EnemyEntity[] = [];
   private readonly clouds: Cloud[] = [];
   private readonly stars: Stars;
   private objectManager!: ObjectManager;
@@ -78,14 +78,13 @@ export class GameScene {
   private currentGenerator: BaseNoise;
   private sun!: Sun;
   private moon!: Moon;
-  private enemys: Enemy[] = [];
   private currentLookAt = new THREE.Vector3();
   private currentPosition = new THREE.Vector3();
   private offset = new THREE.Vector3(0, 2, -3);
   private baseOffset = new THREE.Vector3(0, 2, -3);
   private closeOffset = new THREE.Vector3(0, 1, -2);
   private debugEnabled: boolean = false;
-  private readonly GRAVITY_FUDGE: number = 0.001; //   0.01;
+  private readonly GRAVITY_FUDGE: number = 0.01; //   0.01;
   private readonly G = 9.81 * this.GRAVITY_FUDGE;
 
   private readonly BASE_FOV = 75; // Default FOV
@@ -132,11 +131,10 @@ export class GameScene {
 
     this.currentGenerator = this.globe.noise;
     TerrainHelper.getInstance().setDefaults(this.currentGenerator, this.globe.getLandGeometry());
-    this.dynamicBodies = [];
-    this.player = new Player(this.scene, this.world, generateRandomPosition(this.globe.getRadius() * 1.3));
+
+    this.player = new PlayerEntity(this.scene, this.world, generateRandomPosition(this.globe.getRadius() * 1.3), this.renderer);
     this.cameraAttachedTo = this.player.getObject();
 
-    this.dynamicBodies.push({ body: this.player.getBody(), mesh: this.player.getObject() });
     this.camera.position.set(0, this.globe.getRadius() * 2, 0);
 
     this.debugMesh = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xffffff, vertexColors: true }));
@@ -149,7 +147,7 @@ export class GameScene {
 
     this.loadingScreen = new LoadingScreen();
 
-    this.initializeEnemys();
+    this.initializeenemies();
 
     // Start initialization
     this.initialize();
@@ -158,7 +156,13 @@ export class GameScene {
     this.moon = new Moon(this.scene, this.globe.getRadius() * 2.4);
 
     this.setupControls();
+    this.setupListeners();
 
+    // Start render loop immediately with loading state
+    this.animate();
+  }
+
+  private setupListeners() {
     // Handle window resize
     window.addEventListener("resize", () => {
       this.camera.aspect = window.innerWidth / window.innerHeight;
@@ -172,9 +176,6 @@ export class GameScene {
         this.toggleDebugView();
       }
     });
-
-    // Start render loop immediately with loading state
-    this.animate();
   }
 
   private async initialize(): Promise<void> {
@@ -222,7 +223,7 @@ export class GameScene {
       this.miniGlobe = new MiniGlobe(this.globe.getMiniMapGeometry(), this.camera, 200, 200);
       // Add markers to miniglobe
       this.miniGlobe.addMarkers([this.player], 0x00ff00);
-      this.miniGlobe.addMarkers([...this.enemys], 0xff0000);
+      this.miniGlobe.addMarkers([...this.enemies], 0xff0000);
 
       this.loadingScreen.updateStage("Initializing World", 50);
       this.loadingScreen.setStageComplete("Initializing World");
@@ -244,13 +245,13 @@ export class GameScene {
     }
   }
 
-  private async initializeEnemys(): Promise<void> {
+  private async initializeenemies(): Promise<void> {
     const globeRadius = this.globe.getRadius();
     const minDistance = globeRadius * 1.1;
     for (let i = 0; i < config.numUFOs; i++) {
       const position = generateRandomPosition(minDistance);
-      const enemy = new Enemy(this.scene, this.world, position, this.globe, this.player);
-      this.enemys.push(enemy);
+      const enemy = new EnemyEntity(this.scene, this.world, position, this.globe, this.player);
+      this.enemies.push(enemy);
     }
   }
 
@@ -303,22 +304,22 @@ export class GameScene {
       this.player.update(this.camera);
       this.updateDayNightCycle();
       if (config.orbitCoontrols) this.controls.update();
-      else this.updateCamera(this.cameraAttachedTo.position.clone(), this.cameraAttachedTo.quaternion.clone());
+      else this.updateCamera(this.cameraAttachedTo.position.clone());
       BulletGenerator.getInstance(this.world).update(1);
       const camPos = this.camera.position;
 
-      this.dynamicBodies.forEach(({ mesh, body }) => {
-        const position = body.translation();
-        mesh.position.set(position.x, position.y, position.z);
-        const rotation = body.rotation();
-        mesh.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
-      });
+      // this.dynamicBodies.forEach(({ mesh, body }) => {
+      //   const position = body.translation();
+      //   mesh.position.set(position.x, position.y, position.z);
+      //   const rotation = body.rotation();
+      //   mesh.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
+      // });
 
       debugManager.set("camera", "Cam: " + camPos.x.toFixed(2) + "," + camPos.y.toFixed(2) + "," + camPos.z.toFixed(2));
       if (this.debugMesh?.visible) {
         this.updateDebugVisualization();
       }
-      this.enemys.forEach((enemy) => enemy.update(this.camera));
+      this.enemies.forEach((enemy) => enemy.update(this.camera));
       if (this.miniGlobe) {
         this.miniGlobe.update();
       }
@@ -366,34 +367,63 @@ export class GameScene {
     }
   }
 
-  private updateCamera(position: THREE.Vector3, playerRotation: THREE.Quaternion): void {
+  // private updateCamera(position: THREE.Vector3, playerRotation: THREE.Quaternion): void {
+  //   const up = position.clone().normalize();
+  //   const forward = vectorPool.getVector(0, 0, 1);
+  //   forward.applyQuaternion(playerRotation);
+  //   const right = vectorPool.getVector().crossVectors(up, forward).normalize();
+  //   forward.crossVectors(right, up).normalize();
+
+  //   const targetPosition = position.clone();
+  //   targetPosition.add(up.multiplyScalar(this.offset.y));
+  //   targetPosition.add(forward.multiplyScalar(this.offset.z));
+  //   const cameraLerp = 0.72;
+
+  //   this.currentPosition.lerp(targetPosition, cameraLerp);
+  //   this.camera.position.copy(this.currentPosition);
+  //   this.currentLookAt.lerp(position, cameraLerp);
+  //   this.camera.lookAt(this.currentLookAt);
+  //   this.camera.up.copy(up);
+
+  //   vectorPool.releaseVector(forward);
+  //   vectorPool.releaseVector(right);
+  //   this.camera.updateMatrixWorld(true);
+
+  //   this.sun.update(1);
+  //   if (this.moon) this.moon.update(1);
+
+  //   this.camera.updateProjectionMatrix();
+  // }
+  private updateCamera(position: THREE.Vector3): void {
+    // Calculate up vector based on position relative to planet center
     const up = position.clone().normalize();
+
+    // Use a constant forward direction (we don't want it to yaw)
     const forward = vectorPool.getVector(0, 0, 1);
-    forward.applyQuaternion(playerRotation);
+
+    // Calculate right vector from up and forward
     const right = vectorPool.getVector().crossVectors(up, forward).normalize();
+
+    // Recalculate forward to ensure it's perpendicular to up
     forward.crossVectors(right, up).normalize();
 
+    // Calculate target position using offset
     const targetPosition = position.clone();
     targetPosition.add(up.multiplyScalar(this.offset.y));
     targetPosition.add(forward.multiplyScalar(this.offset.z));
-    const cameraLerp = 0.72;
 
+    // Smooth camera movement
+    const cameraLerp = 1;
     this.currentPosition.lerp(targetPosition, cameraLerp);
     this.camera.position.copy(this.currentPosition);
     this.currentLookAt.lerp(position, cameraLerp);
     this.camera.lookAt(this.currentLookAt);
     this.camera.up.copy(up);
 
+    // Release vectors back to pool
     vectorPool.releaseVector(forward);
     vectorPool.releaseVector(right);
-    this.camera.updateMatrixWorld(true);
-
-    this.sun.update(1);
-    if (this.moon) this.moon.update(1);
-
-    this.camera.updateProjectionMatrix();
   }
-
   private applyGravity(body: RigidBody): void {
     if (!body || !body.isDynamic()) return;
 
@@ -412,10 +442,9 @@ export class GameScene {
   }
 
   private applyGravityToObjects(): void {
-    this.dynamicBodies.forEach(({ body }) => {
-      this.applyGravity(body);
-    });
-    this.enemys.forEach((enemy) => {
+    this.applyGravity(this.player.getBody());
+
+    this.enemies.forEach((enemy) => {
       this.applyGravity(enemy.getBody());
     });
   }
@@ -478,9 +507,9 @@ export class GameScene {
       "Camera: ",
       () => "Player",
       (value) => {
-        this.cameraAttachedTo = value === "Player" ? this.player.getObject() : this.enemys[parseInt(value.replace("UFO #", ""))].getObject();
+        this.cameraAttachedTo = value === "Player" ? this.player.getObject() : this.enemies[parseInt(value.replace("UFO #", ""))].getObject();
       },
-      ["Player", ...this.enemys.map((_, index) => "UFO #" + index)]
+      ["Player", ...this.enemies.map((_, index) => "UFO #" + index)]
     );
 
     controlManager.addAccordion("waterControls", "Water Shader Controls");
