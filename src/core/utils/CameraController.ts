@@ -1,131 +1,100 @@
 import * as THREE from "three";
 import { IEntity } from "../entities/Entity";
+import { vectorPool } from "./VectorPool";
 
 const cameraConfig = {
-  snapToLevelFlight: false,
-  smoothingFactor: 0.1,
+  smoothingFactor: 0.7,
   offset: new THREE.Vector3(0, 4, -4),
-  zOffsetStep: 10.5,
-  minZOffset: -105,
-  maxZOffset: -2,
-  yOffsetStep: 10.5,
-  minYOffset: 2,
-  maxYOffset: 200,
-  xOffsetStep: 15.5,
-  minXOffset: -200,
-  maxXOffset: 200,
 };
 
 export class CameraController {
-  private camera: THREE.PerspectiveCamera;
-  private offset = cameraConfig.offset;
-  private currentPosition = new THREE.Vector3();
-  private currentLookAt!: THREE.Vector3;
-  private velocityPosition = new THREE.Vector3();
-  private velocityLookAt = new THREE.Vector3();
-  private mode: "static" | "follow" = "static";
+  private readonly BASE_FOV = 75; // Default FOV
+  private readonly MAX_FOV = 190; // Maximum FOV when moving fast
+  private readonly MIN_VELOCITY = 0; // Minimum velocity threshold
+  private readonly MAX_VELOCITY = 50; // Velocity at which max FOV is reached
+  private readonly FOV_LERP = 0.1; // How smoothly to adjust FOV
 
-  public setMode(mode: "static" | "follow") {
-    this.mode = mode;
-  }
+  private baseOffset = cameraConfig.offset.clone();
+  private closeOffset = new THREE.Vector3(0, 1, -2);
+
+  private camera: THREE.PerspectiveCamera;
+  private offset = cameraConfig.offset.clone();
+  private currentPosition = new THREE.Vector3();
+  private currentLookAt = new THREE.Vector3();
+  private attachedTo!: IEntity;
 
   constructor(camera: THREE.PerspectiveCamera) {
     this.camera = camera;
     this.currentPosition.copy(camera.position);
-    document.addEventListener("keydown", this.handleKeyDown.bind(this));
   }
-
-  private handleKeyDown(event: KeyboardEvent) {
-    switch (event.key) {
-      case "ArrowUp":
-        this.offset.y = Math.min(cameraConfig.maxYOffset, this.offset.y - cameraConfig.yOffsetStep);
-        this.offset.z = Math.min(cameraConfig.maxZOffset, this.offset.z + cameraConfig.zOffsetStep);
-        break;
-      case "ArrowDown":
-        this.offset.y = Math.max(cameraConfig.minYOffset, this.offset.y + cameraConfig.yOffsetStep);
-        this.offset.z = Math.max(cameraConfig.minZOffset, this.offset.z - cameraConfig.zOffsetStep);
-        break;
-      case "ArrowLeft":
-        this.offset.x = Math.max(cameraConfig.minYOffset, this.offset.x - cameraConfig.xOffsetStep);
-        break;
-      case "ArrowRight":
-        this.offset.x = Math.min(cameraConfig.maxYOffset, this.offset.x + cameraConfig.xOffsetStep);
-        break;
-    }
-  }
-
-  private attachedTo!: IEntity;
 
   public attachTo(entity: IEntity) {
     this.attachedTo = entity;
   }
-
-  public updateStaticCamera(objPosition: THREE.Vector3) {
-    // Calculate the up vector based on the globe's up direction
-    const up = objPosition.clone().normalize();
-
-    // Calculate the right and forward vectors
-    const forward = new THREE.Vector3(0, 0, 1);
-    const right = new THREE.Vector3().crossVectors(forward, up).normalize();
-    const alignedForward = new THREE.Vector3().crossVectors(up, right).normalize();
-
-    // Create the rotation matrix
-    const rotationMatrix = new THREE.Matrix4().makeBasis(right, up, alignedForward);
-
-    // Calculate the target position for the camera
-    const targetPosition = objPosition.clone().add(this.offset.clone().applyMatrix4(rotationMatrix));
-
-    // Update the camera's position and lookAt target
-    this.camera.position.copy(targetPosition);
-    this.camera.lookAt(objPosition);
-    this.camera.up.copy(up);
+  public getAttachedTo() {
+    return this.attachedTo;
   }
 
-  private updateFollowCamera(objPosition: THREE.Vector3) {
-    if (!this.attachedTo.getBody()) return;
+  public update(): void {
+    const position: THREE.Vector3 = this.attachedTo.getObject().position;
+    // Calculate up vector based on position relative to planet center
+    const up = position.clone().normalize();
 
-    // Get velocity directly from physics body
-    const objVelocity = this.attachedTo.getBody().linvel();
-    const velocity = new THREE.Vector3(objVelocity.x, objVelocity.y, objVelocity.z).negate();
+    // Use a constant forward direction (we don't want it to yaw)
+    const forward = vectorPool.getVector(0, 0, 1);
 
-    // Use forward direction if velocity is too small
-    if (velocity.lengthSq() < 0.01) {
-      velocity.copy(this.attachedTo.getForwardDirection());
-    }
+    // Calculate right vector from up and forward
+    const right = vectorPool.getVector().crossVectors(up, forward).normalize();
 
-    // Get the horizontal component of velocity for camera direction
-    const horizontalVelocity = velocity.clone();
-    horizontalVelocity.y = 0;
-    horizontalVelocity.normalize();
+    // Recalculate forward to ensure it's perpendicular to up
+    forward.crossVectors(right, up).normalize();
 
-    // Calculate target position behind the object
-    const targetPosition = objPosition.clone();
-    targetPosition.add(horizontalVelocity.multiplyScalar(-this.offset.z)); // Move back
-    targetPosition.y += this.offset.y; // Move up
+    // Calculate target position using offset
+    const targetPosition = position.clone();
+    targetPosition.add(up.multiplyScalar(this.offset.y));
+    targetPosition.add(forward.multiplyScalar(this.offset.z));
 
-    // Apply smoothing to camera position
-    const deltaPosition = targetPosition.clone().sub(this.currentPosition);
-    this.velocityPosition.add(deltaPosition.multiplyScalar(cameraConfig.smoothingFactor));
-    this.velocityPosition.multiplyScalar(0.85);
-    this.currentPosition.add(this.velocityPosition);
+    // Smooth camera movement
+
+    this.currentPosition.lerp(targetPosition, cameraConfig.smoothingFactor);
     this.camera.position.copy(this.currentPosition);
-
-    // Update look-at target with smoothing
-    if (!this.currentLookAt) {
-      this.currentLookAt = objPosition.clone();
-    }
-    const deltaLookAt = objPosition.clone().sub(this.currentLookAt);
-    this.velocityLookAt.add(deltaLookAt.multiplyScalar(cameraConfig.smoothingFactor));
-    this.velocityLookAt.multiplyScalar(0.85);
-    this.currentLookAt.add(this.velocityLookAt);
-
-    // Update camera orientation
+    this.currentLookAt.lerp(position, cameraConfig.smoothingFactor);
     this.camera.lookAt(this.currentLookAt);
-    this.camera.up.copy(objPosition.normalize());
+    this.camera.up.copy(up);
+
+    // Release vectors back to pool
+    vectorPool.releaseVector(forward);
+    vectorPool.releaseVector(right);
   }
 
-  public update() {
-    const objPosition = this.attachedTo.getPosition();
-    this.mode === "static" ? this.updateStaticCamera(objPosition) : this.updateFollowCamera(objPosition);
+  public updateCameraFOV(): void {
+    if (!this.attachedTo || !this.camera) return;
+
+    // Get forward velocity component
+    const velocity = this.attachedTo.getBody().linvel();
+    const playerForward = this.attachedTo.getForwardDirection();
+
+    // Project velocity onto forward direction
+    const velocityVec = new THREE.Vector3(velocity.x, velocity.y, velocity.z);
+    const forwardSpeed = velocityVec.dot(playerForward);
+
+    // Use absolute value since we care about speed not direction
+    const absForwardSpeed = Math.abs(forwardSpeed);
+
+    // Calculate target FOV based on forward speed
+    const speedFactor = THREE.MathUtils.clamp((absForwardSpeed - this.MIN_VELOCITY) / (this.MAX_VELOCITY - this.MIN_VELOCITY), 0, 1);
+    const targetFOV = THREE.MathUtils.lerp(this.BASE_FOV, this.MAX_FOV, speedFactor);
+
+    const targetOffset = speedFactor > 0.2 ? this.baseOffset.clone().lerp(this.closeOffset, speedFactor) : this.baseOffset;
+
+    // Smooth transition to new offset
+    this.offset.lerp(targetOffset, 0.2);
+
+    // this.speedPass.uniforms.time.value += 0.016;
+    // // Update speed effect intensity
+    // this.speedPass.uniforms.speed.value = speedFactor;
+    // Smoothly interpolate current FOV to target
+    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFOV, this.FOV_LERP);
+    this.camera.updateProjectionMatrix();
   }
 }

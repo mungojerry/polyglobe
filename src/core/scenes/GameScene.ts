@@ -22,6 +22,7 @@ import { MiniGlobe } from "../planet/MiniGlobe";
 import { BaseNoise } from "../planet/noise/BaseNoise";
 import { TerrainHelper } from "../planet/terrainHelper";
 import { LoadingScreen } from "../ui/LoadingScreen";
+import { CameraController } from "../utils/CameraController";
 import { generateRandomPosition } from "../utils/utils";
 import { vectorPool } from "../utils/VectorPool";
 import { BulletGenerator } from "../weapons/BulletGenerator";
@@ -71,33 +72,22 @@ export class GameScene {
   private loadingScreen: LoadingScreen;
   private isInitializing: boolean = false;
   private isInitialized: boolean = false;
-
-  private cameraAttachedTo: THREE.Object3D;
+  private cameraController: CameraController;
   private debugMesh: THREE.LineSegments;
 
   private currentGenerator: BaseNoise;
   private sun!: Sun;
   private moon!: Moon;
-  private currentLookAt = new THREE.Vector3();
-  private currentPosition = new THREE.Vector3();
-  private offset = new THREE.Vector3(0, 2, -3);
-  private baseOffset = new THREE.Vector3(0, 2, -3);
-  private closeOffset = new THREE.Vector3(0, 1, -2);
   private debugEnabled: boolean = false;
   private readonly GRAVITY_FUDGE: number = 0.01; //   0.01;
   private readonly G = 9.81 * this.GRAVITY_FUDGE;
-
-  private readonly BASE_FOV = 75; // Default FOV
-  private readonly MAX_FOV = 190; // Maximum FOV when moving fast
-  private readonly MIN_VELOCITY = 0; // Minimum velocity threshold
-  private readonly MAX_VELOCITY = 50; // Velocity at which max FOV is reached
-  private readonly FOV_LERP = 0.1; // How smoothly to adjust FOV
 
   constructor() {
     this.world = new World(new Vector3(0, 0, 0));
     this.eventQueue = new EventQueue(false);
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 4000);
+    this.cameraController = new CameraController(this.camera);
     this.renderer = new THREE.WebGLRenderer();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.toneMapping = THREE.CineonToneMapping;
@@ -133,7 +123,8 @@ export class GameScene {
     TerrainHelper.getInstance().setDefaults(this.currentGenerator, this.globe.getLandGeometry());
 
     this.player = new PlayerEntity(this.scene, this.world, generateRandomPosition(this.globe.getRadius() * 1.3), this.renderer);
-    this.cameraAttachedTo = this.player.getObject();
+
+    this.cameraController.attachTo(this.player);
 
     this.camera.position.set(0, this.globe.getRadius() * 2, 0);
 
@@ -304,7 +295,7 @@ export class GameScene {
       this.player.update(this.camera);
       this.updateDayNightCycle();
       if (config.orbitCoontrols) this.controls.update();
-      else this.updateCamera(this.cameraAttachedTo.position.clone());
+      else this.cameraController.update();
       BulletGenerator.getInstance(this.world).update(1);
       const camPos = this.camera.position;
 
@@ -367,63 +358,6 @@ export class GameScene {
     }
   }
 
-  // private updateCamera(position: THREE.Vector3, playerRotation: THREE.Quaternion): void {
-  //   const up = position.clone().normalize();
-  //   const forward = vectorPool.getVector(0, 0, 1);
-  //   forward.applyQuaternion(playerRotation);
-  //   const right = vectorPool.getVector().crossVectors(up, forward).normalize();
-  //   forward.crossVectors(right, up).normalize();
-
-  //   const targetPosition = position.clone();
-  //   targetPosition.add(up.multiplyScalar(this.offset.y));
-  //   targetPosition.add(forward.multiplyScalar(this.offset.z));
-  //   const cameraLerp = 0.72;
-
-  //   this.currentPosition.lerp(targetPosition, cameraLerp);
-  //   this.camera.position.copy(this.currentPosition);
-  //   this.currentLookAt.lerp(position, cameraLerp);
-  //   this.camera.lookAt(this.currentLookAt);
-  //   this.camera.up.copy(up);
-
-  //   vectorPool.releaseVector(forward);
-  //   vectorPool.releaseVector(right);
-  //   this.camera.updateMatrixWorld(true);
-
-  //   this.sun.update(1);
-  //   if (this.moon) this.moon.update(1);
-
-  //   this.camera.updateProjectionMatrix();
-  // }
-  private updateCamera(position: THREE.Vector3): void {
-    // Calculate up vector based on position relative to planet center
-    const up = position.clone().normalize();
-
-    // Use a constant forward direction (we don't want it to yaw)
-    const forward = vectorPool.getVector(0, 0, 1);
-
-    // Calculate right vector from up and forward
-    const right = vectorPool.getVector().crossVectors(up, forward).normalize();
-
-    // Recalculate forward to ensure it's perpendicular to up
-    forward.crossVectors(right, up).normalize();
-
-    // Calculate target position using offset
-    const targetPosition = position.clone();
-    targetPosition.add(up.multiplyScalar(this.offset.y));
-    targetPosition.add(forward.multiplyScalar(this.offset.z));
-
-    // Smooth camera movement
-    const cameraLerp = 1;
-    this.currentPosition.lerp(targetPosition, cameraLerp);
-    this.camera.position.copy(this.currentPosition);
-    this.currentLookAt.lerp(position, cameraLerp);
-    this.camera.lookAt(this.currentLookAt);
-    this.camera.up.copy(up);
-
-    // Release vectors back to pool
-    vectorPool.releaseVector(forward);
-    vectorPool.releaseVector(right);
-  }
   private applyGravity(body: RigidBody): void {
     if (!body || !body.isDynamic()) return;
 
@@ -435,9 +369,7 @@ export class GameScene {
     const force = new RAPIER.Vector3(-pos.x * forceMagnitude, -pos.y * forceMagnitude, -pos.z * forceMagnitude);
 
     body.applyImpulse(force, true);
-    if (body === this.player.getBody()) {
-      this.player.updateGravityArrow(force);
-    }
+
     vectorPool.releaseVector(pos);
   }
 
@@ -507,7 +439,7 @@ export class GameScene {
       "Camera: ",
       () => "Player",
       (value) => {
-        this.cameraAttachedTo = value === "Player" ? this.player.getObject() : this.enemies[parseInt(value.replace("UFO #", ""))].getObject();
+        this.cameraController.attachTo(value === "Player" ? this.player : this.enemies[parseInt(value.replace("UFO #", ""))]);
       },
       ["Player", ...this.enemies.map((_, index) => "UFO #" + index)]
     );
@@ -625,36 +557,5 @@ export class GameScene {
         controlManager.addChildToAccordion("noiseControls", sliderControl);
       }
     });
-  }
-
-  private updateCameraFOV(): void {
-    if (!this.player || !this.camera) return;
-
-    // Get forward velocity component
-    const velocity = this.player.getBody().linvel();
-    const playerForward = this.player.getForwardDirection();
-
-    // Project velocity onto forward direction
-    const velocityVec = new THREE.Vector3(velocity.x, velocity.y, velocity.z);
-    const forwardSpeed = velocityVec.dot(playerForward);
-
-    // Use absolute value since we care about speed not direction
-    const absForwardSpeed = Math.abs(forwardSpeed);
-
-    // Calculate target FOV based on forward speed
-    const speedFactor = THREE.MathUtils.clamp((absForwardSpeed - this.MIN_VELOCITY) / (this.MAX_VELOCITY - this.MIN_VELOCITY), 0, 1);
-    const targetFOV = THREE.MathUtils.lerp(this.BASE_FOV, this.MAX_FOV, speedFactor);
-
-    const targetOffset = speedFactor > 0.2 ? this.baseOffset.clone().lerp(this.closeOffset, speedFactor) : this.baseOffset;
-
-    // Smooth transition to new offset
-    this.offset.lerp(targetOffset, 0.2);
-
-    this.speedPass.uniforms.time.value += 0.016;
-    // Update speed effect intensity
-    this.speedPass.uniforms.speed.value = speedFactor;
-    // Smoothly interpolate current FOV to target
-    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFOV, this.FOV_LERP);
-    this.camera.updateProjectionMatrix();
   }
 }
