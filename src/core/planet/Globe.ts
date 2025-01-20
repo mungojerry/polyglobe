@@ -19,7 +19,7 @@ const globeConfig = {
   showPoles: false,
   showWater: true,
   radius: 1300,
-  detail: 110,
+  detail: 40,
   chunkSize: 20,
   showChunks: true,
 };

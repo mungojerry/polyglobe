@@ -77,11 +77,48 @@ export class FlyingEntity implements IFlyingEntity, IEntity {
     this.ribbonTrail.update(position, direction);
   }
 
-  private previousUp = new THREE.Vector3(0, 1, 0);
-  private targetRotation = new THREE.Quaternion();
-  private currentRotation = new THREE.Quaternion();
+  protected previousUp = new THREE.Vector3(0, 1, 0);
+  protected targetRotation = new THREE.Quaternion();
+  protected currentRotation = new THREE.Quaternion();
 
-  private updateRotation(): void {
+  protected previousForward = new THREE.Vector3(0, 0, 1);
+
+  protected updateRotation(): void {
+    if (!this.body) return;
+
+    // Get position and calculate surface normal
+    const pos = this.body.translation();
+    const up = new THREE.Vector3(pos.x, pos.y, pos.z).normalize();
+
+    // Create surface-aligned coordinate system
+    const forward = new THREE.Vector3(0, 0, 1);
+    forward.sub(up.clone().multiplyScalar(forward.dot(up))).normalize();
+    const right = new THREE.Vector3().crossVectors(up, forward).normalize();
+    forward.crossVectors(right, up);
+
+    // Create base orientation matrix
+    const baseRotation = new THREE.Matrix4().makeBasis(right, up, forward);
+    const baseQuaternion = new THREE.Quaternion().setFromRotationMatrix(baseRotation);
+
+    // Apply control inputs
+    const pitchQuat = new THREE.Quaternion().setFromAxisAngle(right, THREE.MathUtils.clamp(this.mouseY * MAX_PITCH, -MAX_PITCH, MAX_PITCH));
+    const rollQuat = new THREE.Quaternion().setFromAxisAngle(forward, THREE.MathUtils.clamp(this.mouseX * MAX_ROLL, -MAX_ROLL, MAX_ROLL));
+
+    // Combine rotations
+    this.targetRotation.copy(baseQuaternion).multiply(pitchQuat).multiply(rollQuat);
+
+    // Smooth transition
+    this.currentRotation.slerp(this.targetRotation, 0.1);
+
+    // Apply to rigid body
+    const rotation = new RAPIER.Quaternion(this.currentRotation.x, this.currentRotation.y, this.currentRotation.z, this.currentRotation.w);
+    this.body.setRotation(rotation, true);
+
+    // Update visual object
+    this.object.quaternion.copy(this.currentRotation);
+  }
+
+  private updateRotation2(): void {
     if (!this.body) return;
 
     // Get ship's position and calculate surface normal (up vector)
@@ -198,7 +235,7 @@ export class FlyingEntity implements IFlyingEntity, IEntity {
     }
   }
 
-  public update(camera: THREE.PerspectiveCamera): void {
+  public update(camera: THREE.Camera): void {
     if (!this.object || !this.body) return;
 
     this.updateRotation();

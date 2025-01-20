@@ -35,19 +35,27 @@ export class CameraController {
     return this.attachedTo;
   }
 
+  private previousForward = new THREE.Vector3(0, 0, 1);
+
   public update(): void {
     const position: THREE.Vector3 = this.attachedTo.getObject().position;
-    // Calculate up vector based on position relative to planet center
+
+    // Up vector (radial direction)
     const up = position.clone().normalize();
 
-    // Use a constant forward direction (we don't want it to yaw)
-    const forward = vectorPool.getVector(0, 0, 1);
+    // Get forward vector and project it onto tangent plane
+    const forward = vectorPool.getVector().copy(this.previousForward);
+    const forwardDotUp = forward.dot(up);
+    forward.sub(up.clone().multiplyScalar(forwardDotUp)).normalize();
 
-    // Calculate right vector from up and forward
+    // Calculate right from up and projected forward
     const right = vectorPool.getVector().crossVectors(up, forward).normalize();
 
-    // Recalculate forward to ensure it's perpendicular to up
+    // Recalculate forward to ensure orthogonality
     forward.crossVectors(right, up).normalize();
+
+    // Store forward for next frame
+    this.previousForward.copy(forward);
 
     // Calculate target position using offset
     const targetPosition = position.clone();
@@ -55,14 +63,13 @@ export class CameraController {
     targetPosition.add(forward.multiplyScalar(this.offset.z));
 
     // Smooth camera movement
-
     this.currentPosition.lerp(targetPosition, cameraConfig.smoothingFactor);
     this.camera.position.copy(this.currentPosition);
     this.currentLookAt.lerp(position, cameraConfig.smoothingFactor);
     this.camera.lookAt(this.currentLookAt);
     this.camera.up.copy(up);
 
-    // Release vectors back to pool
+    // Release vectors
     vectorPool.releaseVector(forward);
     vectorPool.releaseVector(right);
   }
