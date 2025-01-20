@@ -83,35 +83,38 @@ export class FlyingEntity implements IFlyingEntity, IEntity {
   protected updateRotation(): void {
     if (!this.body) return;
 
-    // Get position and create up vector (from planet center to craft)
+    // Get position and create up vector
     const pos = this.body.translation();
     const up = new THREE.Vector3(pos.x, pos.y, pos.z).normalize();
 
-    // Calculate pitch and bank based on mouse position from center
-    // mouseX and mouseY should be normalized from -1 to 1 where 0,0 is center
-    const pitchAmount = -this.mouseY * MAX_PITCH; // Forward/back tilt
-    const bankAmount = this.mouseX * MAX_ROLL; // Left/right tilt
+    // Mouse input normalized -1 to 1
+    const pitchAmount = -this.mouseY * MAX_PITCH;
+    const bankAmount = this.mouseX * MAX_ROLL;
 
-    // Create right vector (initial reference)
-    let right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), up);
-    if (right.lengthSq() < 0.1) {
-      right = new THREE.Vector3().crossVectors(new THREE.Vector3(1, 0, 0), up);
+    // Calculate the rotation that aligns 'up' with the planet's surface normal
+    const alignmentQuat = new THREE.Quaternion();
+    const worldUp = new THREE.Vector3(0, 1, 0);
+
+    // Find the rotation from world-up to our desired up vector
+    if (up.dot(worldUp) < -0.99999) {
+      // Special case: we're exactly inverted
+      alignmentQuat.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI);
+    } else {
+      // Normal case: find shortest arc rotation from worldUp to up
+      const rotationAxis = new THREE.Vector3().crossVectors(worldUp, up).normalize();
+      const rotationAngle = Math.acos(up.dot(worldUp));
+      alignmentQuat.setFromAxisAngle(rotationAxis, rotationAngle);
     }
-    right.normalize();
 
-    // Create forward vector
-    const forward = new THREE.Vector3().crossVectors(right, up).normalize();
+    // Create pitch and bank rotations relative to aligned orientation
+    const pitchAxis = new THREE.Vector3(1, 0, 0).applyQuaternion(alignmentQuat);
+    const bankAxis = new THREE.Vector3(0, 0, 1).applyQuaternion(alignmentQuat);
 
-    // Create base orientation that aligns with planet surface
-    const baseRotation = new THREE.Matrix4().makeBasis(right, up, forward);
-    const baseQuaternion = new THREE.Quaternion().setFromRotationMatrix(baseRotation);
+    const pitchQuat = new THREE.Quaternion().setFromAxisAngle(pitchAxis, pitchAmount);
+    const bankQuat = new THREE.Quaternion().setFromAxisAngle(bankAxis, bankAmount);
 
-    // Create pitch and bank rotations
-    const pitchQuat = new THREE.Quaternion().setFromAxisAngle(right, pitchAmount);
-    const bankQuat = new THREE.Quaternion().setFromAxisAngle(forward, bankAmount);
-
-    // Combine into target rotation: base * bank * pitch
-    this.targetRotation.copy(baseQuaternion).multiply(bankQuat).multiply(pitchQuat);
+    // Combine rotations: alignment * bank * pitch
+    this.targetRotation.copy(alignmentQuat).multiply(bankQuat).multiply(pitchQuat);
 
     // Smooth transition
     this.currentRotation.slerp(this.targetRotation, ROTATION_RATE);
