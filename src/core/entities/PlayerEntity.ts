@@ -117,8 +117,15 @@ export class PlayerEntity extends FlyingEntity implements IFlyingEntity {
       this.cursorY = event.clientY; //Math.max(0, Math.min(window.innerHeight, this.cursorY + event.movementY));
 
       // Update ship control values
-      this.mouseX = (this.cursorX - this.screenCenterX) / this.screenCenterX;
-      this.mouseY = (this.screenCenterY - this.cursorY) / this.screenCenterY;
+      // this.mouseX = (this.cursorX - this.screenCenterX) / this.screenCenterX;
+      // this.mouseY = (this.screenCenterY - this.cursorY) / this.screenCenterY;
+
+      this.mouseX = (event.clientX - this.screenCenterX) / this.screenCenterX;
+      this.mouseY = (event.clientY - this.screenCenterY) / this.screenCenterY;
+
+      // Clamp values to -1 to 1
+      this.mouseX = Math.max(-1, Math.min(1, this.mouseX));
+      this.mouseY = Math.max(-1, Math.min(1, this.mouseY));
 
       // Update crosshair position
       this.crosshair.style.left = `${this.cursorX}px`;
