@@ -87,8 +87,7 @@ export class FlyingEntity implements IFlyingEntity, IEntity {
     if (!this.body) return;
 
     // Get position and calculate surface normal
-    const pos = this.body.translation();
-    const up = new THREE.Vector3(pos.x, pos.y, pos.z).normalize();
+    const up = this.getPosition().clone().normalize();
 
     // Create surface-aligned coordinate system
     const forward = new THREE.Vector3(0, 0, 1);
