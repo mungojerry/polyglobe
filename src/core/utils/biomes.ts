@@ -43,12 +43,12 @@ export const BIOMES: BiomesMap = {
     name: BiomeName.Ocean,
     color: new THREE.Color(0x0055aa), // Rich medium blue
     elevationMin: 0.15,
-    elevationMax: 0.42,
+    elevationMax: 0.4599,
   },
   [BiomeName.Beach]: {
     name: BiomeName.Beach,
     color: new THREE.Color(0xf0e68c), // Khaki sand color
-    elevationMin: 0.42,
+    elevationMin: 0.4599,
     elevationMax: 0.46,
   },
   [BiomeName.Land]: {
@@ -87,13 +87,15 @@ export function isLand(height: number) {
 const sortedBiomes = Object.values(BIOMES).sort((a, b) => a.elevationMin - b.elevationMin);
 
 export function getBiomeByElevation(elevation: number): { biome: Biome; color: THREE.Color } {
+  const interpolationStrength = 4;
   for (let i = 0; i < sortedBiomes.length - 1; i++) {
     const currentBiome = sortedBiomes[i];
     const nextBiome = sortedBiomes[i + 1];
 
     if (elevation >= currentBiome.elevationMin && elevation < currentBiome.elevationMax) {
       // Calculate how far we are between this biome and the next
-      const t = (elevation - currentBiome.elevationMin) / (currentBiome.elevationMax - currentBiome.elevationMin);
+      let t = (elevation - currentBiome.elevationMin) / (currentBiome.elevationMax - currentBiome.elevationMin);
+      t = Math.pow(t, interpolationStrength);
 
       // Interpolate between current and next biome colors
       const lerpedColor = currentBiome.color.clone().lerp(nextBiome.color, t);
