@@ -80,72 +80,58 @@ export class FlyingEntity implements IFlyingEntity, IEntity {
   protected previousUp = new THREE.Vector3(0, 1, 0);
   protected targetRotation = new THREE.Quaternion();
   protected currentRotation = new THREE.Quaternion();
-
   protected previousForward = new THREE.Vector3(0, 0, 1);
-
+  protected previousRight = new THREE.Vector3(1, 0, 0);
   protected updateRotation(): void {
     if (!this.body) return;
 
-    // Get position and calculate surface normal
-    const up = this.getPosition().clone().normalize();
+    // Get current position and calculate up vector (surface normal)
+    const pos = this.body.translation();
+    const up = new THREE.Vector3(pos.x, pos.y, pos.z).normalize();
 
-    // Create surface-aligned coordinate system
-    const forward = new THREE.Vector3(0, 0, 1);
-    forward.sub(up.clone().multiplyScalar(forward.dot(up))).normalize();
-    const right = new THREE.Vector3().crossVectors(up, forward).normalize();
-    forward.crossVectors(right, up);
+    // Project previous forward onto new surface plane
+    const projectedForward = this.previousForward
+      .clone()
+      .sub(up.clone().multiplyScalar(this.previousForward.dot(up)))
+      .normalize();
 
-    // Create base orientation matrix
+    // Project previous right onto new surface plane
+    const projectedRight = this.previousRight
+      .clone()
+      .sub(up.clone().multiplyScalar(this.previousRight.dot(up)))
+      .normalize();
+
+    // Ensure right is perpendicular to up and projected forward
+    const right = projectedRight.sub(projectedForward.clone().multiplyScalar(projectedRight.dot(projectedForward))).normalize();
+
+    // Ensure forward is perpendicular to both up and right
+    const forward = new THREE.Vector3().crossVectors(right, up).normalize();
+
+    // Create base orientation matrix from orthogonal vectors
     const baseRotation = new THREE.Matrix4().makeBasis(right, up, forward);
     const baseQuaternion = new THREE.Quaternion().setFromRotationMatrix(baseRotation);
 
-    // Apply control inputs
+    // Apply pitch and roll rotations
     const pitchQuat = new THREE.Quaternion().setFromAxisAngle(right, THREE.MathUtils.clamp(this.mouseY * MAX_PITCH, -MAX_PITCH, MAX_PITCH));
     const rollQuat = new THREE.Quaternion().setFromAxisAngle(forward, THREE.MathUtils.clamp(this.mouseX * MAX_ROLL, -MAX_ROLL, MAX_ROLL));
 
-    // Combine rotations
+    // Combine rotations: base orientation first, then pitch and roll
     this.targetRotation.copy(baseQuaternion).multiply(pitchQuat).multiply(rollQuat);
 
-    // Smooth transition
-    this.currentRotation.slerp(this.targetRotation, 0.1);
+    // Smooth transition to target rotation
+    this.currentRotation.slerp(this.targetRotation, ROTATION_RATE);
 
-    // Apply to rigid body
+    // Apply final rotation to physics body
     const rotation = new RAPIER.Quaternion(this.currentRotation.x, this.currentRotation.y, this.currentRotation.z, this.currentRotation.w);
     this.body.setRotation(rotation, true);
 
     // Update visual object
     this.object.quaternion.copy(this.currentRotation);
-  }
 
-  private updateRotation2(): void {
-    if (!this.body) return;
-
-    // Get ship's position and calculate surface normal (up vector)
-    const pos = this.body.translation();
-    const planetUp = new THREE.Vector3(pos.x, pos.y, pos.z).normalize();
-
-    // Calculate the rotation from previous up to current up
-    const alignmentQuat = new THREE.Quaternion().setFromUnitVectors(this.previousUp, planetUp);
-    this.previousUp.copy(planetUp);
-
-    // Create a basis aligned with the surface
-    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(alignmentQuat);
-    const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(alignmentQuat);
-
-    // Apply pitch rotation (around right axis)
-    const pitchQuat = new THREE.Quaternion().setFromAxisAngle(right, THREE.MathUtils.clamp(this.mouseY * MAX_PITCH, -MAX_PITCH, MAX_PITCH));
-
-    // Apply roll rotation (around forward axis)
-    const rollQuat = new THREE.Quaternion().setFromAxisAngle(forward, THREE.MathUtils.clamp(this.mouseX * MAX_ROLL, -MAX_ROLL, MAX_ROLL));
-
-    // Combine rotations: alignment * pitch * roll
-    this.targetRotation.copy(alignmentQuat).multiply(pitchQuat).multiply(rollQuat);
-
-    // Smoothly interpolate to target rotation
-    this.currentRotation.slerp(this.targetRotation, ROTATION_RATE);
-
-    // Apply final rotation to the body
-    this.body.setRotation(this.currentRotation, true);
+    // Store vectors for next frame
+    this.previousUp.copy(up);
+    this.previousForward.copy(forward);
+    this.previousRight.copy(right);
 
     // Update forward direction for movement
     this.updateForwardDirection();
@@ -154,23 +140,23 @@ export class FlyingEntity implements IFlyingEntity, IEntity {
   private updateForwardDirection(): void {
     if (!this.body) return;
 
-    // Calculate the forward direction in world space
-    const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(this.currentRotation);
+    // Use the continuous forward direction from our rotation system
+    const forward = this.previousForward.clone();
 
-    // Project forward onto the tangent plane of the sphere
+    // Project it onto the current surface plane
     const pos = this.body.translation();
     const up = new THREE.Vector3(pos.x, pos.y, pos.z).normalize();
     const projection = forward.sub(up.multiplyScalar(forward.dot(up))).normalize();
 
     // Store this for use in movement calculations
-    this.forwardDirection = projection;
+    this.forwardDirection.copy(projection);
   }
 
-  // Update the getForwardDirection method to use the cached forward direction
+  // Use the same forward direction as our rotation system
   private forwardDirection = new THREE.Vector3(0, 0, 1);
 
   public getForwardDirection(): THREE.Vector3 {
-    return this.forwardDirection.clone();
+    return this.previousForward.clone();
   }
   createThrustEffect(position: THREE.Vector3 = new THREE.Vector3()): ParticleSystem {
     // Create emitter at position and point downward
