@@ -39,11 +39,11 @@ export class PlayerEntity extends FlyingEntity implements IFlyingEntity {
 
     const loader = new GLTFLoader();
 
-    loader.load("assets/models/wooden_ufo_toy.glb", (gltf) => {
+    loader.load("assets/models/ship2.glb", (gltf) => {
       console.log("loaded saucer");
       const objectMesh = gltf.scene;
       console.log(objectMesh);
-      objectMesh.scale.setScalar(1);
+      objectMesh.scale.setScalar(0.4);
       let mesh: THREE.Mesh;
 
       objectMesh.traverse((child) => {

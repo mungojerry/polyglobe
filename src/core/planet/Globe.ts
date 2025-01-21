@@ -15,7 +15,7 @@ import { BaseNoise } from "./noise/BaseNoise";
 import { TerrainNoise } from "./noise/TerrainNoise";
 import { TerrainDeformer } from "./TerrainDeformer";
 const globeConfig = {
-  showWall: true,
+  showEquator: true,
   showPoles: true,
   showWater: true,
   radius: 1300,
@@ -62,7 +62,7 @@ export class Globe {
     this.waterLevel = globeConfig.radius * 1.055;
 
     if (globeConfig.showWater) this.buildWater();
-    if (globeConfig.showWall) this.buildEquatorWall();
+    if (globeConfig.showEquator) this.buildEquatorWall();
 
     this.object.castShadow = true;
     this.object.receiveShadow = true;
