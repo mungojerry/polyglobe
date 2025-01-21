@@ -100,6 +100,52 @@ export class FlyingEntity implements IFlyingEntity, IEntity {
       alignQuat.setFromAxisAngle(rotationAxis, rotationAngle);
     }
 
+    // Calculate heading with flip when in bottom hemisphere
+    const headingMultiplier = this.mouseY > 0 ? 1 : -1; // Flip sign in bottom hemisphere
+    const heading = headingMultiplier * this.mouseX * (Math.PI / 2); // Scale to ±90°
+    const headingQuat = new THREE.Quaternion();
+    headingQuat.setFromAxisAngle(normal, heading);
+
+    // Pitch based on mouseY
+    const pitchQuat = new THREE.Quaternion();
+    const right = new THREE.Vector3(1, 0, 0);
+    const pitchAngle = -this.mouseY * Math.PI;
+    pitchQuat.setFromAxisAngle(right, pitchAngle);
+
+    // Combine rotations
+    this.targetRotation.copy(alignQuat).multiply(headingQuat).multiply(pitchQuat);
+
+    // Smooth transition
+    this.currentRotation.slerp(this.targetRotation, ROTATION_RATE);
+
+    // Apply to physics body
+    const rotation = new RAPIER.Quaternion(this.currentRotation.x, this.currentRotation.y, this.currentRotation.z, this.currentRotation.w);
+    this.body.setRotation(rotation, true);
+
+    // Update visual object
+    this.object.quaternion.copy(this.currentRotation);
+    this.updateForwardDirection();
+  }
+
+  protected updateRotationFlippedBottomRight(): void {
+    if (!this.body) return;
+
+    // Get position for normal
+    const pos = this.body.translation();
+    const normal = new THREE.Vector3(pos.x, pos.y, pos.z).normalize();
+
+    // Create rotation to align with normal
+    const alignQuat = new THREE.Quaternion();
+    const worldUp = new THREE.Vector3(0, 1, 0);
+
+    if (normal.dot(worldUp) < -0.99999) {
+      alignQuat.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI);
+    } else {
+      const rotationAxis = new THREE.Vector3().crossVectors(worldUp, normal).normalize();
+      const rotationAngle = Math.acos(normal.dot(worldUp));
+      alignQuat.setFromAxisAngle(rotationAxis, rotationAngle);
+    }
+
     // Calculate heading only from mouseX (-1 to 1) to avoid the 180° flip
     const heading = -this.mouseX * (Math.PI / 2); // Scale to ±90°
     const headingQuat = new THREE.Quaternion();
