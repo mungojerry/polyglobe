@@ -12,7 +12,7 @@ import { RibbonTrail } from "./RibbonTrail";
 const THRUST_FORCE = 10; // Increased for better control
 const MAX_VELOCITY = 150;
 
-const ROTATION_RATE = 0.05; // Slower rotation for better control
+const ROTATION_RATE = 0.5; // Slower rotation for better control
 const MAX_PITCH = Math.PI * 0.95; // Maximum pitch angle (about 72 degrees)
 const MAX_ROLL = Math.PI * 0.95; // Maximum roll angle (about 54 degrees)
 const MOUSE_SENSITIVITY = 0.003;
@@ -88,7 +88,11 @@ export class FlyingEntity implements IFlyingEntity, IEntity {
     const pos = this.body.translation();
     const normal = new THREE.Vector3(pos.x, pos.y, pos.z).normalize();
 
-    // Create rotation to align with normal
+    const headingMultiplier = this.mouseY > 0 ? 1 : -1;
+    const heading = headingMultiplier * this.mouseX * (Math.PI / 2);
+    const headingQuat = new THREE.Quaternion();
+    headingQuat.setFromAxisAngle(new THREE.Vector3(0, 1, 0), heading);
+
     const alignQuat = new THREE.Quaternion();
     const worldUp = new THREE.Vector3(0, 1, 0);
 
@@ -100,19 +104,13 @@ export class FlyingEntity implements IFlyingEntity, IEntity {
       alignQuat.setFromAxisAngle(rotationAxis, rotationAngle);
     }
 
-    // Calculate heading with flip when in bottom hemisphere
-    const headingMultiplier = this.mouseY > 0 ? 1 : -1; // Flip sign in bottom hemisphere
-    const heading = headingMultiplier * this.mouseX * (Math.PI / 2); // Scale to ±90°
-    const headingQuat = new THREE.Quaternion();
-    headingQuat.setFromAxisAngle(normal, heading);
-
     // Pitch based on mouseY
     const pitchQuat = new THREE.Quaternion();
     const right = new THREE.Vector3(1, 0, 0);
     const pitchAngle = -this.mouseY * Math.PI;
     pitchQuat.setFromAxisAngle(right, pitchAngle);
 
-    // Combine rotations
+    // Combine rotations: heading first, then align to surface, then pitch
     this.targetRotation.copy(alignQuat).multiply(headingQuat).multiply(pitchQuat);
 
     // Smooth transition
