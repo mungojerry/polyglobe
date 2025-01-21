@@ -15,11 +15,11 @@ import { BaseNoise } from "./noise/BaseNoise";
 import { TerrainNoise } from "./noise/TerrainNoise";
 import { TerrainDeformer } from "./TerrainDeformer";
 const globeConfig = {
-  showWall: false,
-  showPoles: false,
+  showWall: true,
+  showPoles: true,
   showWater: true,
   radius: 1300,
-  detail: 40,
+  detail: 30,
   chunkSize: 20,
   showChunks: true,
 };

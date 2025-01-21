@@ -39,11 +39,11 @@ export class PlayerEntity extends FlyingEntity implements IFlyingEntity {
 
     const loader = new GLTFLoader();
 
-    loader.load("assets/models/wooden_ufo_toy.glb", (gltf) => {
+    loader.load("assets/models/ship2.glb", (gltf) => {
       console.log("loaded saucer");
       const objectMesh = gltf.scene;
       console.log(objectMesh);
-      objectMesh.scale.setScalar(1);
+      objectMesh.scale.setScalar(0.4);
       let mesh: THREE.Mesh;
 
       objectMesh.traverse((child) => {
@@ -113,13 +113,10 @@ export class PlayerEntity extends FlyingEntity implements IFlyingEntity {
     // Mouse movement handler
     document.addEventListener("mousemove", (event) => {
       // Update cursor position based on movement
-      this.cursorX = event.clientX; //Math.max(0, Math.min(window.innerWidth, this.cursorX + event.movementX));
-      this.cursorY = event.clientY; //Math.max(0, Math.min(window.innerHeight, this.cursorY + event.movementY));
+      this.cursorX = event.clientX;
+      this.cursorY = event.clientY;
 
       // Update ship control values
-      // this.mouseX = (this.cursorX - this.screenCenterX) / this.screenCenterX;
-      // this.mouseY = (this.screenCenterY - this.cursorY) / this.screenCenterY;
-
       this.mouseX = (event.clientX - this.screenCenterX) / this.screenCenterX;
       this.mouseY = (event.clientY - this.screenCenterY) / this.screenCenterY;
 
@@ -136,8 +133,6 @@ export class PlayerEntity extends FlyingEntity implements IFlyingEntity {
     window.addEventListener("keydown", (event) => {
       if (event.code === "Space") {
         this.thrustActive = true;
-      } else if (event.code === "Escape" && this.isPointerLocked) {
-        document.exitPointerLock();
       }
     });
 

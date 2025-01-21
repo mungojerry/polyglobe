@@ -80,41 +80,39 @@ export class FlyingEntity implements IFlyingEntity, IEntity {
   protected targetRotation = new THREE.Quaternion();
   protected currentRotation = new THREE.Quaternion();
   protected previousRight = new THREE.Vector3(1, 0, 0);
+
   protected updateRotation(): void {
     if (!this.body) return;
 
-    // Get position and create up vector
+    // Get position for normal
     const pos = this.body.translation();
-    const up = new THREE.Vector3(pos.x, pos.y, pos.z).normalize();
+    const normal = new THREE.Vector3(pos.x, pos.y, pos.z).normalize();
 
-    // Mouse input normalized -1 to 1
-    const pitchAmount = -this.mouseY * MAX_PITCH;
-    const bankAmount = this.mouseX * MAX_ROLL;
-
-    // Calculate the rotation that aligns 'up' with the planet's surface normal
-    const alignmentQuat = new THREE.Quaternion();
+    // Create rotation to align with normal
+    const alignQuat = new THREE.Quaternion();
     const worldUp = new THREE.Vector3(0, 1, 0);
 
-    // Find the rotation from world-up to our desired up vector
-    if (up.dot(worldUp) < -0.99999) {
-      // Special case: we're exactly inverted
-      alignmentQuat.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI);
+    if (normal.dot(worldUp) < -0.99999) {
+      alignQuat.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI);
     } else {
-      // Normal case: find shortest arc rotation from worldUp to up
-      const rotationAxis = new THREE.Vector3().crossVectors(worldUp, up).normalize();
-      const rotationAngle = Math.acos(up.dot(worldUp));
-      alignmentQuat.setFromAxisAngle(rotationAxis, rotationAngle);
+      const rotationAxis = new THREE.Vector3().crossVectors(worldUp, normal).normalize();
+      const rotationAngle = Math.acos(normal.dot(worldUp));
+      alignQuat.setFromAxisAngle(rotationAxis, rotationAngle);
     }
 
-    // Create pitch and bank rotations relative to aligned orientation
-    const pitchAxis = new THREE.Vector3(1, 0, 0).applyQuaternion(alignmentQuat);
-    const bankAxis = new THREE.Vector3(0, 0, 1).applyQuaternion(alignmentQuat);
+    // Calculate heading only from mouseX (-1 to 1) to avoid the 180° flip
+    const heading = -this.mouseX * (Math.PI / 2); // Scale to ±90°
+    const headingQuat = new THREE.Quaternion();
+    headingQuat.setFromAxisAngle(normal, heading);
 
-    const pitchQuat = new THREE.Quaternion().setFromAxisAngle(pitchAxis, pitchAmount);
-    const bankQuat = new THREE.Quaternion().setFromAxisAngle(bankAxis, bankAmount);
+    // Pitch based on mouseY
+    const pitchQuat = new THREE.Quaternion();
+    const right = new THREE.Vector3(1, 0, 0);
+    const pitchAngle = -this.mouseY * Math.PI;
+    pitchQuat.setFromAxisAngle(right, pitchAngle);
 
-    // Combine rotations: alignment * bank * pitch
-    this.targetRotation.copy(alignmentQuat).multiply(bankQuat).multiply(pitchQuat);
+    // Combine rotations
+    this.targetRotation.copy(alignQuat).multiply(headingQuat).multiply(pitchQuat);
 
     // Smooth transition
     this.currentRotation.slerp(this.targetRotation, ROTATION_RATE);
@@ -125,8 +123,6 @@ export class FlyingEntity implements IFlyingEntity, IEntity {
 
     // Update visual object
     this.object.quaternion.copy(this.currentRotation);
-
-    // Update forward direction for movement
     this.updateForwardDirection();
   }
   protected updateRotationBROKNEPITCH(): void {
