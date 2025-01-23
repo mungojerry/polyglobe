@@ -5,20 +5,19 @@ import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise";
 import { DragBehavior, PlanetaryGravityBehavior } from "../particles/Behaviors";
 import { ConeEmitter } from "../particles/Emitters";
 import { ParticleSystem } from "../particles/ParticleSystem";
-import { vectorPool } from "../utils/VectorPool";
 
 // Constants
-const THRUST_FORCE = 10; // Increased for better control
-const LINEAR_DAMPING = 0.2; // Reduced for more responsive movement
-const ANGULAR_DAMPING = 2.0; // Reduced for smoother rotation
+const THRUST_FORCE = 20; // Increased for better control
+const LINEAR_DAMPING = 0.1; // Reduced for more responsive movement
+const ANGULAR_DAMPING = 1.0; // Reduced for smoother rotation
 const PLANET_RADIUS = 1300;
 const GRAVITY_STRENGTH = 9.8 * 20; // Reduced gravity for better control
 const MAX_VELOCITY = 150;
 const SHIP_START_HEIGHT = PLANET_RADIUS + 50;
-const ROTATION_RATE = 0.05; // Slower rotation for better control
+const ROTATION_RATE = 0.1; // Faster rotation for better control
 const MAX_PITCH = Math.PI * 0.95; // Maximum pitch angle (about 72 degrees)
 const MAX_ROLL = Math.PI * 0.95; // Maximum roll angle (about 54 degrees)
-const MOUSE_SENSITIVITY = 0.003;
+const MOUSE_SENSITIVITY = 0.005; // Increased sensitivity for more responsive control
 
 const COLLISION_MASKS = {
   PLANET: 0xffffffff,
@@ -38,7 +37,6 @@ export class ZarchFlyScene {
   private mouseY: number = 0;
   private screenCenterX: number = 0;
   private screenCenterY: number = 0;
-  private isPointerLocked: boolean = false;
   private currentPitch: number = 0;
   private currentRoll: number = 0;
   private crosshair: HTMLDivElement;
@@ -102,25 +100,13 @@ export class ZarchFlyScene {
   private setupEventListeners(): void {
     // Mouse movement with pointer lock
     document.addEventListener("mousemove", (event) => {
-      if (this.isPointerLocked) {
-        // Update cursor position based on movement
-        this.cursorX = Math.max(0, Math.min(window.innerWidth, this.cursorX + event.movementX));
-        this.cursorY = Math.max(0, Math.min(window.innerHeight, this.cursorY + event.movementY));
+      // Direct cursor position
+      this.cursorX = event.clientX;
+      this.cursorY = event.clientY;
 
-        // Update ship control values
-        this.mouseX += event.movementX * MOUSE_SENSITIVITY;
-        this.mouseY += event.movementY * MOUSE_SENSITIVITY;
-        this.mouseX = Math.max(-1, Math.min(1, this.mouseX));
-        this.mouseY = Math.max(-1, Math.min(1, this.mouseY));
-      } else {
-        // Direct cursor position
-        this.cursorX = event.clientX;
-        this.cursorY = event.clientY;
-
-        // Update ship control values
-        this.mouseX = (event.clientX - this.screenCenterX) / this.screenCenterX;
-        this.mouseY = (this.screenCenterY - event.clientY) / this.screenCenterY;
-      }
+      // Update ship control values
+      this.mouseX = (event.clientX - this.screenCenterX) / this.screenCenterX;
+      this.mouseY = (this.screenCenterY - event.clientY) / this.screenCenterY;
 
       // Update crosshair position
       this.crosshair.style.left = `${this.cursorX}px`;
@@ -128,31 +114,17 @@ export class ZarchFlyScene {
     });
 
     // Pointer lock controls
-    this.renderer.domElement.addEventListener("click", () => {
-      if (!this.isPointerLocked) {
-        this.renderer.domElement.requestPointerLock();
-      }
+    this.renderer.domElement.addEventListener("mousedown", () => {
+      this.thrustActive = true;
     });
-
-    document.addEventListener("pointerlockchange", () => {
-      this.isPointerLocked = document.pointerLockElement === this.renderer.domElement;
-      if (!this.isPointerLocked) {
-        this.mouseX = 0;
-        this.mouseY = 0;
-        // Reset cursor to center when exiting pointer lock
-        this.cursorX = window.innerWidth / 2;
-        this.cursorY = window.innerHeight / 2;
-        this.crosshair.style.left = `${this.cursorX}px`;
-        this.crosshair.style.top = `${this.cursorY}px`;
-      }
+    this.renderer.domElement.addEventListener("mouseup", () => {
+      this.thrustActive = false;
     });
 
     // Thrust control
     window.addEventListener("keydown", (event) => {
       if (event.code === "Space") {
         this.thrustActive = true;
-      } else if (event.code === "Escape" && this.isPointerLocked) {
-        document.exitPointerLock();
       }
     });
 
@@ -299,33 +271,28 @@ export class ZarchFlyScene {
   private updateRotation(): void {
     if (!this.shipBody) return;
 
-    // Get ship's position and up vector (surface normal)
+    // Get ship's position and surface normal
     const pos = this.shipBody.translation();
     const planetUp = new THREE.Vector3(pos.x, pos.y, pos.z).normalize();
 
-    // Update pitch and roll based on mouse input, but invert based on hemisphere
-    const upDot = planetUp.y; // dot product with world up to determine hemisphere
-    this.currentPitch = THREE.MathUtils.lerp(this.currentPitch, this.mouseY * MAX_PITCH * Math.sign(upDot), ROTATION_RATE);
-    this.currentRoll = THREE.MathUtils.lerp(this.currentRoll, this.mouseX * MAX_ROLL * Math.sign(upDot), ROTATION_RATE);
+    // Create rotation matrix to align with surface
+    const surfaceAlignmentMatrix = new THREE.Matrix4().makeRotationFromQuaternion(
+      new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), planetUp)
+    );
 
-    // Start with base orientation aligned to planet surface
-    const baseQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), planetUp);
+    // Create separate rotations for pitch and roll
+    const pitchRotation = new THREE.Matrix4().makeRotationX(-this.mouseY * MAX_PITCH);
+    const rollRotation = new THREE.Matrix4().makeRotationZ(-this.mouseX * MAX_ROLL);
 
-    // Apply pitch rotation around the right axis
-    const rightAxis = new THREE.Vector3(1, 0, 0).applyQuaternion(baseQuat);
-    const pitchQuat = new THREE.Quaternion().setFromAxisAngle(rightAxis, this.currentPitch);
+    // Combine rotations
+    const finalRotationMatrix = new THREE.Matrix4().multiply(surfaceAlignmentMatrix).multiply(pitchRotation).multiply(rollRotation);
 
-    // Apply roll rotation around the forward axis
-    const forwardAxis = new THREE.Vector3(0, 0, 1).applyQuaternion(baseQuat);
-    const rollQuat = new THREE.Quaternion().setFromAxisAngle(forwardAxis, this.currentRoll);
-
-    // Combine all rotations
-    const finalQuat = new THREE.Quaternion().multiplyQuaternions(baseQuat, pitchQuat).multiply(rollQuat);
+    // Convert matrix back to quaternion
+    const finalQuat = new THREE.Quaternion().setFromRotationMatrix(finalRotationMatrix);
 
     // Apply final rotation
     this.shipBody.setRotation(finalQuat, true);
   }
-
   private updateMovement(): void {
     if (!this.shipBody) return;
 
@@ -382,35 +349,34 @@ export class ZarchFlyScene {
   private currentLookAt = new THREE.Vector3();
 
   private updateCamera(position: THREE.Vector3): void {
-    // Calculate up vector based on position relative to planet center
-    const up = position.clone().normalize();
+    // Normalized surface normal
+    const surfaceNormal = position.clone().normalize();
 
-    // Use a constant forward direction (we don't want it to yaw)
-    const forward = vectorPool.getVector(0, 0, 1);
+    // Create rotation that aligns camera with surface
+    const worldUp = new THREE.Vector3(0, 1, 0);
+    const rotationAxis = new THREE.Vector3().crossVectors(worldUp, surfaceNormal);
+    const angle = worldUp.angleTo(surfaceNormal);
 
-    // Calculate right vector from up and forward
-    const right = vectorPool.getVector().crossVectors(up, forward).normalize();
+    const surfaceRotation = new THREE.Quaternion().setFromAxisAngle(rotationAxis.normalize(), angle);
 
-    // Recalculate forward to ensure it's perpendicular to up
-    forward.crossVectors(right, up).normalize();
+    // Compute camera offset in rotated space
+    const localOffset = new THREE.Vector3(0, this.offset.y, this.offset.z);
+    const rotatedOffset = localOffset.clone().applyQuaternion(surfaceRotation);
 
-    // Calculate target position using offset
-    const targetPosition = position.clone();
-    targetPosition.add(up.multiplyScalar(this.offset.y));
-    targetPosition.add(forward.multiplyScalar(this.offset.z));
+    // Target camera position
+    const targetPosition = position.clone().add(rotatedOffset);
 
-    // Smooth camera movement
-    const cameraLerp = 1;
-    this.currentPosition.lerp(targetPosition, cameraLerp);
+    // Smooth interpolation
+    const smoothFactor = 0.9;
+    this.currentPosition.lerp(targetPosition, smoothFactor);
+    this.currentLookAt.lerp(position, smoothFactor);
+
+    // Apply camera transformations
     this.camera.position.copy(this.currentPosition);
-    this.currentLookAt.lerp(position, cameraLerp);
     this.camera.lookAt(this.currentLookAt);
-    this.camera.up.copy(up);
-
-    // Release vectors back to pool
-    vectorPool.releaseVector(forward);
-    vectorPool.releaseVector(right);
+    this.camera.up.copy(surfaceNormal);
   }
+
   private animate(): void {
     requestAnimationFrame(() => this.animate());
 

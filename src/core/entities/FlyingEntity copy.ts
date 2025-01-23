@@ -12,27 +12,20 @@ import { RibbonTrail } from "./RibbonTrail";
 const THRUST_FORCE = 10; // Increased for better control
 const MAX_VELOCITY = 150;
 
-const ROTATION_RATE = 0.05; // Slower rotation for better control
-const MAX_PITCH = Math.PI * 0.5; // Maximum pitch angle (about 72 degrees)
-const MAX_ROLL = Math.PI * 0.5; // Maximum roll angle (about 54 degrees)
+const ROTATION_RATE = 0.5; // Slower rotation for better control
+const MAX_PITCH = Math.PI * 0.95; // Maximum pitch angle (about 72 degrees)
+const MAX_ROLL = Math.PI * 0.95; // Maximum roll angle (about 54 degrees)
 
 export interface IFlyingEntity {
   applyDamage(amount: number): void;
   onHit(): void;
 }
 
-type MoveDirection = -1 | 0 | 1;
-type RotationDirection = -1 | 0 | 1;
-
 export class FlyingEntity implements IFlyingEntity, IEntity {
   protected object!: THREE.Object3D;
   protected body!: RAPIER.RigidBody;
   protected world: RAPIER.World;
-  protected rotationSpeed: number = 0.1;
   protected thrustForce: number = 0.3;
-  protected movementForce: number = 0.1;
-  protected move: MoveDirection = 0;
-  protected rotationDirection: RotationDirection = 0;
   protected thrusting: boolean = false;
   private ribbonTrail: RibbonTrail;
   protected scene: THREE.Scene;
@@ -77,58 +70,59 @@ export class FlyingEntity implements IFlyingEntity, IEntity {
     this.ribbonTrail.update(position, direction);
   }
 
+  // protected targetRotation = new THREE.Quaternion();
+  // protected currentRotation = new THREE.Quaternion();
+  // protected previousRight = new THREE.Vector3(1, 0, 0);
+
   protected updateRotation(): void {
     if (!this.body) return;
 
-    // Get our current position and create our up vector
+    // 1. Get current up vector (gravity direction)
     const pos = this.body.translation();
+    const rot = this.body.rotation();
     const up = new THREE.Vector3(pos.x, pos.y, pos.z).normalize();
 
-    // Create world reference frame
-    const worldUp = new THREE.Vector3(0, 1, 0);
-    let right = new THREE.Vector3().crossVectors(up, worldUp);
+    // 2. Get the ship's current basis vectors from its quaternion
+    const currentOrientation = new THREE.Quaternion(rot.x, rot.y, rot.z, rot.w);
 
-    // Handle pole cases
-    if (right.lengthSq() < 0.001) {
-      right.set(1, 0, 0);
-    }
-    right.normalize();
+    // Get ship's current right and forward vectors
+    const shipRight = new THREE.Vector3(1, 0, 0).applyQuaternion(currentOrientation);
+    const shipForward = new THREE.Vector3(0, 0, 1).applyQuaternion(currentOrientation);
 
-    // Calculate mouse input
-    const mouseAngle = Math.atan2(this.mouseY, this.mouseX);
-    const mouseDistance = Math.min(Math.sqrt(this.mouseX * this.mouseX + this.mouseY * this.mouseY), 1.0);
+    // 3. Project these vectors onto the surface plane
+    // Project right vector
+    const projectedRight = shipRight
+      .clone()
+      .sub(up.clone().multiplyScalar(shipRight.dot(up)))
+      .normalize();
 
-    // Calculate rotation based on mouse input
-    const MAX_TILT = Math.PI / 2;
-    const tiltAmount = mouseDistance * MAX_TILT;
-    const targetDir = up.clone();
+    // Project forward vector
+    const projectedForward = shipForward
+      .clone()
+      .sub(up.clone().multiplyScalar(shipForward.dot(up)))
+      .normalize();
 
-    // Apply rotation
-    const rotationAxis = right.clone().applyAxisAngle(up, mouseAngle).normalize();
-    targetDir.applyAxisAngle(rotationAxis, tiltAmount);
+    // 4. Create the surface-aligned orientation
+    const alignmentMatrix = new THREE.Matrix4().makeBasis(projectedRight, up, projectedForward);
+    const alignmentQuat = new THREE.Quaternion().setFromRotationMatrix(alignmentMatrix);
 
-    // Create target quaternion
-    const targetQuaternion = new THREE.Quaternion();
-    targetQuaternion.setFromUnitVectors(worldUp, targetDir);
+    // 5. Create relative rotations for pitch and yaw
+    const pitchQuat = new THREE.Quaternion().setFromAxisAngle(projectedRight, -this.mouseY * MAX_PITCH);
 
-    // Get current body rotation
-    const currentRotation = this.body.rotation();
-    const currentQuaternion = new THREE.Quaternion(currentRotation.x, currentRotation.y, currentRotation.z, currentRotation.w);
+    const yawQuat = new THREE.Quaternion().setFromAxisAngle(up, this.mouseX * MAX_ROLL);
 
-    // Smooth interpolation
-    const ROTATION_SPEED = 0.1;
-    currentQuaternion.slerp(targetQuaternion, ROTATION_SPEED);
+    // 6. Combine rotations
+    const targetRotation = new THREE.Quaternion().copy(alignmentQuat).multiply(yawQuat).multiply(pitchQuat);
 
-    // Apply to physics body
-    this.body.setRotation(
-      {
-        x: currentQuaternion.x,
-        y: currentQuaternion.y,
-        z: currentQuaternion.z,
-        w: currentQuaternion.w,
-      },
-      true
-    );
+    // 7. Smooth interpolation
+    currentOrientation.slerp(targetRotation, ROTATION_RATE);
+
+    // 8. Apply to physics body
+    const rotation = new RAPIER.Quaternion(currentOrientation.x, currentOrientation.y, currentOrientation.z, currentOrientation.w);
+    this.body.setRotation(rotation, true);
+
+    // 9. Update visual object
+    this.object.quaternion.copy(currentOrientation);
   }
   private forwardDirection = new THREE.Vector3(0, 0, 1);
 
@@ -169,7 +163,7 @@ export class FlyingEntity implements IFlyingEntity, IEntity {
       },
     });
   }
-  private updateMovement(): void {
+  private updateThrust(): void {
     if (!this.body) return;
 
     if (this.thrustActive) {
@@ -201,7 +195,7 @@ export class FlyingEntity implements IFlyingEntity, IEntity {
     if (!this.object || !this.body) return;
 
     this.updateRotation();
-    this.updateMovement();
+    this.updateThrust();
 
     // Update ship model position and rotation
     const translation = this.body.translation();
@@ -236,14 +230,6 @@ export class FlyingEntity implements IFlyingEntity, IEntity {
     const position = this.getPosition();
     return vectorPool.getVector(position.x, position.y, position.z).normalize();
   }
-  // public getForwardDirection(): THREE.Vector3 {
-  //   const position = vectorPool.getVector(this.body.translation().x, this.body.translation().y, this.body.translation().z);
-  //   const up = position.clone().normalize();
-  //   const orientation = this.object.quaternion;
-  //   const forward = vectorPool.getVector(0, 0, 1).applyQuaternion(orientation);
-  //   const projection = forward.clone().sub(up.clone().multiplyScalar(forward.dot(up)));
-  //   return projection.normalize();
-  // }
 
   protected thrust() {
     if (this.thrusting) {
@@ -255,14 +241,6 @@ export class FlyingEntity implements IFlyingEntity, IEntity {
 
   public setThrusting(thrusting: boolean) {
     this.thrusting = thrusting;
-  }
-
-  public setMove(move: MoveDirection) {
-    this.move = move;
-  }
-
-  public setRotationDirection(rotationDirection: RotationDirection) {
-    this.rotationDirection = rotationDirection;
   }
 
   public onHit(): void {

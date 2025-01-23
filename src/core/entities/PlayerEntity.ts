@@ -141,6 +141,12 @@ export class PlayerEntity extends FlyingEntity implements IFlyingEntity {
         this.thrustActive = false;
       }
     });
+    window.addEventListener("mousedown", (event) => {
+      this.thrustActive = true;
+    });
+    window.addEventListener("mouseup", (event) => {
+      this.thrustActive = false;
+    });
 
     // Update screen center on resize
     window.addEventListener("resize", () => {
