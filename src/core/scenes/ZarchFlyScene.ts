@@ -281,8 +281,8 @@ export class ZarchFlyScene {
     );
 
     // Create separate rotations for pitch and roll
-    const pitchRotation = new THREE.Matrix4().makeRotationX(-this.mouseY * MAX_PITCH);
-    const rollRotation = new THREE.Matrix4().makeRotationZ(-this.mouseX * MAX_ROLL);
+    const pitchRotation = new THREE.Matrix4().makeRotationX(this.mouseY * MAX_PITCH);
+    const rollRotation = new THREE.Matrix4().makeRotationZ(this.mouseX * MAX_ROLL);
 
     // Combine rotations
     const finalRotationMatrix = new THREE.Matrix4().multiply(surfaceAlignmentMatrix).multiply(pitchRotation).multiply(rollRotation);
