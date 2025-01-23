@@ -13,11 +13,13 @@ const ANGULAR_DAMPING = 1.0; // Reduced for smoother rotation
 const PLANET_RADIUS = 1300;
 const GRAVITY_STRENGTH = 9.8 * 20; // Reduced gravity for better control
 const MAX_VELOCITY = 150;
-const SHIP_START_HEIGHT = PLANET_RADIUS + 50;
+const SHIP_START_HEIGHT = PLANET_RADIUS + 150;
 const ROTATION_RATE = 0.1; // Faster rotation for better control
-const MAX_PITCH = Math.PI * 0.95; // Maximum pitch angle (about 72 degrees)
-const MAX_ROLL = Math.PI * 0.95; // Maximum roll angle (about 54 degrees)
+const MAX_PITCH = Math.PI; // Maximum pitch angle (about 72 degrees)
+const MAX_ROLL = Math.PI; // Maximum roll angle (about 54 degrees)
 const MOUSE_SENSITIVITY = 0.005; // Increased sensitivity for more responsive control
+const POLE_CYLINDER_RADIUS = 50;
+const POLE_CYLINDER_HEIGHT = 100;
 
 const COLLISION_MASKS = {
   PLANET: 0xffffffff,
@@ -42,6 +44,8 @@ export class ZarchFlyScene {
   private crosshair: HTMLDivElement;
   private cursorX: number = 0;
   private cursorY: number = 0;
+  private northPoleMesh: THREE.Mesh | undefined;
+  private southPoleMesh: THREE.Mesh | undefined;
 
   constructor() {
     this.scene = new THREE.Scene();
@@ -70,8 +74,9 @@ export class ZarchFlyScene {
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.25);
     this.scene.add(ambientLight);
     const directionalLight = new THREE.DirectionalLight(0xffffff, 2);
-    directionalLight.position.set(0, 2000, 0);
+    directionalLight.position.set(2000, 2000, 0);
     this.scene.add(directionalLight);
+    directionalLight.castShadow = true;
 
     const pointLight1 = new THREE.PointLight(0xffffff, 1);
     pointLight1.position.set(2000, 0, 0);
@@ -83,6 +88,8 @@ export class ZarchFlyScene {
 
     this.updateScreenCenter();
     this.initialize();
+    this.createPoleCylinders();
+    this.createVisiblePoleCylinders();
   }
 
   private updateScreenCenter(): void {
@@ -153,6 +160,8 @@ export class ZarchFlyScene {
           // Scale and rotate ship model to match thrust direction
           this.shipModel.scale.set(1.5, 1.5, 1.5);
           this.shipModel.rotation.x = Math.PI; // Rotate 180 degrees to point engines down
+          this.shipModel.castShadow = true;
+          this.shipModel.receiveShadow = true;
           this.scene.add(this.shipModel);
 
           const startPos = new THREE.Vector3(0, SHIP_START_HEIGHT, 0);
@@ -248,9 +257,9 @@ export class ZarchFlyScene {
       flatShading: true,
       metalness: 0,
       roughness: 0.8,
-      wireframe: true,
+      wireframe: false,
     });
-
+    geometry.computeVertexNormals();
     const planet = new THREE.Mesh(geometry, material);
     planet.castShadow = true;
     planet.receiveShadow = true;
@@ -266,6 +275,44 @@ export class ZarchFlyScene {
       .setRestitution(0.2);
 
     this.world.createCollider(colliderDesc, this.planetBody);
+  }
+
+  private createPoleCylinders(): void {
+    // North pole cylinder
+    const northPoleColliderDesc = RAPIER.ColliderDesc.cylinder(POLE_CYLINDER_HEIGHT / 2, POLE_CYLINDER_RADIUS).setTranslation(
+      0,
+      PLANET_RADIUS + POLE_CYLINDER_HEIGHT / 2,
+      0
+    );
+
+    // South pole cylinder
+    const southPoleColliderDesc = RAPIER.ColliderDesc.cylinder(POLE_CYLINDER_HEIGHT / 2, POLE_CYLINDER_RADIUS).setTranslation(
+      0,
+      -(PLANET_RADIUS + POLE_CYLINDER_HEIGHT / 2),
+      0
+    );
+
+    this.world.createCollider(northPoleColliderDesc, this.planetBody);
+    this.world.createCollider(southPoleColliderDesc, this.planetBody);
+  }
+
+  private createVisiblePoleCylinders(): void {
+    const geometry = new THREE.CylinderGeometry(POLE_CYLINDER_RADIUS, POLE_CYLINDER_RADIUS, POLE_CYLINDER_HEIGHT, 32);
+    const material = new THREE.MeshPhongMaterial({ color: 0x808080, flatShading: true });
+
+    this.northPoleMesh = new THREE.Mesh(geometry, material);
+    this.southPoleMesh = new THREE.Mesh(geometry, material);
+
+    this.northPoleMesh.position.set(0, PLANET_RADIUS + POLE_CYLINDER_HEIGHT / 2, 0);
+    this.southPoleMesh.position.set(0, -(PLANET_RADIUS + POLE_CYLINDER_HEIGHT / 2), 0);
+    this.northPoleMesh.receiveShadow = true;
+    this.northPoleMesh.castShadow = true;
+    this.southPoleMesh.receiveShadow = true;
+    this.southPoleMesh.castShadow = true;
+    this.northPoleMesh.geometry.computeVertexNormals();
+    this.southPoleMesh.geometry.computeVertexNormals();
+    this.scene.add(this.northPoleMesh);
+    this.scene.add(this.southPoleMesh);
   }
 
   private updateRotation(): void {
@@ -367,7 +414,7 @@ export class ZarchFlyScene {
     const targetPosition = position.clone().add(rotatedOffset);
 
     // Smooth interpolation
-    const smoothFactor = 0.9;
+    const smoothFactor = 1;
     this.currentPosition.lerp(targetPosition, smoothFactor);
     this.currentLookAt.lerp(position, smoothFactor);
 
