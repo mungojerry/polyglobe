@@ -20,6 +20,7 @@ const MAX_ROLL = Math.PI; // Maximum roll angle (about 54 degrees)
 const MOUSE_SENSITIVITY = 0.005; // Increased sensitivity for more responsive control
 const POLE_CYLINDER_RADIUS = 50;
 const POLE_CYLINDER_HEIGHT = 100;
+const SHOT_COOLDOWN = 100; //
 
 const COLLISION_MASKS = {
   PLANET: 0xffffffff,
@@ -47,10 +48,15 @@ export class ZarchFlyScene {
   private northPoleMesh: THREE.Mesh | undefined;
   private southPoleMesh: THREE.Mesh | undefined;
 
+  private particleSystem: ParticleSystem | null = null;
+  private bulletSystem: ParticleSystem | null = null;
+
   constructor() {
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 10000);
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(this.renderer.domElement);
 
@@ -73,14 +79,24 @@ export class ZarchFlyScene {
     // Lighting
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.25);
     this.scene.add(ambientLight);
+    // const directionalLight = new THREE.DirectionalLight(0xffffff, 2);
+    // directionalLight.position.set(2000, 2000, 0);
+    // this.scene.add(directionalLight);
+    // directionalLight.castShadow = true;
+
     const directionalLight = new THREE.DirectionalLight(0xffffff, 2);
     directionalLight.position.set(2000, 2000, 0);
-    this.scene.add(directionalLight);
     directionalLight.castShadow = true;
+    directionalLight.shadow.mapSize.width = 2048;
+    directionalLight.shadow.mapSize.height = 2048;
+    directionalLight.shadow.camera.near = 1;
+    directionalLight.shadow.camera.far = 5000;
+    directionalLight.shadow.bias = -0.001;
+    this.scene.add(directionalLight);
 
-    const pointLight1 = new THREE.PointLight(0xffffff, 1);
-    pointLight1.position.set(2000, 0, 0);
-    this.scene.add(pointLight1);
+    // const pointLight1 = new THREE.PointLight(0xffffff, 1);
+    // pointLight1.position.set(2000, 0, 0);
+    // this.scene.add(pointLight1);
 
     // Create and configure emitter for thrust
 
@@ -102,6 +118,17 @@ export class ZarchFlyScene {
     this.createPlanet();
     this.setupEventListeners();
     this.animate();
+  }
+
+  // Add to class properties
+  private lastShotTime: number = 0;
+  private mouseLeftDown: boolean = false;
+  private mouseRightDown: boolean = false;
+
+  // Add method to check if can shoot
+  private canShoot(): boolean {
+    const now = performance.now();
+    return now - this.lastShotTime >= SHOT_COOLDOWN;
   }
 
   private setupEventListeners(): void {
@@ -130,13 +157,10 @@ export class ZarchFlyScene {
 
     // Thrust control
     window.addEventListener("keydown", (event) => {
-      if (event.code === "Space") {
-        this.thrustActive = true;
+      if (event.code === "Space" && this.canShoot()) {
+        this.bulletSystem?.emit(1);
+        this.lastShotTime = performance.now();
       }
-    });
-
-    window.addEventListener("keyup", (event) => {
-      if (event.code === "Space") this.thrustActive = false;
     });
 
     // Window resize
@@ -147,8 +171,6 @@ export class ZarchFlyScene {
       this.updateScreenCenter();
     });
   }
-
-  particleSystem: ParticleSystem | null = null;
 
   private async createShip(): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -183,7 +205,9 @@ export class ZarchFlyScene {
           this.world.createCollider(shipCollider, this.shipBody);
 
           this.particleSystem = this.createThrustEffect();
+          this.bulletSystem = this.createBullet();
           this.scene.add(this.particleSystem);
+          this.scene.add(this.bulletSystem);
           resolve();
         },
         undefined,
@@ -193,6 +217,41 @@ export class ZarchFlyScene {
   }
 
   emitter!: ConeEmitter;
+  bulletEmitter!: ConeEmitter;
+
+  createBullet(position: THREE.Vector3 = new THREE.Vector3()): ParticleSystem {
+    // Create emitter at position and point downward
+    const emitterPos = position.clone();
+    // Even narrower cone angle (5 degrees) and faster initial velocity
+    this.bulletEmitter = new ConeEmitter(
+      emitterPos,
+      0.1, // Narrower spread
+      2, // Smaller cone angle
+      () => Math.random() * 1 + 15 // Faster initial velocity
+    );
+    const direction = new THREE.Vector3(0, -1, 0);
+    this.emitter.setDirection(direction);
+    return new ParticleSystem({
+      count: 1000,
+      emitter: this.bulletEmitter,
+      behaviors: [
+        new PlanetaryGravityBehavior({
+          center: new THREE.Vector3(0, 0, 0),
+          strength: 2.8, // Reduced gravity effect for better visibility
+        }),
+        new DragBehavior({ dragCoefficient: 0.01 }), // Less drag for longer trails
+      ],
+      appearance: {
+        startColor: new THREE.Color(1, 0.8, 0.3),
+        endColor: new THREE.Color(1, 0.2, 0),
+        startSize: 0.5, // Increased initial size
+        endSize: 0.5,
+        startOpacity: 1, // Slightly reduced initial opacity
+        endOpacity: 1,
+        blending: THREE.NormalBlending,
+      },
+    });
+  }
 
   createThrustEffect(position: THREE.Vector3 = new THREE.Vector3()): ParticleSystem {
     // Create emitter at position and point downward
@@ -231,7 +290,7 @@ export class ZarchFlyScene {
 
   private createPlanet(): void {
     const simplex = new SimplexNoise();
-    const geometry = new THREE.SphereGeometry(PLANET_RADIUS, 32, 32);
+    const geometry = new THREE.IcosahedronGeometry(PLANET_RADIUS, 32);
     const positions = geometry.attributes.position;
 
     // Apply noise to vertices
@@ -251,15 +310,15 @@ export class ZarchFlyScene {
       // Update vertex
       positions.setXYZ(i, vertex.x, vertex.y, vertex.z);
     }
-
+    positions.needsUpdate = true;
     const material = new THREE.MeshStandardMaterial({
       color: 0x33ff66,
       flatShading: true,
-      metalness: 0,
-      roughness: 0.8,
+      metalness: 0.5,
+      roughness: 0.1,
       wireframe: false,
     });
-    geometry.computeVertexNormals();
+    // geometry.computeVertexNormals();
     const planet = new THREE.Mesh(geometry, material);
     planet.castShadow = true;
     planet.receiveShadow = true;
@@ -423,7 +482,37 @@ export class ZarchFlyScene {
     this.camera.lookAt(this.currentLookAt);
     this.camera.up.copy(surfaceNormal);
   }
+  private getShipForwardDirection(): THREE.Vector3 {
+    if (!this.shipBody) return new THREE.Vector3();
 
+    // Get current rotation
+    const rotation = this.shipBody.rotation();
+    const quat = new THREE.Quaternion(rotation.x, rotation.y, rotation.z, rotation.w);
+
+    // Forward is -Z for the ship model
+    const forward = new THREE.Vector3(0, 0, 1);
+    forward.applyQuaternion(quat);
+
+    return forward.normalize();
+  }
+  private getBulletDirection(): THREE.Vector3 {
+    if (!this.shipBody) return new THREE.Vector3();
+
+    // Get ship orientation vectors
+    const forward = this.getShipForwardDirection();
+    const pos = this.shipBody.translation();
+    const up = new THREE.Vector3(pos.x, pos.y, pos.z).normalize();
+    const right = forward.clone().cross(up).normalize();
+
+    // Mouse influence (-1 to 1 range)
+    const mouseInfluence = -1; // Adjust spread
+    const targetDir = forward
+      .clone()
+      .add(right.multiplyScalar(-this.mouseX * mouseInfluence))
+      .add(up.multiplyScalar(-this.mouseY * mouseInfluence));
+
+    return targetDir.normalize();
+  }
   private animate(): void {
     requestAnimationFrame(() => this.animate());
 
@@ -443,11 +532,13 @@ export class ZarchFlyScene {
     if (this.shipModel) {
       // Update particle system position and gravity center
       this.particleSystem?.position.copy(this.shipModel.position);
+      this.bulletSystem?.position.copy(this.shipModel.position);
 
       // Calculate emission direction based on ship's orientation
       const rotation = this.shipModel.quaternion;
       const direction = new THREE.Vector3(0, -1, 0).applyQuaternion(rotation);
       this.emitter.setDirection(direction);
+      this.bulletEmitter.setDirection(direction.negate());
 
       // Emit particles when thrust is active
       if (this.thrustActive) {
@@ -455,6 +546,7 @@ export class ZarchFlyScene {
       }
     }
     this.particleSystem?.update(1 / 60);
+    this.bulletSystem?.update(1 / 60);
     this.updateCamera(this.shipModel.position.clone());
     this.world.step();
     this.renderer.render(this.scene, this.camera);

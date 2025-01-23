@@ -5,34 +5,26 @@ import { ConeEmitter } from "../particles/Emitters";
 import { ParticleSystem } from "../particles/ParticleSystem";
 import { vectorPool } from "../utils/VectorPool";
 import { Bullet } from "../weapons/Bullet";
-import { BulletGenerator } from "../weapons/BulletGenerator";
 import { IEntity } from "./Entity";
 import { HealthBar } from "./HealthBar";
 import { RibbonTrail } from "./RibbonTrail";
 const THRUST_FORCE = 10; // Increased for better control
 const MAX_VELOCITY = 150;
 
-const ROTATION_RATE = 0.05; // Slower rotation for better control
-const MAX_PITCH = Math.PI * 0.5; // Maximum pitch angle (about 72 degrees)
-const MAX_ROLL = Math.PI * 0.5; // Maximum roll angle (about 54 degrees)
+const SHOT_COOLDOWN = 120; // Slower rotation for better control
+const MAX_PITCH = Math.PI; // Maximum pitch angle (about 72 degrees)
+const MAX_ROLL = Math.PI; // Maximum roll angle (about 54 degrees)
 
 export interface IFlyingEntity {
   applyDamage(amount: number): void;
   onHit(): void;
 }
 
-type MoveDirection = -1 | 0 | 1;
-type RotationDirection = -1 | 0 | 1;
-
 export class FlyingEntity implements IFlyingEntity, IEntity {
   protected object!: THREE.Object3D;
   protected body!: RAPIER.RigidBody;
   protected world: RAPIER.World;
-  protected rotationSpeed: number = 0.1;
   protected thrustForce: number = 0.3;
-  protected movementForce: number = 0.1;
-  protected move: MoveDirection = 0;
-  protected rotationDirection: RotationDirection = 0;
   protected thrusting: boolean = false;
   private ribbonTrail: RibbonTrail;
   protected scene: THREE.Scene;
@@ -46,11 +38,18 @@ export class FlyingEntity implements IFlyingEntity, IEntity {
   protected currentRoll: number = 0;
   protected thrustActive: boolean = false;
   protected emitter!: ConeEmitter;
+
+  protected bulletEmitter!: ConeEmitter;
   protected particleSystem: ParticleSystem | null = null;
+  private bulletSystem: ParticleSystem | null = null;
 
   private healthBar!: HealthBar;
   private tag: string;
   private health: number = 100;
+  private canShoot(): boolean {
+    const now = performance.now();
+    return now - this.lastShotTime >= SHOT_COOLDOWN;
+  }
 
   constructor(scene: THREE.Scene, position: THREE.Vector3, world: RAPIER.World, tag: string) {
     this.tag = tag;
@@ -59,8 +58,11 @@ export class FlyingEntity implements IFlyingEntity, IEntity {
     this.scene = scene;
     this.ribbonTrail = new RibbonTrail(scene);
 
-    this.particleSystem = this.createThrustEffect();
+    this.particleSystem = this.createThrustSystem();
     this.scene.add(this.particleSystem);
+
+    this.bulletSystem = this.createBulletSystem();
+    this.scene.add(this.bulletSystem);
   }
 
   private updateHealthBar(camera: THREE.Camera): void {
@@ -76,8 +78,32 @@ export class FlyingEntity implements IFlyingEntity, IEntity {
 
     this.ribbonTrail.update(position, direction);
   }
+  private updateRotation(): void {
+    if (!this.body) return;
 
-  protected updateRotation(): void {
+    // Get ship's position and surface normal
+    const pos = this.body.translation();
+    const planetUp = new THREE.Vector3(pos.x, pos.y, pos.z).normalize();
+
+    // Create rotation matrix to align with surface
+    const surfaceAlignmentMatrix = new THREE.Matrix4().makeRotationFromQuaternion(
+      new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), planetUp)
+    );
+
+    // Create separate rotations for pitch and roll
+    const pitchRotation = new THREE.Matrix4().makeRotationX(this.mouseY * MAX_PITCH);
+    const rollRotation = new THREE.Matrix4().makeRotationZ(this.mouseX * MAX_ROLL);
+
+    // Combine rotations
+    const finalRotationMatrix = new THREE.Matrix4().multiply(surfaceAlignmentMatrix).multiply(pitchRotation).multiply(rollRotation);
+
+    // Convert matrix back to quaternion
+    const finalQuat = new THREE.Quaternion().setFromRotationMatrix(finalRotationMatrix);
+
+    // Apply final rotation
+    this.body.setRotation(finalQuat, true);
+  }
+  protected updateRotationOLD(): void {
     if (!this.body) return;
 
     // Get our current position and create our up vector
@@ -135,7 +161,7 @@ export class FlyingEntity implements IFlyingEntity, IEntity {
   public getForwardDirection(): THREE.Vector3 {
     return this.forwardDirection.clone();
   }
-  createThrustEffect(position: THREE.Vector3 = new THREE.Vector3()): ParticleSystem {
+  createThrustSystem(position: THREE.Vector3 = new THREE.Vector3()): ParticleSystem {
     // Create emitter at position and point downward
     const emitterPos = position.clone();
     // Even narrower cone angle (5 degrees) and faster initial velocity
@@ -166,6 +192,40 @@ export class FlyingEntity implements IFlyingEntity, IEntity {
         startOpacity: 0.8, // Slightly reduced initial opacity
         endOpacity: 0,
         blending: THREE.AdditiveBlending,
+      },
+    });
+  }
+
+  createBulletSystem(position: THREE.Vector3 = new THREE.Vector3()): ParticleSystem {
+    // Create emitter at position and point downward
+    const emitterPos = position.clone();
+    // Even narrower cone angle (5 degrees) and faster initial velocity
+    this.bulletEmitter = new ConeEmitter(
+      emitterPos,
+      0.1, // Narrower spread
+      2, // Smaller cone angle
+      () => Math.random() * 1 + 15 // Faster initial velocity
+    );
+    const direction = new THREE.Vector3(0, -1, 0);
+    this.emitter.setDirection(direction);
+    return new ParticleSystem({
+      count: 1000,
+      emitter: this.bulletEmitter,
+      behaviors: [
+        new PlanetaryGravityBehavior({
+          center: new THREE.Vector3(0, 0, 0),
+          strength: 2.8, // Reduced gravity effect for better visibility
+        }),
+        new DragBehavior({ dragCoefficient: 0.01 }), // Less drag for longer trails
+      ],
+      appearance: {
+        startColor: new THREE.Color(1, 0.8, 0.3),
+        endColor: new THREE.Color(1, 0.2, 0),
+        startSize: 0.5, // Increased initial size
+        endSize: 0.5,
+        startOpacity: 1, // Slightly reduced initial opacity
+        endOpacity: 1,
+        blending: THREE.NormalBlending,
       },
     });
   }
@@ -211,18 +271,21 @@ export class FlyingEntity implements IFlyingEntity, IEntity {
     if (this.object) {
       // Update particle system position and gravity center
       this.particleSystem?.position.copy(this.object.position);
+      this.bulletSystem?.position.copy(this.object.position);
 
       // Calculate emission direction based on ship's orientation
       const rotation = this.object.quaternion;
       const direction = new THREE.Vector3(0, -1, 0).applyQuaternion(rotation);
       this.emitter.setDirection(direction);
+      this.bulletEmitter.setDirection(direction.negate());
 
       // Emit particles when thrust is active
       if (this.thrustActive) {
-        this.particleSystem?.emit(2); // Increased emission rate
+        this.particleSystem?.emit(3); // Increased emission rate
       }
     }
     this.particleSystem?.update(1 / 60);
+    this.bulletSystem?.update(1 / 60);
   }
 
   public getBody() {
@@ -236,14 +299,6 @@ export class FlyingEntity implements IFlyingEntity, IEntity {
     const position = this.getPosition();
     return vectorPool.getVector(position.x, position.y, position.z).normalize();
   }
-  // public getForwardDirection(): THREE.Vector3 {
-  //   const position = vectorPool.getVector(this.body.translation().x, this.body.translation().y, this.body.translation().z);
-  //   const up = position.clone().normalize();
-  //   const orientation = this.object.quaternion;
-  //   const forward = vectorPool.getVector(0, 0, 1).applyQuaternion(orientation);
-  //   const projection = forward.clone().sub(up.clone().multiplyScalar(forward.dot(up)));
-  //   return projection.normalize();
-  // }
 
   protected thrust() {
     if (this.thrusting) {
@@ -257,30 +312,16 @@ export class FlyingEntity implements IFlyingEntity, IEntity {
     this.thrusting = thrusting;
   }
 
-  public setMove(move: MoveDirection) {
-    this.move = move;
-  }
-
-  public setRotationDirection(rotationDirection: RotationDirection) {
-    this.rotationDirection = rotationDirection;
-  }
-
   public onHit(): void {
     console.warn("Onerrdide GameObject::onHit");
   }
 
   protected shoot() {
-    const now = Date.now();
-    if (now - this.lastShotTime < this.shootCooldown) return;
-
-    const bodyPos = this.body.translation();
-    const position = new THREE.Vector3(bodyPos.x, bodyPos.y, bodyPos.z);
-    const forward = this.getForwardDirection();
-
-    const bulletGenerator = BulletGenerator.getInstance(this.world);
-    bulletGenerator.createBullet(this.scene, this, position, forward, this.tag);
-
-    this.lastShotTime = now;
+    if (this.canShoot()) {
+      console.log("shoot", this.bulletSystem);
+      this.bulletSystem?.emit(1);
+      this.lastShotTime = performance.now();
+    }
   }
 
   public getPosition() {

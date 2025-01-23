@@ -31,7 +31,7 @@ export class EnemyEntity extends FlyingEntity implements IFlyingEntity {
   private waypoints: THREE.Vector3[] = [];
   private currentWaypointIndex: number = 0;
   private waypointMarkers: THREE.Mesh[] = [];
-  private debugMarkers: boolean = false;
+  private debugMarkers: boolean = true;
 
   private player: PlayerEntity;
 
@@ -53,18 +53,17 @@ export class EnemyEntity extends FlyingEntity implements IFlyingEntity {
     this.globe = globe;
     this.globeRadius = globe.getRadius();
     this.player = player;
-    this.movementForce = 0.2;
-    this.thrustForce = 0.6;
+    this.thrustForce = 10.6;
 
     const bodyDesc = RAPIER.RigidBodyDesc.dynamic().setTranslation(position.x, position.y, position.z);
     this.body = world.createRigidBody(bodyDesc);
     this.body.setLinearDamping(0.8);
     this.body.setAngularDamping(0.8);
     const loader = new GLTFLoader();
-
+    this.object = new THREE.Object3D();
     loader.load("assets/models/baddies/bomber.glb", (gltf) => {
-      this.objectMesh = gltf.scene;
-      this.object.add(this.objectMesh);
+      this.object.add(gltf.scene);
+      this.object.scale.setScalar(1);
       this.object.position.copy(position);
       this.object.frustumCulled = true;
       scene.add(this.object);
@@ -235,10 +234,15 @@ export class EnemyEntity extends FlyingEntity implements IFlyingEntity {
 
     if (angleToWaypoint > ROTATION_THRESHOLD) {
       const cross = vectorPool.getVector().crossVectors(forwardDirection, directionToWaypoint);
-      this.setRotationDirection(cross.dot(normalizedPosition) > 0 ? 1 : -1);
+      // rotate the craft using mouseX and mouseY
+      const maxAngle = Math.PI / 2; // 90 degrees
+      this.mouseX = Math.max(-1, Math.min(1, (Math.sign(cross.y) * angleToWaypoint) / maxAngle));
+      this.mouseY = Math.max(-1, Math.min(1, (-Math.sign(cross.x) * angleToWaypoint) / maxAngle));
+
       vectorPool.releaseVector(cross);
     } else {
-      this.setRotationDirection(0);
+      this.mouseX = 0;
+      this.mouseY = 0;
     }
 
     // check slightly in front
@@ -258,8 +262,6 @@ export class EnemyEntity extends FlyingEntity implements IFlyingEntity {
     }
     vectorPool.releaseVector(directionToWaypoint);
     vectorPool.releaseVector(crossProduct);
-    // Move forward
-    this.setMove(1);
   }
 
   private handleAttack(distanceToPlayer: number, now: number) {
@@ -290,8 +292,7 @@ export class EnemyEntity extends FlyingEntity implements IFlyingEntity {
 
   private handleInfect(delta: number) {
     this.hover(20);
-    this.move = 1;
-    if (Math.random() > 0.99) this.rotationDirection = Math.random() > 0.9 ? (Math.random() > 0.5 ? 1 : -1) : 0;
+    // if (Math.random() > 0.99) this.rotationDirection = Math.random() > 0.9 ? (Math.random() > 0.5 ? 1 : -1) : 0;
 
     // Infecting logic
     this.infectLand();

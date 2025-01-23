@@ -33,7 +33,7 @@ THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 const config = {
-  numUFOs: 0,
+  numUFOs: 1,
   dayNightCycle: {
     rotationSpeed: 0.00005,
     currentAngle: 0,

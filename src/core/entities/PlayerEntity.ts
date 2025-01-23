@@ -39,11 +39,11 @@ export class PlayerEntity extends FlyingEntity implements IFlyingEntity {
 
     const loader = new GLTFLoader();
 
-    loader.load("assets/models/ship2.glb", (gltf) => {
+    loader.load("assets/models/wooden_ufo_toy.glb", (gltf) => {
       console.log("loaded saucer");
       const objectMesh = gltf.scene;
       console.log(objectMesh);
-      objectMesh.scale.setScalar(0.4);
+      objectMesh.scale.setScalar(1.5);
       let mesh: THREE.Mesh;
 
       objectMesh.traverse((child) => {
@@ -94,15 +94,13 @@ export class PlayerEntity extends FlyingEntity implements IFlyingEntity {
       this.object.frustumCulled = true;
     });
 
-    // Setup object and add to scene
-    this.move = 0;
-
     this.setupEventListeners();
   }
 
   onHit() {
     console.log("Player hit");
   }
+
   private setupEventListeners(): void {
     // Initialize cursor position to center
     this.cursorX = window.innerWidth / 2;
@@ -132,15 +130,10 @@ export class PlayerEntity extends FlyingEntity implements IFlyingEntity {
     // Key handlers
     window.addEventListener("keydown", (event) => {
       if (event.code === "Space") {
-        this.thrustActive = true;
+        this.shoot();
       }
     });
 
-    window.addEventListener("keyup", (event) => {
-      if (event.code === "Space") {
-        this.thrustActive = false;
-      }
-    });
     window.addEventListener("mousedown", (event) => {
       this.thrustActive = true;
     });

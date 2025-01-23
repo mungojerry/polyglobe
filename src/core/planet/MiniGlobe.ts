@@ -1,9 +1,8 @@
 import * as THREE from "three";
-import { IGameObject } from "../entities/FlyingEntity";
-
+import { IEntity } from "../entities/Entity";
 export interface Marker {
   mesh: THREE.Mesh;
-  object: IGameObject;
+  object: IEntity;
 }
 
 export class MiniGlobe {
@@ -21,8 +20,9 @@ export class MiniGlobe {
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 2000);
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true });
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     this.renderer.setSize(width, height);
+
     this.viewportWidth = width;
     this.viewportHeight = height;
     this.mainCamera = mainCamera;
@@ -97,20 +97,20 @@ export class MiniGlobe {
     miniGlobeElement.style.right = "10px";
     miniGlobeElement.style.width = this.viewportWidth + "px";
     miniGlobeElement.style.height = this.viewportHeight + "px";
-    miniGlobeElement.style.background = "#000";
+    miniGlobeElement.style.backgroundColor = "transparent";
     miniGlobeElement.style.borderRadius = "50%";
 
-    const miniGlobeElementShadow = document.createElement("div");
-    miniGlobeElementShadow.id = "mini-globe-shadow";
-    document.body.appendChild(miniGlobeElementShadow);
-    miniGlobeElementShadow.style.zIndex = "100";
-    miniGlobeElementShadow.style.position = "absolute";
-    miniGlobeElementShadow.style.top = "10px";
-    miniGlobeElementShadow.style.right = "10px";
-    miniGlobeElementShadow.style.width = this.viewportWidth + "px";
-    miniGlobeElementShadow.style.height = this.viewportHeight + "px";
-    miniGlobeElementShadow.style.background = "radial-gradient(circle, rgba(0,0,0,0) 0%, rgba(0,0,0,0) 50%, rgba(0,0,0,.71) 80%, rgba(0,0,0,.91) 100%)";
-    miniGlobeElementShadow.style.borderRadius = "50%";
+    // const miniGlobeElementShadow = document.createElement("div");
+    // miniGlobeElementShadow.id = "mini-globe-shadow";
+    // document.body.appendChild(miniGlobeElementShadow);
+    // miniGlobeElementShadow.style.zIndex = "100";
+    // miniGlobeElementShadow.style.position = "absolute";
+    // miniGlobeElementShadow.style.top = "10px";
+    // miniGlobeElementShadow.style.right = "10px";
+    // miniGlobeElementShadow.style.width = this.viewportWidth + "px";
+    // miniGlobeElementShadow.style.height = this.viewportHeight + "px";
+    // // miniGlobeElementShadow.style.background = "radial-gradient(circle, rgba(0,0,0,0) 0%, rgba(0,0,0,0) 50%, rgba(0,0,0,.71) 80%, rgba(0,0,0,.91) 100%)";
+    // miniGlobeElementShadow.style.borderRadius = "50%";
   }
 
   public updateGeometry(bufferGeometry: THREE.BufferGeometry): void {
@@ -140,7 +140,7 @@ export class MiniGlobe {
     this.renderer.render(this.scene, this.camera);
   }
 
-  public addMarkers(gameObjects: IGameObject[], color: number): void {
+  public addMarkers(gameObjects: IEntity[], color: number): void {
     this.objectMarkers = [
       ...this.objectMarkers,
       ...gameObjects.map((gameObject) => {

@@ -4,7 +4,7 @@ import { vectorPool } from "./VectorPool";
 
 const cameraConfig = {
   smoothingFactor: 0.7,
-  offset: new THREE.Vector3(0, 4, -4),
+  offset: new THREE.Vector3(0, 11, -8),
 };
 
 export class CameraController {
@@ -36,8 +36,36 @@ export class CameraController {
   }
 
   private previousForward = new THREE.Vector3(0, 0, 1);
-
   public update(): void {
+    const position: THREE.Vector3 = this.attachedTo.getObject().position;
+    // Normalized surface normal
+    const surfaceNormal = position.clone().normalize();
+
+    // Create rotation that aligns camera with surface
+    const worldUp = new THREE.Vector3(0, 1, 0);
+    const rotationAxis = new THREE.Vector3().crossVectors(worldUp, surfaceNormal);
+    const angle = worldUp.angleTo(surfaceNormal);
+
+    const surfaceRotation = new THREE.Quaternion().setFromAxisAngle(rotationAxis.normalize(), angle);
+
+    // Compute camera offset in rotated space
+    const localOffset = new THREE.Vector3(0, this.offset.y, this.offset.z);
+    const rotatedOffset = localOffset.clone().applyQuaternion(surfaceRotation);
+
+    // Target camera position
+    const targetPosition = position.clone().add(rotatedOffset);
+
+    // Smooth interpolation
+    const smoothFactor = 1;
+    this.currentPosition.lerp(targetPosition, smoothFactor);
+    this.currentLookAt.lerp(position, smoothFactor);
+
+    // Apply camera transformations
+    this.camera.position.copy(this.currentPosition);
+    this.camera.lookAt(this.currentLookAt);
+    this.camera.up.copy(surfaceNormal);
+  }
+  public updateOLD(): void {
     const position: THREE.Vector3 = this.attachedTo.getObject().position;
 
     // Up vector (radial direction)
