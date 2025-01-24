@@ -99,18 +99,6 @@ export class MiniGlobe {
     miniGlobeElement.style.height = this.viewportHeight + "px";
     miniGlobeElement.style.backgroundColor = "transparent";
     miniGlobeElement.style.borderRadius = "50%";
-
-    // const miniGlobeElementShadow = document.createElement("div");
-    // miniGlobeElementShadow.id = "mini-globe-shadow";
-    // document.body.appendChild(miniGlobeElementShadow);
-    // miniGlobeElementShadow.style.zIndex = "100";
-    // miniGlobeElementShadow.style.position = "absolute";
-    // miniGlobeElementShadow.style.top = "10px";
-    // miniGlobeElementShadow.style.right = "10px";
-    // miniGlobeElementShadow.style.width = this.viewportWidth + "px";
-    // miniGlobeElementShadow.style.height = this.viewportHeight + "px";
-    // // miniGlobeElementShadow.style.background = "radial-gradient(circle, rgba(0,0,0,0) 0%, rgba(0,0,0,0) 50%, rgba(0,0,0,.71) 80%, rgba(0,0,0,.91) 100%)";
-    // miniGlobeElementShadow.style.borderRadius = "50%";
   }
 
   public updateGeometry(bufferGeometry: THREE.BufferGeometry): void {

@@ -8,10 +8,10 @@ import { ParticleSystem } from "../particles/ParticleSystem";
 
 // Constants
 const THRUST_FORCE = 20; // Increased for better control
-const LINEAR_DAMPING = 0.1; // Reduced for more responsive movement
+const LINEAR_DAMPING = 0.8; // Reduced for more responsive movement
 const ANGULAR_DAMPING = 1.0; // Reduced for smoother rotation
 const PLANET_RADIUS = 1300;
-const GRAVITY_STRENGTH = 9.8 * 20; // Reduced gravity for better control
+const GRAVITY_STRENGTH = 9.8 * 50; // Reduced gravity for better control
 const MAX_VELOCITY = 150;
 const SHIP_START_HEIGHT = PLANET_RADIUS + 150;
 const ROTATION_RATE = 0.1; // Faster rotation for better control
@@ -374,54 +374,34 @@ export class ZarchFlyScene {
     this.scene.add(this.southPoleMesh);
   }
 
-  private updateRotation(): void {
-    if (!this.shipBody) return;
-
-    // Get ship's position and surface normal
-    const pos = this.shipBody.translation();
-    const planetUp = new THREE.Vector3(pos.x, pos.y, pos.z).normalize();
-
-    // Create rotation matrix to align with surface
-    const surfaceAlignmentMatrix = new THREE.Matrix4().makeRotationFromQuaternion(
-      new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), planetUp)
-    );
-
-    // Create separate rotations for pitch and roll
-    const pitchRotation = new THREE.Matrix4().makeRotationX(this.mouseY * MAX_PITCH);
-    const rollRotation = new THREE.Matrix4().makeRotationZ(this.mouseX * MAX_ROLL);
-
-    // Combine rotations
-    const finalRotationMatrix = new THREE.Matrix4().multiply(surfaceAlignmentMatrix).multiply(pitchRotation).multiply(rollRotation);
-
-    // Convert matrix back to quaternion
-    const finalQuat = new THREE.Quaternion().setFromRotationMatrix(finalRotationMatrix);
-
-    // Apply final rotation
-    this.shipBody.setRotation(finalQuat, true);
-  }
   private updateMovement(): void {
     if (!this.shipBody) return;
 
     if (this.thrustActive) {
       const rotation = this.shipBody.rotation();
       const quat = new THREE.Quaternion(rotation.x, rotation.y, rotation.z, rotation.w);
-      // Thrust comes from bottom of ship (positive Y pushes away from bottom)
-      const thrustDirection = new THREE.Vector3(0, 1, 0).applyQuaternion(quat);
+
+      // More dynamic thrust based on orientation and mouse input
+      const baseThrust = THRUST_FORCE;
+      const dynamicThrust = baseThrust * (1 + Math.abs(this.mouseY));
+      const thrustDirection = new THREE.Vector3(0, 1, 0).applyQuaternion(quat).multiplyScalar(dynamicThrust);
 
       this.shipBody.applyImpulse(
         {
-          x: thrustDirection.x * THRUST_FORCE,
-          y: thrustDirection.y * THRUST_FORCE,
-          z: thrustDirection.z * THRUST_FORCE,
+          x: thrustDirection.x,
+          y: thrustDirection.y,
+          z: thrustDirection.z,
         },
         true
       );
 
-      // Apply velocity limits
+      // More aggressive velocity management
       const vel = this.shipBody.linvel();
       const velocity = new THREE.Vector3(vel.x, vel.y, vel.z);
-      if (velocity.length() > MAX_VELOCITY) {
-        velocity.normalize().multiplyScalar(MAX_VELOCITY);
+      const velocityMagnitude = velocity.length();
+
+      if (velocityMagnitude > MAX_VELOCITY) {
+        velocity.normalize().multiplyScalar(MAX_VELOCITY * (1 + Math.abs(this.mouseY)));
         this.shipBody.setLinvel({ x: velocity.x, y: velocity.y, z: velocity.z }, true);
       }
     }
@@ -454,30 +434,47 @@ export class ZarchFlyScene {
 
   private currentLookAt = new THREE.Vector3();
 
+  private updateRotation(): void {
+    if (!this.shipBody) return;
+
+    // Get ship's position and surface normal
+    const pos = this.shipBody.translation();
+    const planetUp = new THREE.Vector3(pos.x, pos.y, pos.z).normalize();
+
+    // Simplified rotation with smoother mouse influence
+    const rotation = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), planetUp);
+
+    // Gentle mouse-based rotation
+    const pitchRotation = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), this.mouseY * MAX_PITCH);
+
+    const rollRotation = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), this.mouseX * MAX_ROLL);
+
+    // Combine rotations
+    rotation.multiply(pitchRotation).multiply(rollRotation);
+    this.shipBody.setRotation(rotation, true);
+  }
+
+  private cameraLag = 0.9;
+
   private updateCamera(position: THREE.Vector3): void {
-    // Normalized surface normal
     const surfaceNormal = position.clone().normalize();
 
-    // Create rotation that aligns camera with surface
+    // Dynamic camera offset with slight mouse influence
+    const dynamicOffset = this.offset.clone().add(new THREE.Vector3(this.mouseX * 1, Math.abs(this.mouseY) * 2, -Math.abs(this.mouseY) * 2));
+
+    // Compute rotated offset
     const worldUp = new THREE.Vector3(0, 1, 0);
     const rotationAxis = new THREE.Vector3().crossVectors(worldUp, surfaceNormal);
     const angle = worldUp.angleTo(surfaceNormal);
-
     const surfaceRotation = new THREE.Quaternion().setFromAxisAngle(rotationAxis.normalize(), angle);
 
-    // Compute camera offset in rotated space
-    const localOffset = new THREE.Vector3(0, this.offset.y, this.offset.z);
-    const rotatedOffset = localOffset.clone().applyQuaternion(surfaceRotation);
-
-    // Target camera position
+    const rotatedOffset = dynamicOffset.clone().applyQuaternion(surfaceRotation);
     const targetPosition = position.clone().add(rotatedOffset);
 
-    // Smooth interpolation
-    const smoothFactor = 1;
-    this.currentPosition.lerp(targetPosition, smoothFactor);
-    this.currentLookAt.lerp(position, smoothFactor);
+    // Smooth interpolation with increased lag
+    this.currentPosition.lerp(targetPosition, this.cameraLag);
+    this.currentLookAt.lerp(position, this.cameraLag);
 
-    // Apply camera transformations
     this.camera.position.copy(this.currentPosition);
     this.camera.lookAt(this.currentLookAt);
     this.camera.up.copy(surfaceNormal);
