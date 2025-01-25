@@ -1,7 +1,6 @@
 import RAPIER from "@dimforge/rapier3d";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise";
 import { DragBehavior, PlanetaryGravityBehavior } from "../particles/Behaviors";
 import { ConeEmitter } from "../particles/Emitters";
 import { ParticleSystem } from "../particles/ParticleSystem";
@@ -19,6 +18,13 @@ const MAX_ROLL = Math.PI;
 const POLE_CYLINDER_RADIUS = 50;
 const POLE_CYLINDER_HEIGHT = 100;
 const SHOT_COOLDOWN = 100; //
+
+// Helicopter Control Constants
+const HOVER_DAMPING = 0.94;
+const MAX_LATERAL_SPEED = 75;
+const LATERAL_ACCELERATION = 0.5;
+const ROTATION_SMOOTHING = 0.15;
+const MOUSE_SENSITIVITY = 0.003;
 
 const COLLISION_MASKS = {
   PLANET: 0xffffffff,
@@ -52,13 +58,21 @@ export class ZarchFlyScene {
   private particleSystem: ParticleSystem | null = null;
   private bulletSystem: ParticleSystem | null = null;
 
+  directionalLight: THREE.DirectionalLight;
+  directionalLight2: THREE.DirectionalLight;
+
+  private pitch: number = 0;
+  private yaw: number = 0;
+  private roll: number = 0;
+  private mouseSensitivity: number = 0.005;
+
   constructor() {
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 10000);
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     document.body.appendChild(this.renderer.domElement);
 
     // Create and style the crosshair element
@@ -81,21 +95,51 @@ export class ZarchFlyScene {
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.25);
     this.scene.add(ambientLight);
 
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 2);
-    directionalLight.position.set(2000, 2000, 0);
-    directionalLight.castShadow = true;
-    directionalLight.shadow.mapSize.width = 2048;
-    directionalLight.shadow.mapSize.height = 2048;
-    directionalLight.shadow.camera.near = 1;
-    directionalLight.shadow.camera.far = 5000;
-    directionalLight.shadow.bias = -0.001;
-    this.scene.add(directionalLight);
+    const shadowCameraSize = 2048;
+    this.directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+    this.directionalLight.position.set(2000, 600, 600);
+    this.directionalLight.castShadow = true;
+    this.directionalLight.shadow.mapSize.width = 8192;
+    this.directionalLight.shadow.mapSize.height = 8192;
+    this.directionalLight.shadow.camera.left = -shadowCameraSize;
+    this.directionalLight.shadow.camera.right = shadowCameraSize;
+    this.directionalLight.shadow.camera.top = shadowCameraSize;
+    this.directionalLight.shadow.camera.bottom = -shadowCameraSize;
+    this.directionalLight.shadow.camera.near = 0.1;
+    this.directionalLight.shadow.camera.far = 10000;
+    this.directionalLight.shadow.bias = -0.001;
+    this.directionalLight.shadow.normalBias = 0.02;
+
+    this.directionalLight.shadow.camera.updateProjectionMatrix();
+    this.scene.add(this.directionalLight);
+
+    this.directionalLight2 = new THREE.DirectionalLight(0xffff00, 1);
+    this.directionalLight2.position.set(-2000, -2000, 0);
+    this.directionalLight2.castShadow = true;
+
+    this.directionalLight2.shadow.camera.left = -shadowCameraSize;
+    this.directionalLight2.shadow.camera.right = shadowCameraSize;
+    this.directionalLight2.shadow.camera.top = shadowCameraSize;
+    this.directionalLight2.shadow.camera.bottom = -shadowCameraSize;
+    this.directionalLight2.shadow.camera.near = 0.1;
+    this.directionalLight2.shadow.camera.far = 5000;
+    this.directionalLight2.shadow.bias = -0.0001;
+    this.directionalLight2.shadow.normalBias = 0.02;
+
+    this.directionalLight2.shadow.camera.updateProjectionMatrix();
+    this.scene.add(this.directionalLight2);
+
+    const shadowHelper = new THREE.CameraHelper(this.directionalLight.shadow.camera);
+    this.scene.add(shadowHelper);
+
     this.world = new RAPIER.World({ x: 0, y: 0, z: 0 });
 
     this.updateScreenCenter();
     this.initialize();
     this.createPoleCylinders();
     this.createVisiblePoleCylinders();
+
+    // this.directionalLight.target = this.planetObject;
   }
 
   private updateScreenCenter(): void {
@@ -107,6 +151,7 @@ export class ZarchFlyScene {
     await this.createShip();
     this.createPlanet();
     this.setupEventListeners();
+    this.directionalLight.target = this.planetObject;
     this.animate();
   }
 
@@ -119,14 +164,22 @@ export class ZarchFlyScene {
   private setupEventListeners(): void {
     // Mouse movement with pointer lock
     document.addEventListener("mousemove", (event) => {
-      // Direct cursor position
-      this.cursorX = event.clientX;
-      this.cursorY = event.clientY;
+      const deltaX = (event.movementX || 0) * MOUSE_SENSITIVITY;
+      const deltaY = (event.movementY || 0) * MOUSE_SENSITIVITY;
 
-      // Update ship control values
-      this.mouseX = (event.clientX - this.screenCenterX) / this.screenCenterX;
-      this.mouseY = (this.screenCenterY - event.clientY) / this.screenCenterY;
+      // Reduced sensitivity, smoother transitions
+      this.mouseX = Math.max(-1, Math.min(1, this.mouseX + deltaX));
+      this.mouseY = Math.max(-1, Math.min(1, this.mouseY + deltaY));
 
+      // Gradual decay when no input
+      this.mouseX *= 0.95;
+      this.mouseY *= 0.95;
+
+      this.pitch -= deltaY;
+      this.yaw -= deltaX;
+
+      // Softer pitch/yaw limits
+      this.pitch = Math.max(-MAX_PITCH * 0.5, Math.min(MAX_PITCH * 0.5, this.pitch));
       // Update crosshair position
       this.crosshair.style.left = `${this.cursorX}px`;
       this.crosshair.style.top = `${this.cursorY}px`;
@@ -164,11 +217,27 @@ export class ZarchFlyScene {
         "assets/models/wooden_ufo_toy.glb",
         (gltf) => {
           this.shipModel = gltf.scene;
-          this.shipModel.scale.set(1.5, 1.5, 1.5);
+          this.shipModel.scale.setScalar(3);
           this.shipModel.rotation.x = Math.PI;
           this.shipModel.castShadow = true;
           this.shipModel.receiveShadow = true;
           this.scene.add(this.shipModel);
+
+          this.shipModel.traverse((child) => {
+            if (child instanceof THREE.Mesh) {
+              if (child.material) {
+                child.material.transparent = false;
+                child.material.opacity = 1;
+                child.material.shininess = 0;
+                child.material.vertexColors = false;
+                child.material.flatShading = true;
+                child.material.reflectivity = 0;
+                child.material.side = THREE.FrontSide;
+              }
+              child.castShadow = true;
+              child.receiveShadow = true;
+            }
+          });
 
           const startPos = new THREE.Vector3(0, SHIP_START_HEIGHT, 0);
           const rigidBodyDesc = new RAPIER.RigidBodyDesc(RAPIER.RigidBodyType.Dynamic)
@@ -253,42 +322,42 @@ export class ZarchFlyScene {
       },
     });
   }
-
+  private planetObject!: THREE.Mesh;
   private createPlanet(): void {
-    const simplex = new SimplexNoise();
     const geometry = new THREE.IcosahedronGeometry(PLANET_RADIUS, 32);
-    const positions = geometry.attributes.position;
 
-    for (let i = 0; i < positions.count; i++) {
-      const vertex = new THREE.Vector3();
-      vertex.fromBufferAttribute(positions, i);
-      const scale = 1;
-      let amplitude = 20;
-      const normalized = vertex.clone().normalize();
-
-      let noise = simplex.noise3d(normalized.x * scale, normalized.y * scale, normalized.z * scale) * amplitude;
-      noise = noise * 0.5 + simplex.noise3d(normalized.x * scale, normalized.y * scale, normalized.z * scale) * (amplitude * 0.5);
-      vertex.add(normalized.multiplyScalar(noise));
-
-      positions.setXYZ(i, vertex.x, vertex.y, vertex.z);
-    }
-    positions.needsUpdate = true;
     const material = new THREE.MeshStandardMaterial({
       color: 0x33ff66,
-      flatShading: true,
       metalness: 0.5,
       roughness: 0.1,
+      side: THREE.DoubleSide,
       wireframe: false,
     });
+    // geometry.computeBoundingSphere();
+    geometry.computeVertexNormals();
     const planet = new THREE.Mesh(geometry, material);
-    planet.castShadow = true;
+    // planet.castShadow = true;
     planet.receiveShadow = true;
+    this.planetObject = planet;
     this.scene.add(planet);
+    const materialWire = new THREE.MeshStandardMaterial({
+      color: 0x33ff66,
+      flatShading: true,
+      polygonOffset: true,
+      polygonOffsetFactor: 5,
+      metalness: 0.5,
+      roughness: 0.1,
+      wireframe: true,
+      clipShadows: false,
+    });
+    const planetWire = new THREE.Mesh(geometry, materialWire);
+
+    this.scene.add(planetWire);
 
     const rigidBodyDesc = new RAPIER.RigidBodyDesc(RAPIER.RigidBodyType.Fixed).setTranslation(0, 0, 0);
     this.planetBody = this.world.createRigidBody(rigidBodyDesc);
 
-    const colliderDesc = RAPIER.ColliderDesc.ball(PLANET_RADIUS)
+    const colliderDesc = RAPIER.ColliderDesc.ball(PLANET_RADIUS * 1.002)
       .setCollisionGroups(COLLISION_MASKS.PLANET)
       .setActiveCollisionTypes(RAPIER.ActiveCollisionTypes.ALL)
       .setFriction(0.5)
@@ -316,6 +385,7 @@ export class ZarchFlyScene {
   private createVisiblePoleCylinders(): void {
     const geometry = new THREE.CylinderGeometry(POLE_CYLINDER_RADIUS, POLE_CYLINDER_RADIUS, POLE_CYLINDER_HEIGHT, 32);
     const material = new THREE.MeshPhongMaterial({ color: 0x808080, flatShading: true });
+    geometry.computeVertexNormals();
 
     this.northPoleMesh = new THREE.Mesh(geometry, material);
     this.southPoleMesh = new THREE.Mesh(geometry, material);
@@ -326,8 +396,6 @@ export class ZarchFlyScene {
     this.northPoleMesh.castShadow = true;
     this.southPoleMesh.receiveShadow = true;
     this.southPoleMesh.castShadow = true;
-    this.northPoleMesh.geometry.computeVertexNormals();
-    this.southPoleMesh.geometry.computeVertexNormals();
     this.scene.add(this.northPoleMesh);
     this.scene.add(this.southPoleMesh);
   }
@@ -335,32 +403,38 @@ export class ZarchFlyScene {
   private updateMovement(): void {
     if (!this.shipBody) return;
 
-    if (this.thrustActive) {
-      const rotation = this.shipBody.rotation();
-      const quat = new THREE.Quaternion(rotation.x, rotation.y, rotation.z, rotation.w);
+    const rotation = this.shipBody.rotation();
+    const quat = new THREE.Quaternion(rotation.x, rotation.y, rotation.z, rotation.w);
 
-      const baseThrust = THRUST_FORCE;
-      const dynamicThrust = baseThrust * (1 + Math.abs(this.mouseY));
-      const thrustDirection = new THREE.Vector3(0, 1, 0).applyQuaternion(quat).multiplyScalar(dynamicThrust);
+    // Compute directional vectors
+    const forwardVector = new THREE.Vector3(0, 0, -1).applyQuaternion(quat);
+    const rightVector = new THREE.Vector3(1, 0, 0).applyQuaternion(quat);
+    const upVector = new THREE.Vector3(0, 1, 0).applyQuaternion(quat);
 
-      this.shipBody.applyImpulse(
-        {
-          x: thrustDirection.x,
-          y: thrustDirection.y,
-          z: thrustDirection.z,
-        },
-        true
-      );
+    // Compute current velocity
+    const vel = this.shipBody.linvel();
+    const currentVelocity = new THREE.Vector3(vel.x, vel.y, vel.z);
 
-      const vel = this.shipBody.linvel();
-      const velocity = new THREE.Vector3(vel.x, vel.y, vel.z);
-      const velocityMagnitude = velocity.length();
+    // Lateral movement based on mouse input
+    const lateralMovement = new THREE.Vector3();
+    lateralMovement.add(rightVector.multiplyScalar(this.mouseX * LATERAL_ACCELERATION));
+    lateralMovement.add(forwardVector.multiplyScalar(-this.mouseY * LATERAL_ACCELERATION));
 
-      if (velocityMagnitude > MAX_VELOCITY) {
-        velocity.normalize().multiplyScalar(MAX_VELOCITY * (1 + Math.abs(this.mouseY)));
-        this.shipBody.setLinvel({ x: velocity.x, y: velocity.y, z: velocity.z }, true);
-      }
+    // Apply lateral movement with speed limit
+    const newVelocity = currentVelocity.add(lateralMovement);
+    const velocityMagnitude = newVelocity.length();
+
+    if (velocityMagnitude > MAX_LATERAL_SPEED) {
+      newVelocity.normalize().multiplyScalar(MAX_LATERAL_SPEED);
     }
+
+    // Thrust: vertical hover mechanism
+    const hoverThrust = this.thrustActive ? upVector.multiplyScalar(THRUST_FORCE * 0.5) : new THREE.Vector3();
+
+    // Apply damping for more helicopter-like feel
+    newVelocity.multiplyScalar(HOVER_DAMPING);
+
+    this.shipBody.setLinvel({ x: newVelocity.x + hoverThrust.x, y: newVelocity.y + hoverThrust.y, z: newVelocity.z + hoverThrust.z }, true);
   }
 
   private updateGravity(): void {
@@ -384,50 +458,51 @@ export class ZarchFlyScene {
     );
   }
 
-  private offset = new THREE.Vector3(0, 11, -8);
-  private currentPosition = new THREE.Vector3(0, 0, 0);
-
-  private currentLookAt = new THREE.Vector3();
-
+  private targetRotation = new THREE.Quaternion();
+  private currentRotation = new THREE.Quaternion();
+  private rotationLerpSpeed = 0.15; // Adjust for desired smoothness
   private updateRotation(): void {
     if (!this.shipBody) return;
 
-    const pos = this.shipBody.translation();
-    const planetUp = new THREE.Vector3(pos.x, pos.y, pos.z).normalize();
+    const translation = this.shipBody.translation();
+    const shipPos = new THREE.Vector3(translation.x, translation.y, translation.z);
+    const planetCenter = new THREE.Vector3(0, 0, 0);
+    const surfaceNormal = shipPos.clone().sub(planetCenter).normalize();
 
-    const rotation = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), planetUp);
+    // Simplified rotation relative to surface
+    const tangent = new THREE.Vector3(1, 0, 0).applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), surfaceNormal));
+    const binormal = surfaceNormal.clone().cross(tangent).normalize();
 
-    const pitchRotation = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), this.mouseY * MAX_PITCH);
+    // Smoother, more controlled rotation
+    const pitchQuaternion = new THREE.Quaternion().setFromAxisAngle(tangent, this.pitch * 0.5);
+    const yawQuaternion = new THREE.Quaternion().setFromAxisAngle(binormal, this.yaw * 0.5);
+    const rollQuaternion = new THREE.Quaternion().setFromAxisAngle(surfaceNormal, this.roll * 0.5);
 
-    const rollRotation = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), this.mouseX * MAX_ROLL);
+    this.targetRotation = pitchQuaternion.multiply(yawQuaternion).multiply(rollQuaternion);
+    this.currentRotation.slerp(this.targetRotation, ROTATION_SMOOTHING);
 
-    rotation.multiply(pitchRotation).multiply(rollRotation);
-    this.shipBody.setRotation(rotation, true);
+    this.shipBody.setRotation(this.currentRotation, true);
   }
-
-  private cameraLag = 0.9;
-
   private updateCamera(position: THREE.Vector3): void {
-    const surfaceNormal = position.clone().normalize();
+    if (!this.shipBody) return;
 
-    const dynamicOffset = this.offset.clone().add(new THREE.Vector3(this.mouseX * 1, Math.abs(this.mouseY) * 2, -Math.abs(this.mouseY) * 2));
+    // Calculate camera direction based on ship's rotation
+    const rotation = this.shipBody.rotation();
+    const cameraDirection = new THREE.Vector3(0, 0, -1).applyQuaternion(new THREE.Quaternion(rotation.x, rotation.y, rotation.z, rotation.w));
 
-    const worldUp = new THREE.Vector3(0, 1, 0);
-    const rotationAxis = new THREE.Vector3().crossVectors(worldUp, surfaceNormal);
-    const angle = worldUp.angleTo(surfaceNormal);
-    const surfaceRotation = new THREE.Quaternion().setFromAxisAngle(rotationAxis.normalize(), angle);
+    // Calculate camera position based on ship's position and direction
+    const cameraOffset = cameraDirection.clone().multiplyScalar(-10); // Adjust distance as needed
+    const targetCameraPosition = position.clone().add(cameraOffset);
 
-    const rotatedOffset = dynamicOffset.clone().applyQuaternion(surfaceRotation);
-    const targetPosition = position.clone().add(rotatedOffset);
+    // Lerp camera position for smooth movement
+    this.camera.position.lerp(targetCameraPosition, 0.9);
 
-    this.currentPosition.lerp(targetPosition, this.cameraLag);
-    this.currentLookAt.lerp(position, this.cameraLag);
+    const worldUp = position.clone().normalize();
+    this.camera.up.copy(worldUp);
 
-    this.camera.position.copy(this.currentPosition);
-    this.camera.lookAt(this.currentLookAt);
-    this.camera.up.copy(surfaceNormal);
+    // Look at the ship's position
+    this.camera.lookAt(position);
   }
-
   private animate(): void {
     requestAnimationFrame(() => this.animate());
 
