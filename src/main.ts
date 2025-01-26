@@ -1,4 +1,4 @@
-import { ZarchGame } from "./core/scenes/ZarchGame";
+import { ZarchGameSpherical } from "./core/scenes/ZarchGameSpherical";
 import "./style.css";
 
 console.log("starting...");
@@ -8,5 +8,5 @@ console.log("starting...");
 // new GameScene();
 // new ZarchFlyScene();
 // new HelicopterGlobeSimulation();
-new ZarchGame();
+new ZarchGameSpherical();
 console.log("should be running");
