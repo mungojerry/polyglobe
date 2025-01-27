@@ -29,7 +29,9 @@ export interface LandscapeConfig {
 export class LandscapeGenerator {
   private config: LandscapeConfig;
   private readonly PLANET_RADIUS: number;
-  private vertexNeighbors: Map<number, number[]>;
+  private vertexNeighbors: Map<number, Set<number>>;
+  private tempVector3 = new THREE.Vector3();
+  private tempColor = new THREE.Color();
 
   constructor(planetRadius: number, config?: Partial<LandscapeConfig>) {
     if (planetRadius <= 0) {
@@ -54,35 +56,29 @@ export class LandscapeGenerator {
   }
 
   private buildVertexNeighborMap(geometry: THREE.BufferGeometry): void {
-    // Create index if not exists
     if (!geometry.index) {
-      const vertices = geometry.attributes.position;
-      const indices = [];
-      for (let i = 0; i < vertices.count; i += 3) {
-        indices.push(i, i + 1, i + 2);
-      }
-      geometry.setIndex(indices);
+      const indices = new Uint32Array(geometry.attributes.position.count);
+      for (let i = 0; i < indices.length; i++) indices[i] = i;
+      geometry.setIndex(new THREE.BufferAttribute(indices, 1));
     }
 
     const indices = geometry.index!.array;
-    this.vertexNeighbors = new Map();
+    this.vertexNeighbors.clear();
 
-    // Build neighbor map
+    // Pre-allocate sets for better performance
+    for (let i = 0; i < geometry.attributes.position.count; i++) {
+      this.vertexNeighbors.set(i, new Set());
+    }
+
+    // Build neighbor map in a single pass
     for (let i = 0; i < indices.length; i += 3) {
-      const v1 = indices[i];
-      const v2 = indices[i + 1];
-      const v3 = indices[i + 2];
+      const [v1, v2, v3] = [indices[i], indices[i + 1], indices[i + 2]];
 
-      if (!this.vertexNeighbors.has(v1)) this.vertexNeighbors.set(v1, []);
-      if (!this.vertexNeighbors.has(v2)) this.vertexNeighbors.set(v2, []);
-      if (!this.vertexNeighbors.has(v3)) this.vertexNeighbors.set(v3, []);
-
-      this.vertexNeighbors.get(v1)!.push(v2, v3);
-      this.vertexNeighbors.get(v2)!.push(v1, v3);
-      this.vertexNeighbors.get(v3)!.push(v1, v2);
+      this.vertexNeighbors.get(v1)!.add(v2).add(v3);
+      this.vertexNeighbors.get(v2)!.add(v1).add(v3);
+      this.vertexNeighbors.get(v3)!.add(v1).add(v2);
     }
   }
-
   private findHighElevationVertex(vertexLengths: Float32Array, minElevation: number): number {
     const candidates = [];
     for (let i = 0; i < vertexLengths.length; i++) {
@@ -145,7 +141,6 @@ export class LandscapeGenerator {
     const vertexLengths = new Float32Array(vertices.length / 3);
 
     const noise = new SimplexNoise(pseudoRandom);
-    const colors: number[] = [];
 
     const RIDGE_PARAMS = this.config.ridgeNoise;
     const NOISE_LAYERS = this.config.noiseLayers;
@@ -155,6 +150,8 @@ export class LandscapeGenerator {
 
     let minHeight = this.PLANET_RADIUS,
       maxHeight = this.PLANET_RADIUS;
+
+    const colors = new Float32Array(vertices.length);
 
     // Precompute noise values to reduce redundant calculations
     const precomputedRidgeNoise = new Float32Array(vertices.length / 3);
@@ -207,37 +204,7 @@ export class LandscapeGenerator {
       maxHeight = Math.max(maxHeight, vertexLengths[i / 3]);
     }
     this.generateMountainRanges(vertices, vertexLengths);
-
-    const waterLevel = this.PLANET_RADIUS * this.config.waterLevel;
-    const colorStops = this.config.colors;
-
-    // Color generation
-    for (let i = 0; i < vertices.length; i += 3) {
-      const height = vertexLengths[i / 3];
-      let color;
-
-      if (height <= waterLevel) {
-        color = colorStops[0].color;
-      } else {
-        const normalizedHeight = Math.max(0, Math.min(1, (height - waterLevel) / (maxHeight - waterLevel)));
-
-        let lowerStop = colorStops[0];
-        let upperStop = colorStops[colorStops.length - 1];
-
-        for (let j = 0; j < colorStops.length - 1; j++) {
-          if (normalizedHeight >= colorStops[j].height && normalizedHeight < colorStops[j + 1].height) {
-            lowerStop = colorStops[j];
-            upperStop = colorStops[j + 1];
-            break;
-          }
-        }
-
-        const t = (normalizedHeight - lowerStop.height) / (upperStop.height - lowerStop.height);
-        color = this.lerpColor(lowerStop.color, upperStop.color, t);
-      }
-
-      colors.push(color.r, color.g, color.b);
-    }
+    this.generateColors(vertices, vertexLengths, colors, minHeight, maxHeight);
 
     geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
     geometry.computeVertexNormals();
@@ -245,6 +212,33 @@ export class LandscapeGenerator {
     return geometry;
   }
 
+  private generateColors(vertices: Float32Array, vertexLengths: Float32Array, colors: Float32Array, minHeight: number, maxHeight: number): void {
+    const waterLevel = this.PLANET_RADIUS * this.config.waterLevel;
+    const colorStops = this.config.colors;
+
+    for (let i = 0; i < vertices.length; i += 3) {
+      const height = vertexLengths[i / 3];
+      let color: THREE.Color;
+
+      if (height <= waterLevel) {
+        color = colorStops[0].color;
+      } else {
+        const normalizedHeight = (height - waterLevel) / (maxHeight - waterLevel);
+        const stopIndex = colorStops.findIndex(
+          (stop, j) => j < colorStops.length - 1 && normalizedHeight >= stop.height && normalizedHeight < colorStops[j + 1].height
+        );
+
+        const [lowerStop, upperStop] = [colorStops[Math.max(0, stopIndex)], colorStops[Math.min(colorStops.length - 1, stopIndex + 1)]];
+
+        const t = (normalizedHeight - lowerStop.height) / (upperStop.height - lowerStop.height);
+        color = this.lerpColor(lowerStop.color, upperStop.color, t);
+      }
+
+      colors[i] = color.r;
+      colors[i + 1] = color.g;
+      colors[i + 2] = color.b;
+    }
+  }
   private generateMountainRanges(vertices: Float32Array, vertexLengths: Float32Array): void {
     const noise = new SimplexNoise(pseudoRandom);
     const { count, height, complexity } = this.config.mountainRanges;
@@ -254,16 +248,13 @@ export class LandscapeGenerator {
       let currentVertexIndex = this.findHighElevationVertex(vertexLengths, 1.2);
 
       for (let step = 0; step < complexity; step++) {
-        const normal = new THREE.Vector3(
-          vertices[currentVertexIndex * 3],
-          vertices[currentVertexIndex * 3 + 1],
-          vertices[currentVertexIndex * 3 + 2]
-        ).normalize();
+        // calculate normal
+        this.tempVector3.set(vertices[currentVertexIndex * 3], vertices[currentVertexIndex * 3 + 1], vertices[currentVertexIndex * 3 + 2]).normalize();
 
         // Amplify height with mountain-specific noise
-        const mountainNoise = noise.noise3d(normal.x * 3, normal.y * 3, normal.z * 3);
+        const mountainNoise = noise.noise3d(this.tempVector3.x * 3, this.tempVector3.y * 3, this.tempVector3.z * 3);
 
-        vertexLengths[currentVertexIndex] += height * Math.abs(mountainNoise) * (1 + noise.noise3d(normal.x, normal.y, normal.z));
+        vertexLengths[currentVertexIndex] += height * Math.abs(mountainNoise) * (1 + noise.noise3d(this.tempVector3.x, this.tempVector3.y, this.tempVector3.z));
 
         // Spread mountain range to nearby vertices
         currentVertexIndex = this.findNeighborVertex(currentVertexIndex);
@@ -272,11 +263,10 @@ export class LandscapeGenerator {
   }
 
   private lerpColor(colorA: THREE.Color, colorB: THREE.Color, t: number): THREE.Color {
-    const result = new THREE.Color();
-    result.r = colorA.r + (colorB.r - colorA.r) * t;
-    result.g = colorA.g + (colorB.g - colorA.g) * t;
-    result.b = colorA.b + (colorB.b - colorA.b) * t;
-    return result;
+    this.tempColor.r = colorA.r + (colorB.r - colorA.r) * t;
+    this.tempColor.g = colorA.g + (colorB.g - colorA.g) * t;
+    this.tempColor.b = colorA.b + (colorB.b - colorA.b) * t;
+    return this.tempColor;
   }
 
   // Method to update configuration
