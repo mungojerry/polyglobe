@@ -74,7 +74,7 @@ export class ZarchGameSpherical {
     this.scene.add(gridHelper);
 
     // Camera setup
-    this.camera.position.set(0, 300, 300);
+    this.camera.position.set(0, 0, this.PLANET_RADIUS);
     this.camera.lookAt(0, 0, 0);
 
     // Lighting
@@ -108,7 +108,7 @@ export class ZarchGameSpherical {
     this.controls.dampingFactor = 0.05;
     this.controls.screenSpacePanning = false;
     this.controls.minDistance = 1;
-    this.controls.maxDistance = 500;
+    this.controls.maxDistance = this.PLANET_RADIUS * 20;
     this.controls.maxPolarAngle = Math.PI / 2;
 
     this.velocity = new THREE.Vector3();
@@ -135,7 +135,7 @@ export class ZarchGameSpherical {
     this.scene.add(this.waterSphere.getObject());
 
     // Camera positioning
-    this.camera.position.set(0, 20, 50);
+    this.camera.position.set(0, 0, this.PLANET_RADIUS * 2);
     this.camera.lookAt(0, 0, 0);
 
     // Lighting
