@@ -1,9 +1,10 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
 import { Water } from "../effects/Water";
-import { ButtonElement, ColorElement, controlManager, SliderElement } from "../managers/ControlManager";
+import { AccordionElement, ButtonElement, ColorElement, controlManager, SliderElement } from "../managers/controlManager";
 import { pseudoRandom } from "../utils/PseudoRandom";
 import { LandscapeConfig, LandscapeGenerator } from "./LandscaoeGeneration";
+import { PLANET_PRESETS } from "./LandscapePresets";
 
 export class ZarchGameSpherical {
   private scene: THREE.Scene;
@@ -25,6 +26,7 @@ export class ZarchGameSpherical {
   private thrustActive: boolean = false;
   private waterSphere!: Water;
   private readonly WATER_LEVEL = 1.04; // 1% above planet radius
+  private currentSeed = 23478;
   private landscapeConfig: LandscapeConfig = {
     resolution: 50,
     ridgeNoise: {
@@ -50,11 +52,14 @@ export class ZarchGameSpherical {
       { height: 0.8, color: new THREE.Color(0x666666) },
       { height: 1.0, color: new THREE.Color(0xffffff) },
     ],
+    mountainRanges: {
+      count: 2,
+      height: 0.2,
+      complexity: 8,
+    },
   };
-  private debugFolder: any;
 
   constructor() {
-    pseudoRandom.setSeed(23478);
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -144,9 +149,10 @@ export class ZarchGameSpherical {
 
   private regenerateLandscape(): void {
     console.log("regenerateLandscape...");
+    pseudoRandom.setSeed(this.currentSeed);
     const startTime = performance.now();
     this.scene.remove(this.landscape);
-    pseudoRandom.setSeed(Math.round(performance.now()));
+
     const geometry = this.createLandscape();
     this.landscape = new THREE.Mesh(
       geometry,
@@ -159,10 +165,10 @@ export class ZarchGameSpherical {
     console.log(`landscape generation in ${performance.now() - startTime}ms`);
     console.log("DONE");
   }
-
+  generator = new LandscapeGenerator(this.PLANET_RADIUS, this.landscapeConfig);
   private createLandscape() {
-    const generator = new LandscapeGenerator(this.PLANET_RADIUS, this.landscapeConfig);
-    return generator.generateTerrain();
+    this.generator.updateConfig(this.landscapeConfig);
+    return this.generator.generateTerrain();
   }
 
   createShip() {
@@ -403,13 +409,26 @@ export class ZarchGameSpherical {
   private setupDebugControls(): void {
     controlManager.addAccordion("noiseControls", "Noise Generator Controls");
 
+    controlManager.addDropdown(
+      "Preset",
+      "Preset: ",
+      () => "Earth-like",
+      (value) => {
+        this.loadPreset(value);
+      },
+      [...PLANET_PRESETS.map(({ name }) => name)]
+    );
+
     // Add noise generator controls
     const noiseConfig = this.landscapeConfig;
     const rebuildButton: ButtonElement = {
       id: "rebuildButton",
       label: "Rebuild globe",
       type: "button",
-      callback: () => this.regenerateLandscape(),
+      callback: () => {
+        this.currentSeed = Math.round(performance.now());
+        this.regenerateLandscape();
+      },
     };
     controlManager.addChildToAccordion("noiseControls", rebuildButton);
     const outputValues: ButtonElement = {
@@ -427,11 +446,17 @@ export class ZarchGameSpherical {
         const fullKey = prefix ? `${prefix}.${key}` : key;
 
         if (Array.isArray(value)) {
-          // Handle array of noise layers or colors
-          controlManager.addAccordion(accordianID + key, key);
-
+          console.log(key);
+          const accordianControl: AccordionElement = {
+            expanded: false,
+            id: accordianID + fullKey,
+            label: key,
+            type: "accordion",
+            children: [],
+          };
+          controlManager.addChildToAccordion(accordianID, accordianControl);
           value.forEach((item, index) => {
-            processConfig(item, `${fullKey}[${index}]`, accordianID + key);
+            processConfig(item, `${fullKey}[${index}]`, accordianID + fullKey);
           });
         } else if (value instanceof THREE.Color) {
           // Color picker control
@@ -447,35 +472,8 @@ export class ZarchGameSpherical {
           };
           controlManager.addChildToAccordion(accordianID, colorControl);
         } else if (typeof value === "number") {
-          interface SliderConfig {
-            min: number;
-            max: number;
-            step: number;
-          }
-
-          interface SliderConfigurations {
-            resolution: SliderConfig;
-            waterLevel: SliderConfig;
-            amplitude: SliderConfig;
-            sharpness: SliderConfig;
-            scale: SliderConfig;
-            default: SliderConfig;
-          }
-
-          const SLIDER_CONFIG: SliderConfigurations = {
-            resolution: { min: 4, max: 100, step: 1 },
-            waterLevel: { min: 0, max: 2, step: 0.01 },
-            amplitude: { min: 0, max: 2, step: 0.01 },
-            sharpness: { min: 0, max: 2, step: 0.01 },
-            scale: { min: 0, max: 100, step: 0.01 },
-            default: { min: 0, max: 20, step: 0.01 },
-          };
-
-          const getSliderProps = (key: keyof SliderConfigurations | string): SliderConfig => {
-            return SLIDER_CONFIG[key as keyof SliderConfigurations] || SLIDER_CONFIG.default;
-          };
-
           // Slider control with appropriate ranges
+          console.log("  number " + key + "  " + accordianID);
           const sliderControl: SliderElement = {
             id: fullKey,
             label: key,
@@ -485,16 +483,37 @@ export class ZarchGameSpherical {
               obj[key] = Number(newValue);
               this.regenerateLandscape();
             },
-            ...getSliderProps(key),
+            min: key == "resolution" ? 4 : 0,
+            max: key == "resolution" ? 100 : 4,
+            step: key == "resolution" ? 1 : 0.02,
           };
           controlManager.addChildToAccordion(accordianID, sliderControl);
         } else if (typeof value === "object") {
+          console.log(key + "   creating " + accordianID + fullKey);
           // Recursively process nested objects
-          processConfig(value, fullKey, accordianID);
+          const accordianControl: AccordionElement = {
+            id: accordianID + fullKey,
+            expanded: false,
+            label: key,
+            type: "accordion",
+            children: [],
+          };
+          controlManager.addChildToAccordion(accordianID, accordianControl);
+          processConfig(value, fullKey, accordianID + fullKey);
         }
       });
     };
 
     processConfig(this.landscapeConfig, "", "noiseControls");
+  }
+
+  // Add method to switch presets
+  public loadPreset(presetName: string): void {
+    const preset = PLANET_PRESETS.find((p) => p.name === presetName);
+    if (preset) {
+      this.landscapeConfig = { ...this.landscapeConfig, ...preset.config };
+
+      this.regenerateLandscape();
+    }
   }
 }

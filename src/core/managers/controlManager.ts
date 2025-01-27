@@ -168,6 +168,9 @@ class ControlManager {
   public addChildToAccordion(accordionId: string, childControl: ControlElement): void {
     const accordion = this.controlElements.get(accordionId);
     if (accordion && isAccordion(accordion)) {
+      // Add the child control to the main map so it can be accessed
+      this.controlElements.set(childControl.id, childControl);
+      // And add it to the accordion's children array
       accordion.children.push(childControl);
       this.updateDisplay();
     }
@@ -385,11 +388,35 @@ class ControlManager {
 
     this.clearContainer(componentsToUpdate);
 
+    // Helper function to check if a control is a child of any accordion
+    const isChildOfAnyAccordion = (controlId: string): boolean => {
+      return Array.from(this.controlElements.values()).some((control) => {
+        if (isAccordion(control)) {
+          // Recursively check all children
+          const isChild = (children: ControlElement[]): boolean => {
+            return children.some((child) => {
+              if (child.id === controlId) return true;
+              if (isAccordion(child)) {
+                return isChild(child.children);
+              }
+              return false;
+            });
+          };
+          return isChild(control.children);
+        }
+        return false;
+      });
+    };
+
     this.controlElements.forEach((element) => {
       if (componentsToUpdate && !componentsToUpdate.includes(element.id)) return;
-      const controlWrapper = this.createControlWrapper(element);
-      this.renderControl(element, controlWrapper);
-      this.containerElement?.appendChild(controlWrapper);
+
+      // Only render if the element is not a child of any accordion
+      if (!isChildOfAnyAccordion(element.id)) {
+        const controlWrapper = this.createControlWrapper(element);
+        this.renderControl(element, controlWrapper);
+        this.containerElement?.appendChild(controlWrapper);
+      }
     });
   }
 }
