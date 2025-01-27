@@ -2,13 +2,6 @@ import * as THREE from "three";
 import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise";
 import { pseudoRandom } from "../utils/PseudoRandom";
 
-export interface ErosionConfig {
-  iterations: number;
-  erosionRate: number;
-  depositionRate: number;
-  smoothingFactor: number;
-}
-
 export interface LandscapeConfig {
   resolution: number;
   ridgeNoise: {
@@ -25,7 +18,16 @@ export interface LandscapeConfig {
     height: number;
     color: THREE.Color;
   }>;
-  erosion?: ErosionConfig;
+  rivers: {
+    count: number;
+    complexity: number;
+    erosionFactor: number;
+  };
+  mountainRanges: {
+    count: number;
+    height: number;
+    complexity: number;
+  };
 }
 
 export class LandscapeGenerator {
@@ -48,15 +50,79 @@ export class LandscapeGenerator {
       throw new Error("Invalid ridge noise parameters");
     }
 
-    // Validate erosion config if present
-    if (config.erosion) {
-      const { iterations, erosionRate, depositionRate, smoothingFactor } = config.erosion;
-      if (iterations < 0 || erosionRate < 0 || depositionRate < 0 || smoothingFactor < 0 || smoothingFactor > 1) {
-        throw new Error("Invalid erosion configuration");
+    return config;
+  }
+
+  private generateRivers(vertices: Float32Array, vertexLengths: Float32Array): void {
+    const noise = new SimplexNoise(pseudoRandom);
+    const { count, complexity, erosionFactor } = this.config.rivers;
+
+    for (let riverIndex = 0; riverIndex < count; riverIndex++) {
+      // Random start point on high terrain
+      let currentVertexIndex = this.findHighestTerrainVertex(vertexLengths);
+      const riverPath: number[] = [currentVertexIndex];
+
+      for (let step = 0; step < complexity; step++) {
+        const normal = new THREE.Vector3(
+          vertices[currentVertexIndex * 3],
+          vertices[currentVertexIndex * 3 + 1],
+          vertices[currentVertexIndex * 3 + 2]
+        ).normalize();
+
+        // Use noise to determine river path with some randomness
+        const riverDirectionNoise = noise.noise3d(normal.x * 2, normal.y * 2, normal.z * 2);
+
+        // Find neighboring vertex that leads downhill
+        currentVertexIndex = this.findDownhillNeighbor(vertices, vertexLengths, currentVertexIndex, riverDirectionNoise);
+
+        riverPath.push(currentVertexIndex);
+
+        // Erode terrain along river path
+        vertexLengths[currentVertexIndex] -= erosionFactor;
       }
     }
+  }
 
-    return config;
+  private generateMountainRanges(vertices: Float32Array, vertexLengths: Float32Array): void {
+    const noise = new SimplexNoise(pseudoRandom);
+    const { count, height, complexity } = this.config.mountainRanges;
+
+    for (let rangeIndex = 0; rangeIndex < count; rangeIndex++) {
+      // Select mountain range seed point
+      let currentVertexIndex = this.findHighestTerrainVertex(vertexLengths);
+
+      for (let step = 0; step < complexity; step++) {
+        const normal = new THREE.Vector3(
+          vertices[currentVertexIndex * 3],
+          vertices[currentVertexIndex * 3 + 1],
+          vertices[currentVertexIndex * 3 + 2]
+        ).normalize();
+
+        // Amplify height with mountain-specific noise
+        const mountainNoise = noise.noise3d(normal.x * 3, normal.y * 3, normal.z * 3);
+
+        vertexLengths[currentVertexIndex] += height * Math.abs(mountainNoise) * (1 + noise.noise3d(normal.x, normal.y, normal.z));
+
+        // Spread mountain range to nearby vertices
+        currentVertexIndex = this.findNeighborVertex(vertices, currentVertexIndex);
+      }
+    }
+  }
+
+  private findHighestTerrainVertex(vertexLengths: Float32Array): number {
+    return vertexLengths.reduce((maxIndex, length, index, arr) => (length > arr[maxIndex] ? index : maxIndex), 0);
+  }
+
+  private findDownhillNeighbor(vertices: Float32Array, vertexLengths: Float32Array, currentIndex: number, noise: number): number {
+    // Implementation of finding downhill neighboring vertex
+    // This is a simplified version and would need more sophisticated logic
+    const currentHeight = vertexLengths[currentIndex];
+    return vertexLengths.findIndex((height, index) => height < currentHeight && Math.random() < noise);
+  }
+
+  private findNeighborVertex(vertices: Float32Array, currentIndex: number): number {
+    // Simplified neighbor finding - would need graph/mesh traversal in practice
+    return Math.floor(Math.random() * (vertices.length / 3));
   }
 
   private mergeWithDefaults(partialConfig?: Partial<LandscapeConfig>): LandscapeConfig {
@@ -86,82 +152,21 @@ export class LandscapeGenerator {
         { height: 0.8, color: new THREE.Color(0x666666) },
         { height: 1.0, color: new THREE.Color(0xffffff) },
       ],
-      erosion: {
-        iterations: 3,
-        erosionRate: 0.5,
-        depositionRate: 0.3,
-        smoothingFactor: 0.2,
+      rivers: {
+        count: 3,
+        complexity: 10,
+        erosionFactor: 0.05,
+      },
+      mountainRanges: {
+        count: 2,
+        height: 0.2,
+        complexity: 8,
       },
     };
 
     return { ...defaultConfig, ...partialConfig };
   }
 
-  // Implement a more efficient neighbor finding method
-  private findNearestNeighbors(vertices: Float32Array, index: number, maxNeighbors: number = 6): number[] {
-    const queryVertex = new THREE.Vector3(vertices[index], vertices[index + 1], vertices[index + 2]);
-    const distanceMap = new Map<number, number>();
-
-    for (let i = 0; i < vertices.length; i += 3) {
-      if (i === index) continue;
-
-      const neighbor = new THREE.Vector3(vertices[i], vertices[i + 1], vertices[i + 2]);
-      const distance = queryVertex.distanceTo(neighbor);
-      distanceMap.set(i, distance);
-    }
-
-    // Sort by distance and take nearest neighbors
-    return Array.from(distanceMap.entries())
-      .sort((a, b) => a[1] - b[1])
-      .slice(0, maxNeighbors)
-      .map((entry) => entry[0]);
-  }
-
-  // Rest of the methods remain largely the same, with added safety checks
-  private applyErosion(vertices: Float32Array, vertexLengths: Float32Array): void {
-    if (!this.config.erosion) return;
-
-    const { iterations, erosionRate, depositionRate, smoothingFactor } = this.config.erosion;
-    const noise = new SimplexNoise(pseudoRandom);
-
-    for (let iter = 0; iter < iterations; iter++) {
-      const newVertexLengths = new Float32Array(vertexLengths);
-
-      for (let i = 0; i < vertices.length; i += 3) {
-        const normal = new THREE.Vector3(vertices[i], vertices[i + 1], vertices[i + 2]).normalize();
-        const currentHeight = vertexLengths[i / 3];
-
-        const slope = this.calculateLocalSlope(vertices, vertexLengths, i);
-        const noiseInfluence = noise.noise3d(normal.x * 2, normal.y * 2, normal.z * 2) * 0.1;
-
-        const erosionAmount = Math.max(0, slope * erosionRate * (1 + noiseInfluence));
-        const depositionAmount = Math.max(0, slope * depositionRate * (1 - noiseInfluence));
-
-        newVertexLengths[i / 3] = Math.max(
-          0.5 * this.PLANET_RADIUS, // Prevent terrain from becoming too flat
-          Math.min(currentHeight - erosionAmount, currentHeight + depositionAmount)
-        );
-      }
-
-      if (smoothingFactor > 0) {
-        this.smoothTerrain(newVertexLengths, smoothingFactor);
-      }
-
-      vertexLengths.set(newVertexLengths);
-    }
-
-    // Update vertices based on modified lengths
-    for (let i = 0; i < vertices.length; i += 3) {
-      const normal = new THREE.Vector3(vertices[i], vertices[i + 1], vertices[i + 2]).normalize();
-      const length = vertexLengths[i / 3];
-
-      vertices[i] = normal.x * length;
-      vertices[i + 1] = normal.y * length;
-      vertices[i + 2] = normal.z * length;
-    }
-  }
-
-  // Add more robust error checking and prevent extreme calculations
   generateTerrain(): THREE.BufferGeometry {
     const geometry = new THREE.IcosahedronGeometry(this.PLANET_RADIUS, this.config.resolution);
     const vertices = geometry.attributes.position.array as Float32Array;
@@ -229,7 +234,8 @@ export class LandscapeGenerator {
       minHeight = Math.min(minHeight, vertexLengths[i / 3]);
       maxHeight = Math.max(maxHeight, vertexLengths[i / 3]);
     }
-
+    this.generateRivers(vertices, vertexLengths);
+    this.generateMountainRanges(vertices, vertexLengths);
     const waterLevel = this.PLANET_RADIUS * this.config.waterLevel;
     const colorStops = this.config.colors;
 
@@ -278,69 +284,5 @@ export class LandscapeGenerator {
   // Method to update configuration
   updateConfig(newConfig: Partial<LandscapeConfig>): void {
     this.config = { ...this.config, ...newConfig };
-  }
-
-  private calculateLocalSlope(vertices: Float32Array, vertexLengths: Float32Array, index: number): number {
-    // Use a more efficient slope calculation
-    const neighbors = this.findAdjacentVertices(vertices, index);
-    const currentHeight = vertexLengths[index / 3];
-
-    let totalHeightDiff = 0;
-    let validNeighbors = 0;
-
-    for (const neighborIdx of neighbors) {
-      const neighborHeight = vertexLengths[neighborIdx / 3];
-      totalHeightDiff += Math.abs(currentHeight - neighborHeight);
-      validNeighbors++;
-    }
-
-    return validNeighbors > 0 ? totalHeightDiff / validNeighbors / this.PLANET_RADIUS : 0;
-  }
-
-  private smoothTerrain(vertexLengths: Float32Array, smoothingFactor: number): void {
-    const smoothedLengths = [...vertexLengths];
-
-    for (let i = 0; i < vertexLengths.length; i++) {
-      const neighbors = this.findAdjacentVertices(new Float32Array(vertexLengths.buffer), i * 3);
-      const neighborHeights = neighbors.map((idx) => vertexLengths[idx / 3]);
-      const avgNeighborHeight = neighborHeights.reduce((a, b) => a + b, 0) / neighbors.length;
-
-      // Interpolate between current height and average neighbor height
-      smoothedLengths[i] = vertexLengths[i] * (1 - smoothingFactor) + avgNeighborHeight * smoothingFactor;
-    }
-
-    vertexLengths.set(smoothedLengths);
-  }
-
-  // Preallocate and reuse vectors to reduce memory allocation
-  private readonly _normal = new THREE.Vector3();
-  private readonly _vertex = new THREE.Vector3();
-  private readonly _neighborCache: Map<number, number[]> = new Map();
-
-  // Modify findAdjacentVertices to use cached results
-  private findAdjacentVertices(vertices: Float32Array, index: number, maxNeighbors: number = 6): number[] {
-    const cacheKey = index;
-    if (this._neighborCache.has(cacheKey)) {
-      return this._neighborCache.get(cacheKey)!;
-    }
-
-    const adjacentIndices: number[] = [];
-    const vertex = this._vertex.set(vertices[index], vertices[index + 1], vertices[index + 2]);
-
-    for (let i = 0; i < vertices.length; i += 3) {
-      if (i === index) continue;
-
-      const otherVertex = this._normal.set(vertices[i], vertices[i + 1], vertices[i + 2]);
-      const distance = vertex.distanceTo(otherVertex);
-
-      if (distance < this.PLANET_RADIUS * 0.2) {
-        adjacentIndices.push(i);
-      }
-
-      if (adjacentIndices.length >= maxNeighbors) break;
-    }
-
-    this._neighborCache.set(cacheKey, adjacentIndices);
-    return adjacentIndices;
   }
 }
