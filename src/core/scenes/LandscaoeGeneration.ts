@@ -18,6 +18,10 @@ export interface LandscapeConfig {
     height: number;
     color: THREE.Color;
   }>;
+  erosion?: {
+    iterations: number; // Number of smoothing passes
+    strength: number; // Strength of smoothing effect
+  };
 }
 
 export class LandscapeGenerator {
@@ -60,9 +64,6 @@ export class LandscapeGenerator {
         { scale: 0.5, amplitude: 0.1 },
         { scale: 1.0, amplitude: 0.08 },
         { scale: 2.0, amplitude: 0.04 },
-        { scale: 4.0, amplitude: 0.02 },
-        { scale: 8.0, amplitude: 0.01 },
-        { scale: 16.0, amplitude: 0.005 },
       ],
       waterLevel: 1.03,
       colors: [
@@ -74,6 +75,10 @@ export class LandscapeGenerator {
         { height: 0.8, color: new THREE.Color(0x666666) }, // Mountains
         { height: 1.0, color: new THREE.Color(0xffffff) }, // Snow
       ],
+      erosion: {
+        iterations: 5, // Fewer iterations for low-poly
+        strength: 0.1, // Subtle smoothing
+      },
     };
 
     return { ...defaultConfig, ...partialConfig };
@@ -147,12 +152,63 @@ export class LandscapeGenerator {
       minHeight = Math.min(minHeight, vertexLengths[iDiv3]);
       maxHeight = Math.max(maxHeight, vertexLengths[iDiv3]);
     }
+
+    // Apply low-poly-friendly erosion
+    if (this.config.erosion) {
+      this.applyLowPolyErosion(vertices, vertexLengths, this.config.erosion);
+    }
+
     this.generateColors(vertices, vertexLengths, colors, maxHeight);
 
     geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
     geometry.computeVertexNormals();
 
     return geometry;
+  }
+
+  private applyLowPolyErosion(vertices: Float32Array, vertexLengths: Float32Array, erosionConfig: { iterations: number; strength: number }): void {
+    const { iterations, strength } = erosionConfig;
+
+    for (let iter = 0; iter < iterations; iter++) {
+      const newVertexLengths = new Float32Array(vertexLengths);
+
+      for (let i = 0; i < vertices.length; i += 3) {
+        const neighbors = this.getVertexNeighbors(i, vertices);
+        let sum = vertexLengths[i / 3];
+        let count = 1;
+
+        // Average heights with neighbors
+        neighbors.forEach((neighborIndex) => {
+          sum += vertexLengths[neighborIndex / 3];
+          count++;
+        });
+
+        // Apply smoothing
+        newVertexLengths[i / 3] = vertexLengths[i / 3] * (1 - strength) + (sum / count) * strength;
+      }
+
+      // Update vertex lengths
+      for (let i = 0; i < vertexLengths.length; i++) {
+        vertexLengths[i] = newVertexLengths[i];
+      }
+    }
+  }
+
+  private getVertexNeighbors(index: number, vertices: Float32Array): number[] {
+    // Simplified neighbor calculation for icosahedron geometry
+    const neighbors = [];
+    const vertexIndex = index / 3;
+
+    // Check adjacent vertices (this can be improved for icosahedron geometry)
+    for (let i = -3; i <= 3; i += 3) {
+      if (i === 0) continue; // Skip self
+      const neighborIndex = index + i;
+      if (neighborIndex >= 0 && neighborIndex < vertices.length) {
+        neighbors.push(neighborIndex);
+      }
+    }
+
+    return neighbors;
   }
 
   private generateColors(vertices: Float32Array, vertexLengths: Float32Array, colors: Float32Array, maxHeight: number): void {
@@ -172,7 +228,6 @@ export class LandscapeGenerator {
         );
 
         const [lowerStop, upperStop] = [colorStops[Math.max(0, stopIndex)], colorStops[Math.min(colorStops.length - 1, stopIndex + 1)]];
-
         const t = (normalizedHeight - lowerStop.height) / (upperStop.height - lowerStop.height);
         color = this.lerpColor(lowerStop.color, upperStop.color, t);
       }

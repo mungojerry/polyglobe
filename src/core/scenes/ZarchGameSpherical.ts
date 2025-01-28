@@ -52,6 +52,11 @@ export class ZarchGameSpherical {
       { height: 0.8, color: new THREE.Color(0x666666) },
       { height: 1.0, color: new THREE.Color(0xffffff) },
     ],
+
+    erosion: {
+      iterations: 5, // Lightweight erosion
+      strength: 0.1,
+    },
   };
 
   constructor() {

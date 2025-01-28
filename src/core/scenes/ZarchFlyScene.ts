@@ -1,22 +1,26 @@
 import RAPIER from "@dimforge/rapier3d";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import * as BufferGeometryUtils from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { Water } from "../effects/Water";
+import { AccordionElement, ButtonElement, ColorElement, controlManager, SliderElement } from "../managers/controlManager";
 import { DragBehavior, PlanetaryGravityBehavior } from "../particles/Behaviors";
 import { ConeEmitter } from "../particles/Emitters";
 import { ParticleSystem } from "../particles/ParticleSystem";
+import { pseudoRandom } from "../utils/PseudoRandom";
+import { LandscapeConfig, LandscapeGenerator } from "./LandscaoeGeneration";
+import { PLANET_PRESETS } from "./LandscapePresets";
 
 // Constants
 const THRUST_FORCE = 20;
-const LINEAR_DAMPING = 0.8;
+const LINEAR_DAMPING = 0.1;
 const ANGULAR_DAMPING = 1.0;
 const PLANET_RADIUS = 1300;
-const GRAVITY_STRENGTH = 9.8 * 50;
-const MAX_VELOCITY = 150;
+const GRAVITY_STRENGTH = 9.8 * 500;
 const SHIP_START_HEIGHT = PLANET_RADIUS + 150;
 const MAX_PITCH = Math.PI;
-const MAX_ROLL = Math.PI;
 const POLE_CYLINDER_RADIUS = 50;
-const POLE_CYLINDER_HEIGHT = 100;
+const POLE_CYLINDER_HEIGHT = 1000;
 const SHOT_COOLDOWN = 100; //
 
 // Helicopter Control Constants
@@ -36,14 +40,11 @@ export class ZarchFlyScene {
   private camera: THREE.PerspectiveCamera;
   private renderer: THREE.WebGLRenderer;
   private world: RAPIER.World;
-  private shipBody: RAPIER.RigidBody | undefined;
-  private planetBody: RAPIER.RigidBody | undefined;
+
   private shipModel: THREE.Group | null = null;
   private thrustActive: boolean = false;
   private mouseX: number = 0;
   private mouseY: number = 0;
-  private screenCenterX: number = 0;
-  private screenCenterY: number = 0;
   private crosshair: HTMLDivElement;
   private cursorX: number = 0;
   private cursorY: number = 0;
@@ -58,13 +59,57 @@ export class ZarchFlyScene {
   private particleSystem: ParticleSystem | null = null;
   private bulletSystem: ParticleSystem | null = null;
 
-  directionalLight: THREE.DirectionalLight;
-  directionalLight2: THREE.DirectionalLight;
+  private directionalLight: THREE.DirectionalLight;
+  private directionalLight2: THREE.DirectionalLight;
+
+  private shipBody!: RAPIER.RigidBody;
+
+  private planetBody!: RAPIER.RigidBody;
+  private planetCollider!: RAPIER.Collider;
+
+  private landscapeWire!: THREE.Mesh;
+  private landscape!: THREE.Mesh;
 
   private pitch: number = 0;
   private yaw: number = 0;
   private roll: number = 0;
-  private mouseSensitivity: number = 0.005;
+
+  private currentSeed = 23478;
+  private landscapeConfig = {
+    resolution: 50,
+    ridgeNoise: {
+      scale: 1.3,
+      amplitude: 0.15,
+      sharpness: 1.4,
+    },
+    noiseLayers: [
+      { scale: 0.5, amplitude: 0.1 },
+      { scale: 1.0, amplitude: 0.08 },
+      { scale: 2.0, amplitude: 0.04 },
+      { scale: 4.0, amplitude: 0.02 },
+      { scale: 8.0, amplitude: 0.01 },
+      { scale: 16.0, amplitude: 0.005 },
+    ],
+    waterLevel: 1.03,
+    colors: [
+      { height: 0.0, color: new THREE.Color(0x000066) },
+      { height: 0.05, color: new THREE.Color(0x006699) },
+      { height: 0.1, color: new THREE.Color(0xf0e68c) },
+      { height: 0.2, color: new THREE.Color(0x339933) },
+      { height: 0.6, color: new THREE.Color(0x663300) },
+      { height: 0.8, color: new THREE.Color(0x666666) },
+      { height: 1.0, color: new THREE.Color(0xffffff) },
+    ],
+
+    erosion: {
+      iterations: 5, // Lightweight erosion
+      strength: 0.1,
+    },
+  };
+  private generator = new LandscapeGenerator(PLANET_RADIUS, this.landscapeConfig);
+
+  private targetRotation = new THREE.Quaternion();
+  private currentRotation = new THREE.Quaternion();
 
   constructor() {
     this.scene = new THREE.Scene();
@@ -134,25 +179,92 @@ export class ZarchFlyScene {
 
     this.world = new RAPIER.World({ x: 0, y: 0, z: 0 });
 
-    this.updateScreenCenter();
     this.initialize();
-    this.createPoleCylinders();
-    this.createVisiblePoleCylinders();
-
-    // this.directionalLight.target = this.planetObject;
   }
-
-  private updateScreenCenter(): void {
-    this.screenCenterX = window.innerWidth / 2;
-    this.screenCenterY = window.innerHeight / 2;
+  private isInitialized: boolean = false;
+  private water!: Water;
+  private createWater() {
+    this.water = new Water(PLANET_RADIUS * this.landscapeConfig.waterLevel, 40);
+    this.scene.add(this.water.getObject());
   }
-
   private async initialize(): Promise<void> {
     await this.createShip();
-    this.createPlanet();
+
+    this.createPoleCylinders();
+    this.createVisiblePoleCylinders();
+    this.createWater();
+    this.regenerateLandscape();
+
     this.setupEventListeners();
-    this.directionalLight.target = this.planetObject;
+    this.directionalLight.target = this.landscape;
+    this.setupDebugControls();
+    this.isInitialized = true; // Add this line
     this.animate();
+  }
+
+  public updateLandscapeConfig(newConfig: Partial<LandscapeConfig>): void {
+    this.landscapeConfig = { ...this.landscapeConfig, ...newConfig };
+    this.regenerateLandscape();
+  }
+
+  private regenerateLandscape(): void {
+    console.log("regenerateLandscape...");
+    pseudoRandom.setSeed(this.currentSeed);
+    if (this.landscape) {
+      this.scene.remove(this.landscape);
+      this.scene.remove(this.landscapeWire);
+    }
+    const startTime = performance.now();
+
+    let geometry = this.createLandscapeGeometry();
+    geometry = BufferGeometryUtils.mergeVertices(geometry);
+
+    this.landscape = new THREE.Mesh(
+      geometry,
+      new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        flatShading: true,
+      })
+    );
+    this.scene.add(this.landscape);
+
+    const materialWire = new THREE.MeshStandardMaterial({
+      color: 0x33ff66,
+      flatShading: true,
+      polygonOffset: true,
+      polygonOffsetFactor: 5,
+      metalness: 0.5,
+      roughness: 0.1,
+      wireframe: true,
+      clipShadows: false,
+    });
+    this.landscapeWire = new THREE.Mesh(geometry, materialWire);
+    this.createPhysicsCollider();
+
+    console.log(`landscape generation in ${performance.now() - startTime}ms`);
+    console.log("DONE");
+  }
+
+  private createPhysicsCollider(): void {
+    if (this.planetBody) {
+      // Remove old collider
+      this.world.removeCollider(this.planetCollider, true);
+      this.world.removeRigidBody(this.planetBody);
+    }
+
+    // Create new rigid body with updated geometry
+    const rigidBodyDesc = RAPIER.RigidBodyDesc.fixed();
+    this.planetBody = this.world.createRigidBody(rigidBodyDesc);
+
+    const vertices = this.landscape.geometry.attributes.position.array;
+    const indices = this.landscape.geometry.index ? this.landscape.geometry.index.array : undefined;
+    const colliderDesc = RAPIER.ColliderDesc.trimesh(vertices as Float32Array, indices as Uint32Array);
+    this.planetCollider = this.world.createCollider(colliderDesc, this.planetBody);
+  }
+
+  private createLandscapeGeometry() {
+    this.generator.updateConfig(this.landscapeConfig);
+    return this.generator.generateTerrain();
   }
 
   // Add method to check if can shoot
@@ -167,19 +279,17 @@ export class ZarchFlyScene {
       const deltaX = (event.movementX || 0) * MOUSE_SENSITIVITY;
       const deltaY = (event.movementY || 0) * MOUSE_SENSITIVITY;
 
-      // Reduced sensitivity, smoother transitions
+      // Update mouse input for lateral movement
       this.mouseX = Math.max(-1, Math.min(1, this.mouseX + deltaX));
       this.mouseY = Math.max(-1, Math.min(1, this.mouseY + deltaY));
 
-      // Gradual decay when no input
-      this.mouseX *= 0.95;
-      this.mouseY *= 0.95;
+      // Update rotation (pitch and yaw)
+      this.pitch -= deltaY * 0.5; // Reduce sensitivity for smoother rotation
+      this.yaw -= deltaX * 0.5;
 
-      this.pitch -= deltaY;
-      this.yaw -= deltaX;
-
-      // Softer pitch/yaw limits
+      // Apply limits to pitch and yaw
       this.pitch = Math.max(-MAX_PITCH * 0.5, Math.min(MAX_PITCH * 0.5, this.pitch));
+
       // Update crosshair position
       this.crosshair.style.left = `${this.cursorX}px`;
       this.crosshair.style.top = `${this.cursorY}px`;
@@ -206,7 +316,6 @@ export class ZarchFlyScene {
       this.camera.aspect = window.innerWidth / window.innerHeight;
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(window.innerWidth, window.innerHeight);
-      this.updateScreenCenter();
     });
   }
 
@@ -322,50 +431,7 @@ export class ZarchFlyScene {
       },
     });
   }
-  private planetObject!: THREE.Mesh;
-  private createPlanet(): void {
-    const geometry = new THREE.IcosahedronGeometry(PLANET_RADIUS, 32);
-
-    const material = new THREE.MeshStandardMaterial({
-      color: 0x33ff66,
-      metalness: 0.5,
-      roughness: 0.1,
-      side: THREE.DoubleSide,
-      wireframe: false,
-    });
-    // geometry.computeBoundingSphere();
-    geometry.computeVertexNormals();
-    const planet = new THREE.Mesh(geometry, material);
-    // planet.castShadow = true;
-    planet.receiveShadow = true;
-    this.planetObject = planet;
-    this.scene.add(planet);
-    const materialWire = new THREE.MeshStandardMaterial({
-      color: 0x33ff66,
-      flatShading: true,
-      polygonOffset: true,
-      polygonOffsetFactor: 5,
-      metalness: 0.5,
-      roughness: 0.1,
-      wireframe: true,
-      clipShadows: false,
-    });
-    const planetWire = new THREE.Mesh(geometry, materialWire);
-
-    this.scene.add(planetWire);
-
-    const rigidBodyDesc = new RAPIER.RigidBodyDesc(RAPIER.RigidBodyType.Fixed).setTranslation(0, 0, 0);
-    this.planetBody = this.world.createRigidBody(rigidBodyDesc);
-
-    const colliderDesc = RAPIER.ColliderDesc.ball(PLANET_RADIUS * 1.002)
-      .setCollisionGroups(COLLISION_MASKS.PLANET)
-      .setActiveCollisionTypes(RAPIER.ActiveCollisionTypes.ALL)
-      .setFriction(0.5)
-      .setRestitution(0.2);
-
-    this.world.createCollider(colliderDesc, this.planetBody);
-  }
-
+  // private planetObject!: THREE.Mesh;
   private createPoleCylinders(): void {
     const northPoleColliderDesc = RAPIER.ColliderDesc.cylinder(POLE_CYLINDER_HEIGHT / 2, POLE_CYLINDER_RADIUS).setTranslation(
       0,
@@ -399,7 +465,6 @@ export class ZarchFlyScene {
     this.scene.add(this.northPoleMesh);
     this.scene.add(this.southPoleMesh);
   }
-
   private updateMovement(): void {
     if (!this.shipBody) return;
 
@@ -457,56 +522,70 @@ export class ZarchFlyScene {
       true
     );
   }
-
-  private targetRotation = new THREE.Quaternion();
-  private currentRotation = new THREE.Quaternion();
-  private rotationLerpSpeed = 0.15; // Adjust for desired smoothness
+  planetCenter = new THREE.Vector3(0, 0, 0);
+  private getSurfaceNormal(position: THREE.Vector3): THREE.Vector3 {
+    const surfaceNormal = position.clone().sub(this.planetCenter).normalize();
+    return surfaceNormal;
+  }
   private updateRotation(): void {
     if (!this.shipBody) return;
 
     const translation = this.shipBody.translation();
     const shipPos = new THREE.Vector3(translation.x, translation.y, translation.z);
-    const planetCenter = new THREE.Vector3(0, 0, 0);
-    const surfaceNormal = shipPos.clone().sub(planetCenter).normalize();
+    const surfaceNormal = this.getSurfaceNormal(shipPos);
 
-    // Simplified rotation relative to surface
+    // Calculate the tangent and binormal vectors
     const tangent = new THREE.Vector3(1, 0, 0).applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), surfaceNormal));
     const binormal = surfaceNormal.clone().cross(tangent).normalize();
 
-    // Smoother, more controlled rotation
-    const pitchQuaternion = new THREE.Quaternion().setFromAxisAngle(tangent, this.pitch * 0.5);
-    const yawQuaternion = new THREE.Quaternion().setFromAxisAngle(binormal, this.yaw * 0.5);
-    const rollQuaternion = new THREE.Quaternion().setFromAxisAngle(surfaceNormal, this.roll * 0.5);
+    // Apply pitch and yaw relative to the surface normal
+    const pitchQuaternion = new THREE.Quaternion().setFromAxisAngle(tangent, this.pitch * 10.5);
+    const yawQuaternion = new THREE.Quaternion().setFromAxisAngle(binormal, this.yaw * 10.5);
+    const rollQuaternion = new THREE.Quaternion().setFromAxisAngle(surfaceNormal, this.roll * 10.5);
 
+    // Combine the rotations
     this.targetRotation = pitchQuaternion.multiply(yawQuaternion).multiply(rollQuaternion);
     this.currentRotation.slerp(this.targetRotation, ROTATION_SMOOTHING);
 
+    // Apply the rotation to the ship
     this.shipBody.setRotation(this.currentRotation, true);
   }
+
   private updateCamera(position: THREE.Vector3): void {
     if (!this.shipBody) return;
 
-    // Calculate camera direction based on ship's rotation
+    // Get the surface normal at the ship's position
+    const surfaceNormal = this.getSurfaceNormal(position);
+
+    // Get ship's rotation to determine forward direction
     const rotation = this.shipBody.rotation();
-    const cameraDirection = new THREE.Vector3(0, 0, -1).applyQuaternion(new THREE.Quaternion(rotation.x, rotation.y, rotation.z, rotation.w));
+    const shipQuat = new THREE.Quaternion(rotation.x, rotation.y, rotation.z, rotation.w);
+    const shipForward = new THREE.Vector3(0, 0, -1).applyQuaternion(shipQuat);
 
-    // Calculate camera position based on ship's position and direction
-    const cameraOffset = cameraDirection.clone().multiplyScalar(-10); // Adjust distance as needed
-    const targetCameraPosition = position.clone().add(cameraOffset);
+    // Calculate right vector perpendicular to surface normal and ship forward
+    const right = shipForward.cross(surfaceNormal).normalize();
 
-    // Lerp camera position for smooth movement
-    this.camera.position.lerp(targetCameraPosition, 0.9);
+    // Calculate back vector that follows planet's curvature
+    const back = surfaceNormal.clone().cross(right).normalize();
 
-    const worldUp = position.clone().normalize();
-    this.camera.up.copy(worldUp);
+    // Camera offset distances
+    const heightDistance = 20;
+    const backDistance = 35;
 
-    // Look at the ship's position
+    // Calculate camera position that follows planet's curvature
+    const cameraTargetPosition = position.clone().add(surfaceNormal.clone().multiplyScalar(heightDistance)).add(back.multiplyScalar(backDistance));
+
+    // Smooth camera movement
+    this.camera.position.lerp(cameraTargetPosition, 0.91);
+
+    // Keep camera oriented properly
+    this.camera.up.copy(surfaceNormal);
     this.camera.lookAt(position);
   }
-  private animate(): void {
-    requestAnimationFrame(() => this.animate());
 
-    if (!this.shipModel || !this.shipBody) return;
+  private animate = (): void => {
+    if (!this.isInitialized || !this.shipModel || !this.shipBody || !this.planetBody || !this.landscape || !this.landscapeWire) return;
+    requestAnimationFrame(this.animate);
 
     this.updateRotation();
     this.updateMovement();
@@ -535,5 +614,116 @@ export class ZarchFlyScene {
     this.updateCamera(this.shipModel.position.clone());
     this.world.step();
     this.renderer.render(this.scene, this.camera);
+  };
+
+  private setupDebugControls(): void {
+    controlManager.addAccordion("noiseControls", "Noise Generator Controls");
+
+    controlManager.addDropdown(
+      "Preset",
+      "Preset: ",
+      () => "Earth-like",
+      (value) => {
+        this.loadPreset(value);
+      },
+      [...PLANET_PRESETS.map(({ name }) => name)]
+    );
+
+    // Add noise generator controls
+    const noiseConfig = this.landscapeConfig;
+    const rebuildButton: ButtonElement = {
+      id: "rebuildButton",
+      label: "Rebuild globe",
+      type: "button",
+      callback: () => {
+        this.currentSeed = Math.round(performance.now());
+        this.regenerateLandscape();
+      },
+    };
+    controlManager.addChildToAccordion("noiseControls", rebuildButton);
+    const outputValues: ButtonElement = {
+      id: "outputValues",
+      label: "Output values",
+      type: "button",
+      callback: () => {
+        console.log(JSON.stringify(Object.fromEntries(Object.entries(noiseConfig).map(([key, value]) => [key, value])), null, 2));
+      },
+    };
+    controlManager.addChildToAccordion("noiseControls", outputValues);
+
+    const processConfig = (obj: any, prefix: string = "", accordianID: string) => {
+      Object.entries(obj).forEach(([key, value]) => {
+        const fullKey = prefix ? `${prefix}.${key}` : key;
+
+        if (Array.isArray(value)) {
+          console.log(key);
+          const accordianControl: AccordionElement = {
+            expanded: false,
+            id: accordianID + fullKey,
+            label: key,
+            type: "accordion",
+            children: [],
+          };
+          controlManager.addChildToAccordion(accordianID, accordianControl);
+          value.forEach((item, index) => {
+            processConfig(item, `${fullKey}[${index}]`, accordianID + fullKey);
+          });
+        } else if (value instanceof THREE.Color) {
+          // Color picker control
+          const colorControl: ColorElement = {
+            id: fullKey,
+            label: key,
+            type: "color",
+            getValue: () => `#${value.getHexString()}`,
+            setValue: (newValue) => {
+              value.set(newValue);
+              this.regenerateLandscape();
+            },
+          };
+          controlManager.addChildToAccordion(accordianID, colorControl);
+        } else if (typeof value === "number") {
+          // Slider control with appropriate ranges
+          console.log("  number " + key + "  " + accordianID);
+          const sliderControl: SliderElement = {
+            id: fullKey,
+            label: key,
+            type: "slider",
+            getValue: () => value,
+            setValue: (newValue) => {
+              obj[key] = Number(newValue);
+              this.regenerateLandscape();
+            },
+            min: key == "resolution" ? 4 : 0,
+            max: key == "resolution" ? 150 : 4,
+            step: key == "resolution" || key === "count" ? 1 : 0.02,
+          };
+          controlManager.addChildToAccordion(accordianID, sliderControl);
+        } else if (typeof value === "object") {
+          console.log(key + "   creating " + accordianID + fullKey);
+          // Recursively process nested objects
+          const accordianControl: AccordionElement = {
+            id: accordianID + fullKey,
+            expanded: false,
+            label: key,
+            type: "accordion",
+            children: [],
+          };
+          controlManager.addChildToAccordion(accordianID, accordianControl);
+          processConfig(value, fullKey, accordianID + fullKey);
+        }
+      });
+    };
+
+    processConfig(this.landscapeConfig, "", "noiseControls");
+  }
+
+  // Add method to switch presets
+  public loadPreset(presetName: string): void {
+    const preset = PLANET_PRESETS.find((p) => p.name === presetName);
+    if (preset) {
+      this.landscapeConfig = { ...this.landscapeConfig, ...preset.config };
+
+      this.regenerateLandscape();
+    }
   }
 }
