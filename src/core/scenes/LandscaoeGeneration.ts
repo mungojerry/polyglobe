@@ -18,12 +18,6 @@ export interface LandscapeConfig {
     height: number;
     color: THREE.Color;
   }>;
-
-  mountainRanges: {
-    count: number;
-    height: number;
-    complexity: number;
-  };
 }
 
 export class LandscapeGenerator {
@@ -80,12 +74,6 @@ export class LandscapeGenerator {
         { height: 0.8, color: new THREE.Color(0x666666) }, // Mountains
         { height: 1.0, color: new THREE.Color(0xffffff) }, // Snow
       ],
-
-      mountainRanges: {
-        count: 2,
-        height: 0.2,
-        complexity: 8,
-      },
     };
 
     return { ...defaultConfig, ...partialConfig };

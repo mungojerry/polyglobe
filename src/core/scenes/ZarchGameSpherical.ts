@@ -52,11 +52,6 @@ export class ZarchGameSpherical {
       { height: 0.8, color: new THREE.Color(0x666666) },
       { height: 1.0, color: new THREE.Color(0xffffff) },
     ],
-    mountainRanges: {
-      count: 2,
-      height: 0.2,
-      complexity: 8,
-    },
   };
 
   constructor() {
@@ -484,7 +479,7 @@ export class ZarchGameSpherical {
               this.regenerateLandscape();
             },
             min: key == "resolution" ? 4 : 0,
-            max: key == "resolution" ? 100 : 4,
+            max: key == "resolution" ? 150 : 4,
             step: key == "resolution" || key === "count" ? 1 : 0.02,
           };
           controlManager.addChildToAccordion(accordianID, sliderControl);
