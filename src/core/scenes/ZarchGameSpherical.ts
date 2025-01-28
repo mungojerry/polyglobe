@@ -27,7 +27,7 @@ export class ZarchGameSpherical {
   private waterSphere!: Water;
   private readonly WATER_LEVEL = 1.04; // 1% above planet radius
   private currentSeed = 23478;
-  private landscapeConfig: LandscapeConfig = {
+  private landscapeConfig = {
     resolution: 50,
     ridgeNoise: {
       scale: 1.3,
@@ -485,7 +485,7 @@ export class ZarchGameSpherical {
             },
             min: key == "resolution" ? 4 : 0,
             max: key == "resolution" ? 100 : 4,
-            step: key == "resolution" ? 1 : 0.02,
+            step: key == "resolution" || key === "count" ? 1 : 0.02,
           };
           controlManager.addChildToAccordion(accordianID, sliderControl);
         } else if (typeof value === "object") {

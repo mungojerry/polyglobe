@@ -328,7 +328,7 @@ class ControlManager {
     controlWrapper.appendChild(accordianWrapper);
   }
 
-  private clearContainer(componentsToUpdate?: string[]) {
+  public clear(componentsToUpdate?: string[]) {
     if (!this.containerElement) return;
 
     if (componentsToUpdate) {
@@ -386,7 +386,7 @@ class ControlManager {
   public updateDisplay(componentsToUpdate?: string[]): void {
     if (!this.containerElement) return;
 
-    this.clearContainer(componentsToUpdate);
+    this.clear(componentsToUpdate);
 
     // Helper function to check if a control is a child of any accordion
     const isChildOfAnyAccordion = (controlId: string): boolean => {
