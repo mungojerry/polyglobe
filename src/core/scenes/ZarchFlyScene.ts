@@ -12,7 +12,7 @@ import { LandscapeConfig, LandscapeGenerator } from "./LandscaoeGeneration";
 import { PLANET_PRESETS } from "./LandscapePresets";
 
 // Constants
-const THRUST_FORCE = 20;
+const THRUST_FORCE = 1;
 const LINEAR_DAMPING = 0.19;
 const ANGULAR_DAMPING = 0.1;
 const PLANET_RADIUS = 1300;
@@ -24,10 +24,9 @@ const POLE_CYLINDER_HEIGHT = 1000;
 const SHOT_COOLDOWN = 100; //
 
 // Helicopter Control Constants
-const HOVER_DAMPING = 0.99;
-const MAX_LATERAL_SPEED = 75;
-const LATERAL_ACCELERATION = 0.5;
-const ROTATION_SMOOTHING = 0.15;
+const MAX_LATERAL_SPEED = 100;
+const LATERAL_ACCELERATION = 0.1;
+const ROTATION_SMOOTHING = 0.2;
 const MOUSE_SENSITIVITY = 0.003;
 
 const COLLISION_MASKS = {
@@ -523,66 +522,69 @@ export class ZarchFlyScene {
     );
   }
   planetCenter = new THREE.Vector3(0, 0, 0);
-  private getSurfaceNormal(position: THREE.Vector3): THREE.Vector3 {
-    const surfaceNormal = position.clone().sub(this.planetCenter).normalize();
-    return surfaceNormal;
+  // Common function both methods can use
+  private getOrientationOnPlanet(position: THREE.Vector3): THREE.Quaternion {
+    // Get up vector from planet center to position
+    const upVector = position.clone().normalize();
+
+    // Create base orientation quaternion that aligns with planet surface
+    const baseQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), upVector);
+    return baseQuat;
   }
+
   private updateRotation(): void {
     if (!this.shipBody) return;
 
     const translation = this.shipBody.translation();
     const shipPos = new THREE.Vector3(translation.x, translation.y, translation.z);
-    const planetCenter = new THREE.Vector3(0, 0, 0);
-    const surfaceNormal = this.getSurfaceNormal(shipPos);
 
-    // Calculate the tangent and binormal vectors
-    const tangent = new THREE.Vector3(1, 0, 0).applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), surfaceNormal));
-    const binormal = surfaceNormal.clone().cross(tangent).normalize();
+    // Get base orientation on planet surface
+    const baseQuat = this.getOrientationOnPlanet(shipPos);
 
-    // Apply pitch and yaw relative to the surface normal
-    const pitchQuaternion = new THREE.Quaternion().setFromAxisAngle(tangent, this.pitch * 10.5);
-    const yawQuaternion = new THREE.Quaternion().setFromAxisAngle(binormal, this.yaw * 10.5);
-    const rollQuaternion = new THREE.Quaternion().setFromAxisAngle(surfaceNormal, this.roll * 10.5);
+    // Create quaternions for each rotation axis
+    const pitchQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), this.pitch * 10);
+    const yawQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw * 10);
+    const rollQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), this.roll * 10);
 
-    // Combine the rotations
-    this.targetRotation = pitchQuaternion.multiply(yawQuaternion).multiply(rollQuaternion);
+    // Combine all rotations
+    this.targetRotation.copy(baseQuat).multiply(yawQuat).multiply(pitchQuat).multiply(rollQuat);
+
+    // Smooth interpolation
     this.currentRotation.slerp(this.targetRotation, ROTATION_SMOOTHING);
 
-    // Apply the rotation to the ship
+    // Apply to ship
     this.shipBody.setRotation(this.currentRotation, true);
   }
-  private currentPosition = new THREE.Vector3();
-  private currentLookAt = new THREE.Vector3();
-  private offset = new THREE.Vector3(0, 10, -20); // Adjust these values as needed
+
   private updateCamera(position: THREE.Vector3): void {
     if (!this.shipBody) return;
 
-    const surfaceNormal = position.clone().normalize();
+    // Get base orientation on planet surface (same as ship uses)
+    const baseQuat = this.getOrientationOnPlanet(position);
 
-    // Create rotation that aligns camera with surface
-    const worldUp = new THREE.Vector3(0, 1, 0);
-    const rotationAxis = new THREE.Vector3().crossVectors(worldUp, surfaceNormal);
-    const angle = worldUp.angleTo(surfaceNormal);
-
-    const surfaceRotation = new THREE.Quaternion().setFromAxisAngle(rotationAxis.normalize(), angle);
-
-    // Compute camera offset in rotated space
+    // Create camera offset in local space
     const localOffset = new THREE.Vector3(0, this.offset.y, this.offset.z);
-    const rotatedOffset = localOffset.clone().applyQuaternion(surfaceRotation);
+
+    // Apply the same base orientation to camera offset
+    const rotatedOffset = localOffset.clone().applyQuaternion(baseQuat);
 
     // Target camera position
     const targetPosition = position.clone().add(rotatedOffset);
 
     // Smooth interpolation
-    const smoothFactor = 1;
+    const smoothFactor = 1; // Reduced for smoother camera movement
     this.currentPosition.lerp(targetPosition, smoothFactor);
     this.currentLookAt.lerp(position, smoothFactor);
 
     // Apply camera transformations
     this.camera.position.copy(this.currentPosition);
     this.camera.lookAt(this.currentLookAt);
-    this.camera.up.copy(surfaceNormal);
+    this.camera.up.copy(position.clone().normalize());
   }
+  private currentPosition = new THREE.Vector3();
+  private currentLookAt = new THREE.Vector3();
+  private offset = new THREE.Vector3(0, 10, -20); // Adjust these values as needed
+
   private animate = (): void => {
     if (!this.isInitialized || !this.shipModel || !this.shipBody || !this.planetBody || !this.landscape || !this.landscapeWire) return;
     requestAnimationFrame(this.animate);
