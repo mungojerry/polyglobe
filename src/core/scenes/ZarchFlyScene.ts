@@ -13,10 +13,10 @@ import { PLANET_PRESETS } from "./LandscapePresets";
 
 // Constants
 const THRUST_FORCE = 20;
-const LINEAR_DAMPING = 0.1;
-const ANGULAR_DAMPING = 1.0;
+const LINEAR_DAMPING = 0.19;
+const ANGULAR_DAMPING = 0.1;
 const PLANET_RADIUS = 1300;
-const GRAVITY_STRENGTH = 9.8 * 500;
+const GRAVITY_STRENGTH = 9.8 * 50;
 const SHIP_START_HEIGHT = PLANET_RADIUS + 150;
 const MAX_PITCH = Math.PI;
 const POLE_CYLINDER_RADIUS = 50;
@@ -24,7 +24,7 @@ const POLE_CYLINDER_HEIGHT = 1000;
 const SHOT_COOLDOWN = 100; //
 
 // Helicopter Control Constants
-const HOVER_DAMPING = 0.94;
+const HOVER_DAMPING = 0.99;
 const MAX_LATERAL_SPEED = 75;
 const LATERAL_ACCELERATION = 0.5;
 const ROTATION_SMOOTHING = 0.15;
@@ -486,7 +486,7 @@ export class ZarchFlyScene {
     lateralMovement.add(forwardVector.multiplyScalar(-this.mouseY * LATERAL_ACCELERATION));
 
     // Apply lateral movement with speed limit
-    const newVelocity = currentVelocity.add(lateralMovement);
+    const newVelocity = currentVelocity; //.add(lateralMovement);
     const velocityMagnitude = newVelocity.length();
 
     if (velocityMagnitude > MAX_LATERAL_SPEED) {
@@ -497,7 +497,7 @@ export class ZarchFlyScene {
     const hoverThrust = this.thrustActive ? upVector.multiplyScalar(THRUST_FORCE * 0.5) : new THREE.Vector3();
 
     // Apply damping for more helicopter-like feel
-    newVelocity.multiplyScalar(HOVER_DAMPING);
+    // newVelocity.multiplyScalar(HOVER_DAMPING);
 
     this.shipBody.setLinvel({ x: newVelocity.x + hoverThrust.x, y: newVelocity.y + hoverThrust.y, z: newVelocity.z + hoverThrust.z }, true);
   }
@@ -532,6 +532,7 @@ export class ZarchFlyScene {
 
     const translation = this.shipBody.translation();
     const shipPos = new THREE.Vector3(translation.x, translation.y, translation.z);
+    const planetCenter = new THREE.Vector3(0, 0, 0);
     const surfaceNormal = this.getSurfaceNormal(shipPos);
 
     // Calculate the tangent and binormal vectors
@@ -550,39 +551,38 @@ export class ZarchFlyScene {
     // Apply the rotation to the ship
     this.shipBody.setRotation(this.currentRotation, true);
   }
-
+  private currentPosition = new THREE.Vector3();
+  private currentLookAt = new THREE.Vector3();
+  private offset = new THREE.Vector3(0, 10, -20); // Adjust these values as needed
   private updateCamera(position: THREE.Vector3): void {
     if (!this.shipBody) return;
 
-    // Get the surface normal at the ship's position
-    const surfaceNormal = this.getSurfaceNormal(position);
+    const surfaceNormal = position.clone().normalize();
 
-    // Get ship's rotation to determine forward direction
-    const rotation = this.shipBody.rotation();
-    const shipQuat = new THREE.Quaternion(rotation.x, rotation.y, rotation.z, rotation.w);
-    const shipForward = new THREE.Vector3(0, 0, -1).applyQuaternion(shipQuat);
+    // Create rotation that aligns camera with surface
+    const worldUp = new THREE.Vector3(0, 1, 0);
+    const rotationAxis = new THREE.Vector3().crossVectors(worldUp, surfaceNormal);
+    const angle = worldUp.angleTo(surfaceNormal);
 
-    // Calculate right vector perpendicular to surface normal and ship forward
-    const right = shipForward.cross(surfaceNormal).normalize();
+    const surfaceRotation = new THREE.Quaternion().setFromAxisAngle(rotationAxis.normalize(), angle);
 
-    // Calculate back vector that follows planet's curvature
-    const back = surfaceNormal.clone().cross(right).normalize();
+    // Compute camera offset in rotated space
+    const localOffset = new THREE.Vector3(0, this.offset.y, this.offset.z);
+    const rotatedOffset = localOffset.clone().applyQuaternion(surfaceRotation);
 
-    // Camera offset distances
-    const heightDistance = 20;
-    const backDistance = 35;
+    // Target camera position
+    const targetPosition = position.clone().add(rotatedOffset);
 
-    // Calculate camera position that follows planet's curvature
-    const cameraTargetPosition = position.clone().add(surfaceNormal.clone().multiplyScalar(heightDistance)).add(back.multiplyScalar(backDistance));
+    // Smooth interpolation
+    const smoothFactor = 1;
+    this.currentPosition.lerp(targetPosition, smoothFactor);
+    this.currentLookAt.lerp(position, smoothFactor);
 
-    // Smooth camera movement
-    this.camera.position.lerp(cameraTargetPosition, 0.91);
-
-    // Keep camera oriented properly
+    // Apply camera transformations
+    this.camera.position.copy(this.currentPosition);
+    this.camera.lookAt(this.currentLookAt);
     this.camera.up.copy(surfaceNormal);
-    this.camera.lookAt(position);
   }
-
   private animate = (): void => {
     if (!this.isInitialized || !this.shipModel || !this.shipBody || !this.planetBody || !this.landscape || !this.landscapeWire) return;
     requestAnimationFrame(this.animate);
@@ -611,7 +611,7 @@ export class ZarchFlyScene {
     }
     this.particleSystem?.update(1 / 60);
     this.bulletSystem?.update(1 / 60);
-    this.updateCamera(this.shipModel.position.clone());
+    this.updateCamera(this.shipModel.position);
     this.world.step();
     this.renderer.render(this.scene, this.camera);
   };
