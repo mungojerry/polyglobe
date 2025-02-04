@@ -240,13 +240,13 @@ export class ObjectManager {
         for (let i = 0; i < matrixArray.length; i++) {
           tempMatrix.copy(originalWorldMatrix);
           tempMatrix.premultiply(matrixArray[i]);
-
+          tempMatrix.scale(new THREE.Vector3(5, 5, 5));
           instancedMesh.setMatrixAt(i, tempMatrix);
 
-          // if (this.isDebugMode) {
-          //   tempPosition.setFromMatrixPosition(tempMatrix);
-          //   this.addDebugMarker(tempPosition, 1);
-          // }
+          if (this.isDebugMode) {
+            tempPosition.setFromMatrixPosition(tempMatrix);
+            this.addDebugMarker(tempPosition, 1);
+          }
         }
 
         instancedMesh.count = matrixArray.length;

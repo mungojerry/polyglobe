@@ -3,6 +3,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
 import { Water } from "../effects/Water";
 import { AccordionElement, ButtonElement, ColorElement, controlManager, SliderElement } from "../managers/controlManager";
 import { pseudoRandom } from "../utils/PseudoRandom";
+import { GrassSystem } from "./GrassSystem";
 import { LandscapeConfig, LandscapeGenerator } from "./LandscaoeGeneration";
 import { PLANET_PRESETS } from "./LandscapePresets";
 
@@ -32,7 +33,7 @@ export class ZarchGameSpherical {
     ridgeNoise: {
       scale: 1.3,
       amplitude: 0.15,
-      sharpness: 1.4,
+      sharpness: 2.4,
     },
     noiseLayers: [
       { scale: 0.5, amplitude: 0.1 },
@@ -54,10 +55,11 @@ export class ZarchGameSpherical {
     ],
 
     erosion: {
-      iterations: 5, // Lightweight erosion
+      iterations: 1, // Lightweight erosion
       strength: 0.1,
     },
   };
+  private grassSystem!: GrassSystem;
 
   constructor() {
     this.scene = new THREE.Scene();
@@ -123,12 +125,12 @@ export class ZarchGameSpherical {
   }
 
   initializeScene() {
+    // Initialize grass system first
+    this.grassSystem = new GrassSystem(this.scene);
+
     // Ship
     this.ship = this.createShip();
     this.scene.add(this.ship);
-
-    // Landscape
-    this.regenerateLandscape();
 
     // Water
     this.waterSphere = this.createWaterSphere();
@@ -140,6 +142,9 @@ export class ZarchGameSpherical {
 
     // Lighting
     this.addLighting();
+
+    // Landscape (should be last since it triggers grass generation)
+    this.regenerateLandscape();
   }
 
   public updateLandscapeConfig(newConfig: Partial<LandscapeConfig>): void {
@@ -148,6 +153,12 @@ export class ZarchGameSpherical {
   }
 
   private regenerateLandscape(): void {
+    // Add null check for grassSystem
+    if (!this.grassSystem) {
+      console.warn("GrassSystem not initialized yet");
+      return;
+    }
+
     console.log("regenerateLandscape...");
     pseudoRandom.setSeed(this.currentSeed);
     const startTime = performance.now();
@@ -162,9 +173,15 @@ export class ZarchGameSpherical {
       })
     );
     this.scene.add(this.landscape);
+
+    // Update grass instances with new terrain data
+    const positions = geometry.attributes.position.array as Float32Array;
+    const colors = geometry.attributes.color.array as Float32Array;
+    this.grassSystem.updateInstances(positions, colors, this.PLANET_RADIUS, this.WATER_LEVEL);
+
     console.log(`landscape generation in ${performance.now() - startTime}ms`);
-    console.log("DONE");
   }
+
   generator = new LandscapeGenerator(this.PLANET_RADIUS, this.landscapeConfig);
   private createLandscape() {
     this.generator.updateConfig(this.landscapeConfig);
@@ -314,6 +331,8 @@ export class ZarchGameSpherical {
     } else {
       this.updateCamera();
     }
+
+    this.waterSphere.animate();
 
     // Render scene
     this.renderer.render(this.scene, this.camera);

@@ -15,8 +15,8 @@ import { BaseNoise } from "./noise/BaseNoise";
 import { TerrainNoise } from "./noise/TerrainNoise";
 import { TerrainDeformer } from "./TerrainDeformer";
 const globeConfig = {
-  showEquator: true,
-  showPoles: true,
+  showEquator: false,
+  showPoles: false,
   showWater: true,
   radius: 1300,
   detail: 30,

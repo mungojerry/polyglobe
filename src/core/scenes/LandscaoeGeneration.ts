@@ -18,9 +18,12 @@ export interface LandscapeConfig {
     height: number;
     color: THREE.Color;
   }>;
-  erosion?: {
-    iterations: number; // Number of smoothing passes
-    strength: number; // Strength of smoothing effect
+  craters?: {
+    count: number;
+    minRadius: number;
+    maxRadius: number;
+    depth: number;
+    rimHeight: number;
   };
 }
 
@@ -56,9 +59,9 @@ export class LandscapeGenerator {
     const defaultConfig: LandscapeConfig = {
       resolution: 50,
       ridgeNoise: {
-        scale: 1.3,
-        amplitude: 0.15,
-        sharpness: 1.4,
+        scale: 2.0, // Increased from 1.3 to create larger ridge features
+        amplitude: 0.25, // Increased from 0.15 for more dramatic height variation
+        sharpness: 1.8, // Increased from 1.4 for more defined ridges
       },
       noiseLayers: [
         { scale: 0.5, amplitude: 0.1 },
@@ -75,13 +78,43 @@ export class LandscapeGenerator {
         { height: 0.8, color: new THREE.Color(0x666666) }, // Mountains
         { height: 1.0, color: new THREE.Color(0xffffff) }, // Snow
       ],
-      erosion: {
-        iterations: 5, // Fewer iterations for low-poly
-        strength: 0.1, // Subtle smoothing
+      craters: {
+        count: 8,
+        minRadius: 0.05,
+        maxRadius: 0.15,
+        depth: 0.0015, // Adjusted for better proportions
+        rimHeight: 0.07, // Increased for more prominent rims
       },
     };
 
     return { ...defaultConfig, ...partialConfig };
+  }
+
+  private calculateCraterEffect(vertexPos: THREE.Vector3, craterCenter: THREE.Vector3, radius: number, depth: number, rimHeight: number): number {
+    const distance = vertexPos.distanceTo(craterCenter);
+    const normalizedDist = distance / radius;
+
+    if (normalizedDist > 2.0) return 0; // Extend effect range for ejecta
+
+    // Complex crater shape with central peak for larger craters
+    const centralPeak = radius > this.PLANET_RADIUS * 0.1 ? 0.15 * Math.exp(-Math.pow(normalizedDist * 4, 2)) : 0;
+
+    // Main crater bowl with steeper walls
+    const craterDepth = -depth * Math.pow(Math.max(0, 1 - Math.pow(normalizedDist, 1.5)), 2);
+
+    // Enhanced rim formation with debris accumulation
+    const rimEffect =
+      rimHeight *
+      (Math.exp(-Math.pow((normalizedDist - 1.0) * 4, 2)) + // Main rim
+        0.3 * Math.exp(-Math.pow((normalizedDist - 1.2) * 3, 2))); // Secondary rim
+
+    // Ejecta blanket that thins with distance
+    const ejecta = normalizedDist > 1.0 ? 0.02 * Math.pow(2.0 - normalizedDist, 3) * rimHeight : 0;
+
+    // Add subtle noise to break up symmetry
+    const noise = this.noise.noise3d(vertexPos.x * 10, vertexPos.y * 10, vertexPos.z * 10) * 0.02 * rimHeight;
+
+    return craterDepth + rimEffect + ejecta + centralPeak + noise;
   }
 
   generateTerrain(): THREE.BufferGeometry {
@@ -118,6 +151,25 @@ export class LandscapeGenerator {
       });
     }
 
+    // Generate crater positions if configured
+    const craters: Array<{ center: THREE.Vector3; radius: number }> = [];
+    if (this.config.craters) {
+      const { count, minRadius, maxRadius } = this.config.craters;
+
+      for (let i = 0; i < count; i++) {
+        const phi = pseudoRandom.random() * Math.PI * 2;
+        const cosTheta = 2 * pseudoRandom.random() - 1;
+        const theta = Math.acos(cosTheta);
+
+        const center = new THREE.Vector3(Math.sin(theta) * Math.cos(phi), Math.sin(theta) * Math.sin(phi), Math.cos(theta))
+          .normalize()
+          .multiplyScalar(this.PLANET_RADIUS);
+
+        const radius = (minRadius + pseudoRandom.random() * (maxRadius - minRadius)) * this.PLANET_RADIUS;
+        craters.push({ center, radius });
+      }
+    }
+
     // Second pass: Terrain generation
     for (let i = 0; i < vertices.length; i += 3) {
       normal.set(vertices[i], vertices[i + 1], vertices[i + 2]).normalize();
@@ -132,8 +184,17 @@ export class LandscapeGenerator {
         totalDisplacement += layerNoise * layer.amplitude;
       }
 
+      // Apply crater modifications
+      if (this.config.craters) {
+        const vertexPos = new THREE.Vector3(vertices[i], vertices[i + 1], vertices[i + 2]);
+        for (const crater of craters) {
+          const craterEffect = this.calculateCraterEffect(vertexPos, crater.center, crater.radius, this.config.craters.depth, this.config.craters.rimHeight);
+          totalDisplacement += craterEffect;
+        }
+      }
+
       // Strict displacement clamping
-      totalDisplacement = Math.max(0.5, Math.min(2.0, totalDisplacement));
+      totalDisplacement = Math.max(0.9, Math.min(3.0, totalDisplacement));
 
       const scaledRadius = this.PLANET_RADIUS * totalDisplacement;
 
@@ -153,62 +214,12 @@ export class LandscapeGenerator {
       maxHeight = Math.max(maxHeight, vertexLengths[iDiv3]);
     }
 
-    // Apply low-poly-friendly erosion
-    if (this.config.erosion) {
-      this.applyLowPolyErosion(vertices, vertexLengths, this.config.erosion);
-    }
-
     this.generateColors(vertices, vertexLengths, colors, maxHeight);
 
     geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
     geometry.computeVertexNormals();
 
     return geometry;
-  }
-
-  private applyLowPolyErosion(vertices: Float32Array, vertexLengths: Float32Array, erosionConfig: { iterations: number; strength: number }): void {
-    const { iterations, strength } = erosionConfig;
-
-    for (let iter = 0; iter < iterations; iter++) {
-      const newVertexLengths = new Float32Array(vertexLengths);
-
-      for (let i = 0; i < vertices.length; i += 3) {
-        const neighbors = this.getVertexNeighbors(i, vertices);
-        let sum = vertexLengths[i / 3];
-        let count = 1;
-
-        // Average heights with neighbors
-        neighbors.forEach((neighborIndex) => {
-          sum += vertexLengths[neighborIndex / 3];
-          count++;
-        });
-
-        // Apply smoothing
-        newVertexLengths[i / 3] = vertexLengths[i / 3] * (1 - strength) + (sum / count) * strength;
-      }
-
-      // Update vertex lengths
-      for (let i = 0; i < vertexLengths.length; i++) {
-        vertexLengths[i] = newVertexLengths[i];
-      }
-    }
-  }
-
-  private getVertexNeighbors(index: number, vertices: Float32Array): number[] {
-    // Simplified neighbor calculation for icosahedron geometry
-    const neighbors = [];
-    const vertexIndex = index / 3;
-
-    // Check adjacent vertices (this can be improved for icosahedron geometry)
-    for (let i = -3; i <= 3; i += 3) {
-      if (i === 0) continue; // Skip self
-      const neighborIndex = index + i;
-      if (neighborIndex >= 0 && neighborIndex < vertices.length) {
-        neighbors.push(neighborIndex);
-      }
-    }
-
-    return neighbors;
   }
 
   private generateColors(vertices: Float32Array, vertexLengths: Float32Array, colors: Float32Array, maxHeight: number): void {

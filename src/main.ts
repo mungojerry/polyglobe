@@ -1,4 +1,4 @@
-import { ZarchFlyScene } from "./core/scenes/ZarchFlyScene";
+import PlanetoidGenerator from "./core/scenes/PlanetGenerator";
 import "./style.css";
 
 console.log("starting...");
@@ -6,7 +6,10 @@ console.log("starting...");
 // new FBXViewerScene();
 // new HelicopterScene();
 // new GameScene();
-new ZarchFlyScene();
+new PlanetoidGenerator();
+// new ZarchFlyScene();
 // new HelicopterGlobeSimulation();
 // new ZarchGameSpherical();
+
+// new MarchingCubesDemo();
 console.log("should be running");

@@ -12,7 +12,6 @@ import { LandscapeConfig, LandscapeGenerator } from "./LandscaoeGeneration";
 import { PLANET_PRESETS } from "./LandscapePresets";
 
 // Constants
-const THRUST_FORCE = 1;
 const LINEAR_DAMPING = 0.19;
 const ANGULAR_DAMPING = 0.1;
 const PLANET_RADIUS = 1300;
@@ -23,16 +22,20 @@ const POLE_CYLINDER_RADIUS = 50;
 const POLE_CYLINDER_HEIGHT = 1000;
 const SHOT_COOLDOWN = 100; //
 
-// Helicopter Control Constants
-const MAX_LATERAL_SPEED = 100;
-const LATERAL_ACCELERATION = 0.1;
-const ROTATION_SMOOTHING = 0.2;
 const MOUSE_SENSITIVITY = 0.003;
 
 const COLLISION_MASKS = {
   PLANET: 0xffffffff,
   SHIP: 0xffffffff,
 };
+
+// Helicopter Control Constants
+const MAX_TILT_ANGLE = Math.PI / 6; // 30 degrees max tilt
+const TILT_RESPONSE = 2.0; // How quickly the helicopter responds to tilt commands
+const ROTATION_RATE = 1.5; // Yaw rotation rate
+const COLLECTIVE_RESPONSE = 20.0; // How quickly thrust changes
+const DRIFT_DAMPING = 0.95; // Air resistance factor
+const MAX_SPEED = 50;
 
 export class ZarchFlyScene {
   private scene: THREE.Scene;
@@ -322,10 +325,10 @@ export class ZarchFlyScene {
     return new Promise((resolve, reject) => {
       const loader = new GLTFLoader();
       loader.load(
-        "assets/models/wooden_ufo_toy.glb",
+        "assets/models/ship2.glb",
         (gltf) => {
           this.shipModel = gltf.scene;
-          this.shipModel.scale.setScalar(3);
+          this.shipModel.scale.setScalar(0.5);
           this.shipModel.rotation.x = Math.PI;
           this.shipModel.castShadow = true;
           this.shipModel.receiveShadow = true;
@@ -469,36 +472,44 @@ export class ZarchFlyScene {
 
     const rotation = this.shipBody.rotation();
     const quat = new THREE.Quaternion(rotation.x, rotation.y, rotation.z, rotation.w);
-
-    // Compute directional vectors
-    const forwardVector = new THREE.Vector3(0, 0, -1).applyQuaternion(quat);
-    const rightVector = new THREE.Vector3(1, 0, 0).applyQuaternion(quat);
     const upVector = new THREE.Vector3(0, 1, 0).applyQuaternion(quat);
 
-    // Compute current velocity
-    const vel = this.shipBody.linvel();
-    const currentVelocity = new THREE.Vector3(vel.x, vel.y, vel.z);
+    // Base hover thrust to counter gravity
+    const hoverForce = upVector; //.multiplyScalar(HOVER_THRUST);
 
-    // Lateral movement based on mouse input
-    const lateralMovement = new THREE.Vector3();
-    lateralMovement.add(rightVector.multiplyScalar(this.mouseX * LATERAL_ACCELERATION));
-    lateralMovement.add(forwardVector.multiplyScalar(-this.mouseY * LATERAL_ACCELERATION));
+    // Additional vertical thrust based on collective (spacebar)
+    const collectiveForce = this.thrustActive ? upVector.multiplyScalar(COLLECTIVE_RESPONSE) : new THREE.Vector3();
 
-    // Apply lateral movement with speed limit
-    const newVelocity = currentVelocity; //.add(lateralMovement);
-    const velocityMagnitude = newVelocity.length();
+    // Calculate tilt-based movement
+    const tiltForce = new THREE.Vector3();
+    if (Math.abs(this.mouseX) > 0.01 || Math.abs(this.mouseY) > 0.01) {
+      // Convert mouse input to tilt angles
+      const pitchAngle = -this.mouseY * MAX_TILT_ANGLE;
+      const rollAngle = -this.mouseX * MAX_TILT_ANGLE;
 
-    if (velocityMagnitude > MAX_LATERAL_SPEED) {
-      newVelocity.normalize().multiplyScalar(MAX_LATERAL_SPEED);
+      // Apply tilt forces
+      const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(quat);
+      const right = new THREE.Vector3(1, 0, 0).applyQuaternion(quat);
+
+      tiltForce.add(forward.multiplyScalar(pitchAngle * TILT_RESPONSE));
+      tiltForce.add(right.multiplyScalar(rollAngle * TILT_RESPONSE));
     }
 
-    // Thrust: vertical hover mechanism
-    const hoverThrust = this.thrustActive ? upVector.multiplyScalar(THRUST_FORCE * 0.5) : new THREE.Vector3();
+    // Get current velocity and apply damping
+    const vel = this.shipBody.linvel();
+    const currentVelocity = new THREE.Vector3(vel.x, vel.y, vel.z);
+    currentVelocity.multiplyScalar(DRIFT_DAMPING);
 
-    // Apply damping for more helicopter-like feel
-    // newVelocity.multiplyScalar(HOVER_DAMPING);
+    // Combine all forces
+    const totalForce = hoverForce.add(collectiveForce).add(tiltForce);
 
-    this.shipBody.setLinvel({ x: newVelocity.x + hoverThrust.x, y: newVelocity.y + hoverThrust.y, z: newVelocity.z + hoverThrust.z }, true);
+    // Apply speed limit
+    const newVelocity = currentVelocity.add(totalForce.multiplyScalar(1 / 60));
+    if (newVelocity.length() > MAX_SPEED) {
+      newVelocity.normalize().multiplyScalar(MAX_SPEED);
+    }
+
+    this.shipBody.setLinvel(newVelocity, true);
   }
 
   private updateGravity(): void {
@@ -538,21 +549,20 @@ export class ZarchFlyScene {
     const translation = this.shipBody.translation();
     const shipPos = new THREE.Vector3(translation.x, translation.y, translation.z);
 
-    // Get base orientation on planet surface
+    // Get base orientation relative to planet
     const baseQuat = this.getOrientationOnPlanet(shipPos);
 
-    // Create quaternions for each rotation axis
-    const pitchQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), this.pitch * 10);
-    const yawQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw * 10);
-    const rollQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), this.roll * 10);
+    // Apply tilt based on mouse input
+    const pitchQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -this.mouseY * MAX_TILT_ANGLE);
+    const rollQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -this.mouseX * MAX_TILT_ANGLE);
+    const yawQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw * ROTATION_RATE);
 
-    // Combine all rotations
+    // Combine rotations
     this.targetRotation.copy(baseQuat).multiply(yawQuat).multiply(pitchQuat).multiply(rollQuat);
 
     // Smooth interpolation
-    this.currentRotation.slerp(this.targetRotation, ROTATION_SMOOTHING);
+    this.currentRotation.slerp(this.targetRotation, 0.1);
 
-    // Apply to ship
     this.shipBody.setRotation(this.currentRotation, true);
   }
 

@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { Biome, BiomeName } from "../utils/biomes";
-import { ClusteredPlacement, PlacementStrategy } from "./PlacementStrategies";
+import { ClusteredPlacement, PlacementStrategy, RandomPlacement } from "./PlacementStrategies";
 
 export const MAX_INSTANCES_PER_TYPE: number = 5000;
 export interface CachedLandVertex {
@@ -194,11 +194,11 @@ export const modelGroups: ModelGroup[] = [
   //   biomes: [BiomeName.Land],
   //   numInCluster: 40,
   // },
-  // {
-  //   type: StructureType.Wilderness,
-  //   models: [{ name: "Grass", filename: "assets/models/fbx/Grass", files: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], numInstances: 20000, weight: 1 }],
-  //   placement: new RandomPlacement(),
-  // },
+  {
+    type: StructureType.Wilderness,
+    models: [{ name: "Grass", filename: "assets/models/fbx/Grass", files: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], numInstances: 2000, weight: 1 }],
+    placement: new RandomPlacement(),
+  },
   // {
   //   type: StructureType.Wilderness,
   //   models: [

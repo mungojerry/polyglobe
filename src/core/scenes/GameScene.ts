@@ -13,7 +13,7 @@ import { Moon } from "../entities/Moon";
 import { PlayerEntity } from "../entities/PlayerEntity";
 import { Stars } from "../entities/Stars";
 import { Sun } from "../entities/Sun";
-import { ButtonElement, ColorElement, controlManager, SliderElement } from "../managers/ControlManager";
+import { ButtonElement, ColorElement, controlManager, SliderElement } from "../managers/controlManager";
 import { debugManager } from "../managers/DebugManager";
 import { modelGroups } from "../managers/models";
 import { ObjectManager } from "../managers/ObjectManager";
