@@ -10,12 +10,12 @@ interface DeformationConfig {
 }
 
 class PlanetoidGenerator {
-  private scene: THREE.Scene;
-  private camera: THREE.PerspectiveCamera;
-  private renderer: THREE.WebGLRenderer;
-  private controls: OrbitControls;
-  private planetMesh: THREE.Mesh;
-  private simplex: SimplexNoise;
+  private scene!: THREE.Scene;
+  private camera!: THREE.PerspectiveCamera;
+  private renderer!: THREE.WebGLRenderer;
+  private controls!: OrbitControls;
+  private planetMesh!: THREE.Mesh;
+  private simplex!: SimplexNoise;
   private mousePosition: THREE.Vector2;
   private raycaster: THREE.Raycaster;
 
@@ -23,7 +23,7 @@ class PlanetoidGenerator {
   private deformConfig: DeformationConfig = {
     radius: 0.5,
     strength: 0.2,
-    accumulation: 1.0,
+    accumulation: 0.5,
   };
 
   constructor(private resolution: number = 50, config?: Partial<DeformationConfig>) {
@@ -123,42 +123,42 @@ class PlanetoidGenerator {
         time: { value: 0.0 },
         glowColor: { value: new THREE.Color(0x00ff88) },
       },
-      vertexShader: `
-        attribute float deformation;
-        
-        uniform float radius;
-        uniform vec3 deformPoint;
-        uniform float deformRadius;
-        uniform float deformStrength;
-        uniform bool previewDeformation;
-        uniform float time;
-        
-        varying vec3 vPosition;
-        varying vec3 vNormal;
-        varying float vDeformation;
-        varying vec3 vWorldPosition;
-        
-        void main() {
-            vPosition = position;
-            vNormal = normal;
-            
-            vec3 finalPosition = position;
-            float totalDeformation = deformation;  // Start with permanent deformation
-            
-            // Add preview deformation if active
-            if (previewDeformation) {
-                float distToDeform = distance(position, deformPoint);
-                float deformFactor = smoothstep(deformRadius, 0.0, distToDeform);
-                totalDeformation += deformFactor;
-                finalPosition += normalize(position) * deformFactor * deformStrength;
-            }
-            
-            // Pass total deformation to fragment shader
-            vDeformation = totalDeformation;
-            vWorldPosition = (modelMatrix * vec4(finalPosition, 1.0)).xyz;
-            
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(finalPosition, 1.0);
-        }
+      vertexShader: /* glsl */ `
+attribute float deformation;
+
+uniform float radius;
+uniform vec3 deformPoint;
+uniform float deformRadius;
+uniform float deformStrength;
+uniform bool previewDeformation;
+uniform float time;
+
+varying vec3 vPosition;
+varying vec3 vNormal;
+varying float vDeformation;
+varying vec3 vWorldPosition;
+
+void main() {
+    vPosition = position;
+    vNormal = normal;
+    
+    vec3 finalPosition = position;
+    float totalDeformation = deformation;  // Start with permanent deformation
+    
+    // Add preview deformation if active
+    if (previewDeformation) {
+        float distToDeform = distance(position, deformPoint);
+        float deformFactor = smoothstep(deformRadius, 0.0, distToDeform);
+        totalDeformation += deformFactor;
+        finalPosition += normalize(position) * deformFactor * deformStrength;
+    }
+    
+    // Pass total deformation to fragment shader
+    vDeformation = totalDeformation;
+    vWorldPosition = (modelMatrix * vec4(finalPosition, 1.0)).xyz;
+    
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(finalPosition, 1.0);
+}
       `,
       fragmentShader: /* glsl */ `
       
@@ -277,11 +277,6 @@ void main() {
     // Final color composition
     vec3 finalColor = terrainColor * diffuse + specular + rim * lightColor;
     
-    // Add deformation glow
-    if (vDeformation > 0.0) {
-        // finalColor = mix(finalColor, glowColor, vDeformation * 0.3);
-        // finalColor += glowEffect * 0.2;
-    }
     
     gl_FragColor = vec4(finalColor, 1.0);
 }
