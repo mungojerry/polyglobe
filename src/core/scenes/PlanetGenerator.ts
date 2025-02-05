@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
 import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise";
+import { Water } from "../effects/Water";
 
 interface DeformationConfig {
   radius: number;
@@ -25,7 +26,7 @@ class PlanetoidGenerator {
     accumulation: 1.0,
   };
 
-  constructor(private resolution: number = 140, config?: Partial<DeformationConfig>) {
+  constructor(private resolution: number = 50, config?: Partial<DeformationConfig>) {
     this.mousePosition = new THREE.Vector2();
     this.raycaster = new THREE.Raycaster();
 
@@ -81,6 +82,9 @@ class PlanetoidGenerator {
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(window.innerWidth, window.innerHeight);
     });
+
+    const water = new Water(2, 40);
+    this.scene.add(water.getObject());
   }
 
   private generatePlanetoid() {
@@ -156,63 +160,133 @@ class PlanetoidGenerator {
             gl_Position = projectionMatrix * modelViewMatrix * vec4(finalPosition, 1.0);
         }
       `,
-      fragmentShader: `
-        uniform vec3 lightPosition;
-        uniform vec3 lightColor;
-        uniform float shininess;
-        uniform vec3 specularColor;
-        uniform float time;
-        uniform vec3 glowColor;
+      fragmentShader: /* glsl */ `
+      
+       uniform vec3 lightPosition;
+uniform vec3 lightColor;
+uniform float shininess;
+uniform vec3 specularColor;
+uniform float time;
+uniform vec3 glowColor;
+
+varying vec3 vPosition;
+varying vec3 vNormal;
+varying float vDeformation;
+varying vec3 vWorldPosition;
+
+vec3 getBiomeColor(float height, float latitude) {
+    // Take absolute value of latitude to treat both poles the same
+    // This makes latitude go from 0 (equator) to 1 (either pole)
+    float polarDistance = abs(latitude);
+    
+    // Define biome colors
+    vec3 deepOcean = vec3(0.05, 0.12, 0.3);
+    vec3 ocean = vec3(0.1, 0.15, 0.35);
+    vec3 shallowWater = vec3(0.2, 0.4, 0.6);
+    vec3 beach = vec3(0.85, 0.8, 0.64);
+    vec3 tropicalForest = vec3(0.15, 0.4, 0.1);
+    vec3 temperateForest = vec3(0.2, 0.5, 0.2);
+    vec3 tundra = vec3(0.8, 0.85, 0.8);
+    vec3 mountains = vec3(0.5, 0.45, 0.4);
+    vec3 snow = vec3(0.95, 0.95, 0.95);
+    
+    // Base color selection using height
+    vec3 biomeColor;
+    
+    if (height < -0.1) {
+        // Deep ocean
+        biomeColor = deepOcean;
+    }
+    else if (height < 0.0) {
+        // Ocean with smooth transition to shallow
+        float oceanDepth = smoothstep(-0.1, 0.0, height);
+        biomeColor = mix(ocean, shallowWater, oceanDepth);
+    }
+    else if (height < 0.02) {
+        // Beach transition
+        float beachBlend = smoothstep(0.0, 0.02, height);
+        biomeColor = mix(shallowWater, beach, beachBlend);
+    }
+    else if (height < 0.3) {
+        // Main terrain - varies by polar distance
+        vec3 equatorBiome = tropicalForest;
+        vec3 midBiome = temperateForest;
+        vec3 polarBiome = tundra;
         
-        varying vec3 vPosition;
-        varying vec3 vNormal;
-        varying float vDeformation;
-        varying vec3 vWorldPosition;
-        
-        void main() {
-            // Base terrain color based on height
-            float height = length(vPosition) - 2.0;
-            vec3 terrainColor;
-            if (height < 0.1) {
-                terrainColor = vec3(0.1, 0.3, 0.7); // Deep Ocean
-            } else if (height < 0.2) {
-                terrainColor = vec3(0.4, 0.6, 0.8); // Shore
-            } else if (height < 0.4) {
-                terrainColor = vec3(0.2, 0.7, 0.3); // Grassland
-            } else if (height < 0.6) {
-                terrainColor = vec3(0.5, 0.5, 0.5); // Mountains
-            } else {
-                terrainColor = vec3(1.0, 1.0, 1.0); // Snow Peaks
-            }
-            
-            // Basic lighting
-            vec3 normal = normalize(vNormal);
-            vec3 lightDir = normalize(lightPosition - vWorldPosition);
-            vec3 viewDir = normalize(-vPosition);
-            vec3 reflectDir = reflect(-lightDir, normal);
-            
-            float diff = max(dot(normal, lightDir), 0.0);
-            vec3 diffuse = diff * lightColor;
-            
-            float spec = pow(max(dot(viewDir, reflectDir), 0.0), shininess);
-            vec3 specular = spec * specularColor;
-            
-            // Deformation effects only where deformation exists
-            float glowPulse = sin(time * 2.0) * 0.5 + 0.5;
-            vec3 glowEffect = glowColor * vDeformation * glowPulse;
-            
-            // Final color
-            vec3 finalColor = terrainColor * (diffuse + specular);
-            // Only add glow where there's deformation
-            if (vDeformation > 0.0) {
-                finalColor = mix(finalColor, glowColor, vDeformation * 0.3);
-                finalColor += glowEffect * 0.2;
-            }
-            
-            gl_FragColor = vec4(finalColor, 1.0);
+        // Smooth transitions between biomes based on distance from equator
+        if (polarDistance < 0.4) {
+            biomeColor = mix(equatorBiome, midBiome, smoothstep(0.0, 0.3, polarDistance));
+        } else {
+            biomeColor = mix(midBiome, polarBiome, smoothstep(0.6, 0.7, polarDistance));
         }
+        
+        // Add snow caps at the poles for higher terrain
+        if (polarDistance > 0.7 && height > 0.3) {
+            float snowAmount = smoothstep(0.7, 0.9, polarDistance) * smoothstep(0.3, 0.4, height);
+            biomeColor = mix(biomeColor, snow, snowAmount);
+        }
+    }
+    else {
+        // Mountains and snow
+        float snowLine = smoothstep(0.6, 0.7, height);
+        // More snow near poles
+        snowLine = mix(snowLine, 1.0, smoothstep(0.5, 0.8, polarDistance));
+        biomeColor = mix(mountains, snow, snowLine);
+    }
+    
+    return biomeColor;
+}
+
+void main() {
+    // Calculate height from center
+    float height = length(vPosition) - 2.0;
+    
+    // Calculate latitude using spherical coordinates
+    // This gives us a value from -1 (south pole) to 1 (north pole)
+    float latitude = asin(vPosition.y / length(vPosition)) / (3.14159 / 2.0);
+    
+    // Get base terrain color from biome function
+    vec3 terrainColor = getBiomeColor(height, latitude);
+    
+    // Enhanced lighting
+    vec3 normal = normalize(vNormal);
+    vec3 lightDir = normalize(lightPosition - vWorldPosition);
+    vec3 viewDir = normalize(-vPosition);
+    vec3 halfDir = normalize(lightDir + viewDir);
+    
+    // Ambient light
+    float ambient = 0.2;
+    
+    // Diffuse lighting with softer falloff
+    float diff = max(dot(normal, lightDir), 0.0);
+    diff = ambient + (1.0 - ambient) * diff;
+    vec3 diffuse = diff * lightColor;
+    
+    // Specular with adjusted parameters
+    float spec = pow(max(dot(normal, halfDir), 0.0), shininess);
+    vec3 specular = spec * specularColor * 0.3;
+    
+    // Rim lighting (very subtle edge highlight)
+    float rim = 1.0 - max(dot(viewDir, normal), 0.0);
+    rim = pow(rim, 4.0) * 0.1;
+    
+    // Deformation effects
+    float glowPulse = sin(time * 2.0) * 0.5 + 0.5;
+    vec3 glowEffect = glowColor * vDeformation * glowPulse;
+    
+    // Final color composition
+    vec3 finalColor = terrainColor * diffuse + specular + rim * lightColor;
+    
+    // Add deformation glow
+    if (vDeformation > 0.0) {
+        // finalColor = mix(finalColor, glowColor, vDeformation * 0.3);
+        // finalColor += glowEffect * 0.2;
+    }
+    
+    gl_FragColor = vec4(finalColor, 1.0);
+}
       `,
-      side: THREE.DoubleSide,
+      side: THREE.FrontSide,
     });
     this.planetMesh = new THREE.Mesh(geometry, material);
     this.scene.add(this.planetMesh);
@@ -221,12 +295,12 @@ class PlanetoidGenerator {
     this.animate();
   }
 
-  private generateMultiOctaveNoise(x: number, y: number, z: number, octaves: number = 6): number {
-    let noise = 0;
+  private generateMultiOctaveNoise(x: number, y: number, z: number, octaves: number = 7): number {
+    let noise = 0.2;
     let amplitude = 0.5;
     let frequency = 1;
     let persistance = 0.4;
-    let lacunarity = 2.0;
+    let lacunarity = 1.9;
 
     for (let i = 0; i < octaves; i++) {
       const sampleX = x * frequency;
