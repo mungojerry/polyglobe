@@ -7,6 +7,7 @@ console.log("starting...");
 // new HelicopterScene();
 // new GameScene();
 new PlanetoidGenerator();
+// new CartoonPlanetGenerator();
 // new ZarchFlyScene();
 // new HelicopterGlobeSimulation();
 // new ZarchGameSpherical();

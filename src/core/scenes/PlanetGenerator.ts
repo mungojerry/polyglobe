@@ -39,7 +39,10 @@ class PlanetoidGenerator {
     atmosphereColor: new THREE.Color(0x00ff88),
     waterLevel: 0.0,
   };
-
+  private lights!: {
+    directional: THREE.DirectionalLight;
+    ambient: THREE.AmbientLight;
+  };
   private scene!: THREE.Scene;
   private camera!: THREE.PerspectiveCamera;
   private renderer!: THREE.WebGLRenderer;
@@ -106,6 +109,16 @@ class PlanetoidGenerator {
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(this.renderer.domElement);
+
+    // Setup lights
+    this.lights = {
+      directional: new THREE.DirectionalLight(0xffffff, 1),
+      ambient: new THREE.AmbientLight(0x404040, 0.5),
+    };
+
+    this.lights.directional.position.set(10, 10, 10);
+    this.scene.add(this.lights.directional);
+    this.scene.add(this.lights.ambient);
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
@@ -210,15 +223,16 @@ vec3 getBiomeColor(float height, float latitude) {
     float polarDistance = abs(latitude);
     
     // Define biome colors
-    vec3 deepOcean = vec3(0.05, 0.12, 0.3);
-    vec3 ocean = vec3(0.1, 0.15, 0.35);
     vec3 shallowWater = vec3(0.2, 0.4, 0.6);
     vec3 beach = vec3(0.85, 0.8, 0.64);
-    vec3 tropicalForest = vec3(0.15, 0.4, 0.1);
     vec3 temperateForest = vec3(0.2, 0.5, 0.2);
     vec3 tundra = vec3(0.8, 0.85, 0.8);
     vec3 mountains = vec3(0.5, 0.45, 0.4);
     vec3 snow = vec3(0.95, 0.95, 0.95);
+
+    vec3 deepOcean = vec3(0.1, 0.2, 0.5);        // Richer blue
+    vec3 ocean = vec3(0.2, 0.3, 0.6);            // Brighter blue
+    vec3 tropicalForest = vec3(0.2, 0.6, 0.15);  // More vibrant green
     
     // Base color selection using height
     vec3 biomeColor;
@@ -285,7 +299,7 @@ void main() {
     vec3 halfDir = normalize(lightDir + viewDir);
     
     // Ambient light
-    float ambient = 0.2;
+    float ambient = 0.1;
     
     // Diffuse lighting with softer falloff
     float diff = max(dot(normal, lightDir), 0.0);
@@ -298,7 +312,7 @@ void main() {
     
     // Rim lighting (very subtle edge highlight)
     float rim = 1.0 - max(dot(viewDir, normal), 0.0);
-    rim = pow(rim, 4.0) * 0.1;
+    rim = pow(rim, 4.0) * 0.05;
     
     // Deformation effects
     float glowPulse = sin(time * 2.0) * 0.5 + 0.5;
