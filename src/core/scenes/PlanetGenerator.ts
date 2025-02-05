@@ -7,9 +7,39 @@ interface DeformationConfig {
   radius: number;
   strength: number;
   accumulation: number;
+  maxDeformation: number; // New: limit total deformation
+  smoothing: number; // New: smoothing factor
+}
+
+interface PlanetConfig {
+  resolution: number;
+  baseRadius: number;
+  noiseConfig: {
+    octaves: number;
+    persistence: number;
+    lacunarity: number;
+    baseAmplitude: number;
+    baseFrequency: number;
+  };
+  atmosphereColor: THREE.Color;
+  waterLevel: number;
 }
 
 class PlanetoidGenerator {
+  private static readonly DEFAULT_PLANET_CONFIG: PlanetConfig = {
+    resolution: 50,
+    baseRadius: 2,
+    noiseConfig: {
+      octaves: 7,
+      persistence: 0.4,
+      lacunarity: 1.9,
+      baseAmplitude: 0.5,
+      baseFrequency: 1,
+    },
+    atmosphereColor: new THREE.Color(0x00ff88),
+    waterLevel: 0.0,
+  };
+
   private scene!: THREE.Scene;
   private camera!: THREE.PerspectiveCamera;
   private renderer!: THREE.WebGLRenderer;
@@ -20,20 +50,24 @@ class PlanetoidGenerator {
   private raycaster: THREE.Raycaster;
 
   // Deformation configuration with defaults
+  private config: PlanetConfig;
+
   private deformConfig: DeformationConfig = {
     radius: 0.5,
     strength: 0.2,
     accumulation: 0.5,
+    maxDeformation: 2.0,
+    smoothing: 0.3,
   };
 
-  constructor(private resolution: number = 50, config?: Partial<DeformationConfig>) {
+  private frameId: number | null = null;
+  private disposed = false;
+
+  constructor(config?: Partial<PlanetConfig>, deformConfig?: Partial<DeformationConfig>) {
+    this.config = { ...PlanetoidGenerator.DEFAULT_PLANET_CONFIG, ...config };
+    this.deformConfig = { ...this.deformConfig, ...deformConfig };
     this.mousePosition = new THREE.Vector2();
     this.raycaster = new THREE.Raycaster();
-
-    // Apply any custom config values
-    if (config) {
-      this.deformConfig = { ...this.deformConfig, ...config };
-    }
 
     this.initScene();
     this.generatePlanetoid();
@@ -77,11 +111,7 @@ class PlanetoidGenerator {
     this.controls.enableDamping = true;
 
     // Add resize handler
-    window.addEventListener("resize", () => {
-      this.camera.aspect = window.innerWidth / window.innerHeight;
-      this.camera.updateProjectionMatrix();
-      this.renderer.setSize(window.innerWidth, window.innerHeight);
-    });
+    window.addEventListener("resize", this.handleResize);
 
     const water = new Water(2, 40);
     this.scene.add(water.getObject());
@@ -89,7 +119,7 @@ class PlanetoidGenerator {
 
   private generatePlanetoid() {
     this.simplex = new SimplexNoise();
-    const geometry = new THREE.IcosahedronGeometry(2, this.resolution);
+    const geometry = new THREE.IcosahedronGeometry(2, this.config.resolution);
 
     // Add deformation tracking attribute
     const deformationArray = new Float32Array(geometry.attributes.position.count);
@@ -290,12 +320,11 @@ void main() {
     this.animate();
   }
 
-  private generateMultiOctaveNoise(x: number, y: number, z: number, octaves: number = 7): number {
+  private generateMultiOctaveNoise(x: number, y: number, z: number): number {
+    const { octaves, persistence, lacunarity, baseAmplitude, baseFrequency } = this.config.noiseConfig;
     let noise = 0.2;
-    let amplitude = 0.5;
-    let frequency = 1;
-    let persistance = 0.4;
-    let lacunarity = 1.9;
+    let amplitude = baseAmplitude;
+    let frequency = baseFrequency;
 
     for (let i = 0; i < octaves; i++) {
       const sampleX = x * frequency;
@@ -303,7 +332,7 @@ void main() {
       const sampleZ = z * frequency;
       const perlin = this.simplex.noise3d(sampleX, sampleY, sampleZ);
       noise += perlin * amplitude;
-      amplitude *= persistance;
+      amplitude *= persistence;
       frequency *= lacunarity;
     }
 
@@ -386,19 +415,42 @@ void main() {
     material.uniforms.previewDeformation.value = false;
   }
 
-  private animate() {
-    requestAnimationFrame(() => this.animate());
-    this.controls.update();
-    this.renderer.render(this.scene, this.camera);
-  }
+  private animate = (): void => {
+    if (this.disposed) return;
 
-  // Clean up method
-  public dispose() {
+    this.frameId = requestAnimationFrame(this.animate);
+    this.controls.update();
+
+    // Update time uniform for shaders
+    const material = this.planetMesh.material as THREE.ShaderMaterial;
+    material.uniforms.time.value = performance.now() * 0.001;
+
+    this.renderer.render(this.scene, this.camera);
+  };
+
+  public dispose(): void {
+    this.disposed = true;
+    if (this.frameId !== null) {
+      cancelAnimationFrame(this.frameId);
+    }
+
     this.renderer.dispose();
     this.planetMesh.geometry.dispose();
     (this.planetMesh.material as THREE.Material).dispose();
     this.controls.dispose();
+
+    // Remove event listeners
+    window.removeEventListener("resize", this.handleResize);
+    this.renderer.domElement.remove();
   }
+
+  private handleResize = (): void => {
+    if (!this.disposed) {
+      this.camera.aspect = window.innerWidth / window.innerHeight;
+      this.camera.updateProjectionMatrix();
+      this.renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+  };
 }
 
 export default PlanetoidGenerator;
