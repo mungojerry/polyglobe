@@ -59,14 +59,14 @@ export class Water {
         vec3 calculateLightContribution(vec3 normal, vec3 viewDir, vec3 lightPos, vec3 lightColor, float intensity) {
             vec3 lightDir = normalize(lightPos - worldPosition);
             
-            // Specular
+            // Enhanced specular
             vec3 reflectDir = reflect(-lightDir, normal);
-            float spec = pow(max(dot(viewDir, reflectDir), 0.0), 64.0);
-            vec3 specular = spec * lightColor * intensity;
+            float spec = pow(max(dot(viewDir, reflectDir), 0.0), 128.0);
+            vec3 specular = spec * lightColor * intensity * 2.0;
             
-            // Diffuse
+            // Diffuse with reduced influence to emphasize specular
             float diff = max(dot(lightDir, normal), 0.0);
-            vec3 diffuse = diff * lightColor * intensity * 0.5;
+            vec3 diffuse = diff * lightColor * intensity * 0.3;
             
             return diffuse + specular;
         }
@@ -80,8 +80,8 @@ export class Water {
             vec3 bump1 = normalize(texture2D(waterBump1, uv1).rgb * 2.0 - 1.0);
             vec3 bump2 = normalize(texture2D(waterBump2, uv2).rgb * 2.0 - 1.0);
             
-            // Blend normal maps
-            vec3 finalNormal = normalize(vNormal + bump1 * 0.8 + bump2 * 0.6);
+            // Blend normal maps with increased influence
+            vec3 finalNormal = normalize(vNormal + bump1 * 1.2 + bump2 * 0.8);
             
             vec3 viewDirection = normalize(cameraPosition - worldPosition);
             
@@ -102,11 +102,11 @@ export class Water {
                 1.0 - dayNightMix
             );
             
-            // Fresnel effect
-            float fresnel = pow(1.0 - max(dot(viewDirection, finalNormal), 0.0), 4.0);
+            // Enhanced fresnel effect
+            float fresnel = pow(1.0 - max(dot(viewDirection, finalNormal), 0.0), 5.0);
             
-            // Ambient light
-            vec3 ambient = ambientColor * mix(0.2, 0.1, dayNightMix);
+            // Reduced ambient for more contrast
+            vec3 ambient = ambientColor * mix(0.15, 0.08, dayNightMix);
             
             // Combine all lighting components
             vec3 finalColor = ambient + sunContribution + moonContribution;
@@ -133,11 +133,11 @@ export class Water {
       uniforms: {
         time: { value: 0 },
         sunPosition: { value: new THREE.Vector3(1500, 500, 500) },
-        sunColor: { value: new THREE.Color(0xffffff).multiplyScalar(0.8) },
+        sunColor: { value: new THREE.Color(0xffffff).multiplyScalar(1.0) },
         moonPosition: { value: new THREE.Vector3(-1500, 500, -500) },
-        moonColor: { value: new THREE.Color(0x77ccff).multiplyScalar(0.5) },
-        ambientColor: { value: new THREE.Color(0x00ddff).multiplyScalar(0.5) },
-        opacity: { value: 0.85 },
+        moonColor: { value: new THREE.Color(0x77ccff).multiplyScalar(0.6) },
+        ambientColor: { value: new THREE.Color(0x00ddff).multiplyScalar(0.4) },
+        opacity: { value: 0.9 },
         dayNightMix: { value: 1.0 },
         waterBump1: { value: this.waterBump1 },
         waterBump2: { value: this.waterBump2 },

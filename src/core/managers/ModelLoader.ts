@@ -64,6 +64,17 @@ export class ModelLoader {
     const instancedMesh = new THREE.InstancedMesh(geometry, material, this.maxInstances);
     instancedMesh.count = 0; // Start with 0 instances
     instancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    instancedMesh.castShadow = true;
+    instancedMesh.receiveShadow = true;
+    instancedMesh.frustumCulled = false; // Prevent culling issues with shadows
+
+    // Force shadow-related updates
+    instancedMesh.updateMatrix();
+    instancedMesh.updateMatrixWorld(true);
+
+    // Ensure geometry is shadow-ready
+    geometry.computeBoundingSphere();
+    geometry.computeBoundingBox();
 
     return {
       instancedMesh,
@@ -81,27 +92,28 @@ export class ModelLoader {
 
   private createStandardMaterial(originalMaterial: THREE.Material): THREE.MeshPhongMaterial {
     const orig = originalMaterial as THREE.MeshPhongMaterial;
-    const material = new THREE.MeshPhongMaterial(); //originalMaterial.clone() as THREE.MeshPhongMaterial;
-    // material.flatShading = true;
-    // material.vertexColors = false;
-    material.reflectivity = orig.reflectivity;
-    material.shininess = orig.shininess;
-    material.side = THREE.FrontSide;
+    const material = new THREE.MeshPhongMaterial();
+
+    // Set very low shininess and reflectivity for a matte look
+    material.reflectivity = 0.1;
+    material.shininess = 5;
+    material.side = THREE.DoubleSide;
     material.transparent = false;
     material.flatShading = true;
     material.opacity = 1;
-    material.specular.copy(orig.specular);
-    material.emissive.copy(orig.emissive);
-    material.emissiveIntensity = 1; //orig.emissiveIntensity;
+    material.specular = new THREE.Color(0x111111); // Very dark specular for less shine
+    material.emissive = new THREE.Color(0x000000);
+    material.emissiveIntensity = 0;
+    material.shadowSide = THREE.DoubleSide; // Ensure shadows are cast from both sides
     material.toneMapped = orig.toneMapped;
     material.depthFunc = orig.depthFunc;
     material.colorWrite = orig.colorWrite;
-    material.color.copy(orig.color); //new THREE.Color(originalMaterial.color.r * 2, originalMaterial.color.g * 2, originalMaterial.color.b * 2));
+    material.color.copy(orig.color);
     // material.color = new THREE.Color(1, 0, 0);
     if (originalMaterial instanceof THREE.MeshPhongMaterial) {
-      // material.map = originalMaterial.map;
-      // material.normalMap = originalMaterial.normalMap;
-      // material.specularMap = originalMaterial.specularMap;
+      material.map = originalMaterial.map;
+      material.normalMap = originalMaterial.normalMap;
+      material.specularMap = originalMaterial.specularMap;
     }
     console.log(material.color.getHexString());
     // material.needsUpdate = true;

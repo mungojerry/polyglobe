@@ -3,7 +3,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
 import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader";
 import { Water } from "../effects/Water";
 import { pseudoRandom } from "../utils/PseudoRandom";
-import { LandscapeGenerator } from "./LandscaoeGeneration";
+import { LandscapeConfig, LandscapeGenerator } from "./LandscaoeGeneration";
 
 interface DeformationConfig {
   radius: number;
@@ -14,21 +14,49 @@ interface DeformationConfig {
 }
 
 interface PlanetConfig {
-  resolution: number;
   baseRadius: number;
 
   atmosphereColor: THREE.Color;
   waterLevel: number;
+  landscapeConfig: LandscapeConfig;
 }
 
 class PlanetoidGenerator {
   private static readonly DEFAULT_PLANET_CONFIG: PlanetConfig = {
-    resolution: 50,
     baseRadius: 8,
-
     atmosphereColor: new THREE.Color(0x00ff88),
     waterLevel: 0.6,
+    landscapeConfig: {
+      resolution: 50,
+      ridgeNoise: {
+        scale: 1.3,
+        amplitude: 0.15,
+        sharpness: 2.4,
+      },
+      noiseLayers: [
+        { scale: 0.5, amplitude: 0.15 }, // Increased base terrain variation
+        { scale: 1.0, amplitude: 0.12 }, // Increased medium detail
+        { scale: 2.0, amplitude: 0.08 }, // Increased fine detail
+        { scale: 4.0, amplitude: 0.04 }, // Adjusted micro detail
+        { scale: 8.0, amplitude: 0.02 }, // More subtle highest frequency
+        { scale: 16.0, amplitude: 0.01 }, // Very subtle finest detail
+      ],
+      waterLevel: 1.03,
+      colors: [
+        { height: 0.0, color: new THREE.Color(0x001133) }, // Deeper water
+        { height: 0.02, color: new THREE.Color(0x0044aa) }, // Shallow water
+        { height: 0.05, color: new THREE.Color(0x0066cc) }, // Very shallow water
+        { height: 0.06, color: new THREE.Color(0xc2b280) }, // Beach
+        { height: 0.15, color: new THREE.Color(0x228b22) }, // Lowland vegetation
+        { height: 0.35, color: new THREE.Color(0x064820) }, // Forest
+        { height: 0.6, color: new THREE.Color(0x704214) }, // Mountains
+        { height: 0.75, color: new THREE.Color(0x4a4a4a) }, // High mountains
+        { height: 0.85, color: new THREE.Color(0xd4d4d4) }, // Snow line
+        { height: 1.0, color: new THREE.Color(0xffffff) }, // Peak snow
+      ],
+    },
   };
+
   private lights!: {
     directional: THREE.DirectionalLight;
     ambient: THREE.AmbientLight;
@@ -41,39 +69,7 @@ class PlanetoidGenerator {
   private mousePosition: THREE.Vector2;
   private raycaster: THREE.Raycaster;
   private grassInstancedMesh: THREE.InstancedMesh | null = null;
-  private readonly NUM_GRASS = 300000;
-
-  private landscapeConfig = {
-    resolution: 10,
-    ridgeNoise: {
-      scale: 1.3,
-      amplitude: 0.15,
-      sharpness: 2.4,
-    },
-    noiseLayers: [
-      { scale: 0.5, amplitude: 0.1 },
-      { scale: 1.0, amplitude: 0.08 },
-      { scale: 2.0, amplitude: 0.04 },
-      { scale: 4.0, amplitude: 0.02 },
-      { scale: 8.0, amplitude: 0.01 },
-      { scale: 16.0, amplitude: 0.005 },
-    ],
-    waterLevel: 1.03,
-    colors: [
-      { height: 0.0, color: new THREE.Color(0x000066) },
-      { height: 0.05, color: new THREE.Color(0x006699) },
-      { height: 0.1, color: new THREE.Color(0xf0e68c) },
-      { height: 0.2, color: new THREE.Color(0x339933) },
-      { height: 0.6, color: new THREE.Color(0x663300) },
-      { height: 0.8, color: new THREE.Color(0x666666) },
-      { height: 1.0, color: new THREE.Color(0xffffff) },
-    ],
-
-    erosion: {
-      iterations: 1, // Lightweight erosion
-      strength: 0.1,
-    },
-  };
+  private readonly NUM_GRASS = 3000;
 
   // Deformation configuration with defaults
   private config: PlanetConfig;
@@ -131,6 +127,8 @@ class PlanetoidGenerator {
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     document.body.appendChild(this.renderer.domElement);
 
     // Setup lights
@@ -154,7 +152,7 @@ class PlanetoidGenerator {
   }
 
   private async generatePlanetoid() {
-    const landscapeGeneration = new LandscapeGenerator(this.config.baseRadius, this.landscapeConfig);
+    const landscapeGeneration = new LandscapeGenerator(this.config.baseRadius, this.config.landscapeConfig);
     const geometry = landscapeGeneration.generateTerrain();
 
     // Add deformation tracking attribute
@@ -163,6 +161,8 @@ class PlanetoidGenerator {
 
     const material = new THREE.ShaderMaterial({
       uniforms: {
+        shadowMap: { value: null },
+        shadowMatrix: { value: new THREE.Matrix4() },
         radius: { value: this.config.baseRadius },
         deformPoint: { value: new THREE.Vector3(0, 0, 0) },
         deformRadius: { value: this.deformConfig.radius },
@@ -172,6 +172,8 @@ class PlanetoidGenerator {
         shininess: { value: 32.0 },
         specularColor: { value: new THREE.Color(0xffffff) },
         previewDeformation: { value: false },
+        landscapeColors: { value: this.config.landscapeConfig.colors.map((color) => color.color) },
+        landscapeHeights: { value: this.config.landscapeConfig.colors.map((color) => color.height) },
         time: { value: 0.0 },
         glowColor: { value: new THREE.Color(0x00ff88) },
       },
@@ -189,7 +191,8 @@ varying vec3 vPosition;
 varying vec3 vNormal;
 varying float vDeformation;
 varying vec3 vWorldPosition;
-
+uniform mat4 shadowMatrix;
+    varying vec4 vShadowCoord;
 void main() {
     vPosition = position;
     vNormal = normal;
@@ -208,8 +211,9 @@ void main() {
     // Pass total deformation to fragment shader
     vDeformation = totalDeformation;
     vWorldPosition = (modelMatrix * vec4(finalPosition, 1.0)).xyz;
-    
+    vShadowCoord = shadowMatrix * modelMatrix * vec4(finalPosition, 1.0);
     gl_Position = projectionMatrix * modelViewMatrix * vec4(finalPosition, 1.0);
+    
 }
       `,
       fragmentShader: /* glsl */ `
@@ -225,74 +229,69 @@ varying vec3 vPosition;
 varying vec3 vNormal;
 varying float vDeformation;
 varying vec3 vWorldPosition;
+#define COLORS_LENGTH ${this.config.landscapeConfig.colors.length}
 
-vec3 getBiomeColor(float height, float latitude) {
-    // Take absolute value of latitude to treat both poles the same
-    // This makes latitude go from 0 (equator) to 1 (either pole)
-    float polarDistance = abs(latitude);
-    
-    // Define biome colors
-    vec3 shallowWater = vec3(0.2, 0.4, 0.6);
-    vec3 beach = vec3(0.85, 0.8, 0.64);
-    vec3 temperateForest = vec3(0.2, 0.5, 0.2);
-    vec3 tundra = vec3(0.8, 0.85, 0.8);
-    vec3 mountains = vec3(0.5, 0.45, 0.4);
-    vec3 snow = vec3(0.95, 0.95, 0.95);
+uniform sampler2D shadowMap;
+varying vec4 vShadowCoord;
 
-    vec3 deepOcean = vec3(0.1, 0.2, 0.5);        // Richer blue
-    vec3 ocean = vec3(0.2, 0.3, 0.6);            // Brighter blue
-    vec3 tropicalForest = vec3(0.2, 0.6, 0.15);  // More vibrant green
-    
-    // Base color selection using height
-    vec3 biomeColor;
-    
-    if (height < -0.1) {
-        // Deep ocean
-        biomeColor = deepOcean;
+uniform vec3 landscapeColors[COLORS_LENGTH];
+uniform float landscapeHeights[COLORS_LENGTH];
+
+float getShadow(vec4 shadowCoord) {
+  vec3 shadowCoordProj = shadowCoord.xyz / shadowCoord.w;
+  shadowCoordProj = shadowCoordProj * 0.5 + 0.5;
+  
+  float currentDepth = shadowCoordProj.z;
+  float shadow = 0.0;
+  
+  float bias = 0.005;
+  vec2 texelSize = vec2(1.0 / 2048.0);
+  
+  for(int x = -1; x <= 1; x++) {
+    for(int y = -1; y <= 1; y++) {
+      float pcfDepth = texture2D(shadowMap, shadowCoordProj.xy + vec2(x, y) * texelSize).r;
+      shadow += currentDepth - bias > pcfDepth ? 0.5 : 1.0;
     }
-    else if (height < 0.0) {
-        // Ocean with smooth transition to shallow
-        float oceanDepth = smoothstep(-0.1, 0.0, height);
-        biomeColor = mix(ocean, shallowWater, oceanDepth);
-    }
-    else if (height < 0.02) {
-        // Beach transition
-        float beachBlend = smoothstep(0.0, 0.02, height);
-        biomeColor = mix(shallowWater, beach, beachBlend);
-    }
-    else if (height < 0.3) {
-        // Main terrain - varies by polar distance
-        vec3 equatorBiome = tropicalForest;
-        vec3 midBiome = temperateForest;
-        vec3 polarBiome = tundra;
-        
-        // Smooth transitions between biomes based on distance from equator
-        if (polarDistance < 0.4) {
-            biomeColor = mix(equatorBiome, midBiome, smoothstep(0.0, 0.3, polarDistance));
-        } else {
-            biomeColor = mix(midBiome, polarBiome, smoothstep(0.6, 0.7, polarDistance));
-        }
-        
-        // Add snow caps at the poles for higher terrain
-        if (polarDistance > 0.7 && height > 0.3) {
-            float snowAmount = smoothstep(0.7, 0.9, polarDistance) * smoothstep(0.3, 0.4, height);
-            biomeColor = mix(biomeColor, snow, snowAmount);
-        }
-    }
-    else {
-        // Mountains and snow
-        float snowLine = smoothstep(0.6, 0.7, height);
-        // More snow near poles
-        snowLine = mix(snowLine, 1.0, smoothstep(0.5, 0.8, polarDistance));
-        biomeColor = mix(mountains, snow, snowLine);
-    }
-    
-    return biomeColor;
+  }
+  
+  shadow /= 9.0;
+  return shadow;
+}
+vec3 getLandscapeColor(float height, float latitude) {
+  // If height is below the first height, return the first color
+  vec3 baseColor;
+  const float PI = 3.1415926535897932384626433832795;
+  float polarThreshold = 1.150472; // 60 degrees in radians
+
+  // Find the appropriate color interpolation range
+  for (int i = 0; i < landscapeHeights.length() - 1; i++) {
+      if (height <= landscapeHeights[i]) {
+          // Interpolate between this color and the previous color
+          float t = (height - landscapeHeights[i-1]) / (landscapeHeights[i] - landscapeHeights[i-1]);
+          baseColor = mix(landscapeColors[i-1], landscapeColors[i], t);
+          break;
+      }
+  }
+  
+  if(height < landscapeHeights[0]) {
+    baseColor = landscapeColors[0];
+  }
+  if(height >= landscapeHeights[landscapeHeights.length() - 1]) {
+    baseColor = landscapeColors[landscapeColors.length() - 1];
+  }
+
+  // Apply polar effect
+  if(abs(latitude) > polarThreshold) {
+    float polarBlend = (abs(latitude) - polarThreshold) / (PI/2.0 - polarThreshold);
+    return mix(baseColor, vec3(1.0), polarBlend);
+  }
+
+  // If height is above the last height, return the last color
+  return baseColor;
 }
 
 void main() {
     // Calculate height from center
-
     float height = (length(vPosition) - radius) / radius;
     
     // Calculate latitude using spherical coordinates
@@ -300,7 +299,7 @@ void main() {
     float latitude = asin(vPosition.y / length(vPosition)) / (3.14159 / radius);
     
     // Get base terrain color from biome function
-    vec3 terrainColor = getBiomeColor(height, latitude);
+    vec3 terrainColor = getLandscapeColor(height, latitude);
     
     // Enhanced lighting
     vec3 normal = normalize(vNormal);
@@ -330,8 +329,8 @@ void main() {
     
     // Final color composition
     vec3 finalColor = terrainColor * diffuse + specular + rim * lightColor;
-    
-    
+    float shadow = getShadow(vShadowCoord);
+    finalColor *= shadow;
     gl_FragColor = vec4(finalColor, 1.0);
 }
       `,
