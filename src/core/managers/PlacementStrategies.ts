@@ -100,13 +100,16 @@ class PlacementUtils {
     const matrix = matrixPool.acquire();
     matrix.setPosition(position);
 
-    const quaternion = quaternionPool.acquire().setFromUnitVectors(upVector, normal);
+    // First align with surface normal
+    const alignQuaternion = quaternionPool.acquire().setFromUnitVectors(upVector, normal);
 
     if (randomRotation) {
-      quaternion.multiply(quaternionPool.acquire().setFromAxisAngle(upVector, Math.random() * Math.PI * 2));
+      // Create random rotation around the aligned normal vector
+      const randomRotationQuat = quaternionPool.acquire().setFromAxisAngle(normal, Math.random() * Math.PI * 2);
+      alignQuaternion.multiply(randomRotationQuat);
     }
 
-    const rotationMatrix = matrixPool.acquire().makeRotationFromQuaternion(quaternion);
+    const rotationMatrix = matrixPool.acquire().makeRotationFromQuaternion(alignQuaternion);
     return matrix.multiply(rotationMatrix);
   }
 
