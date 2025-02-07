@@ -390,9 +390,9 @@ void main() {
     this.setupLighting();
 
     await Promise.all([
-      this.createInstancedVegetation("assets/models/fbx/tree", 500, 0.12, 16, new THREE.Vector3(0, 1, 0), [0.9, 1.1]),
+      this.createInstancedVegetation("assets/models/fbx/tree", 300, 0.12, 16, new THREE.Vector3(0, 1, 0), [0.9, 1.1]),
       this.createInstancedVegetation("assets/models/fbx/Grass", 14000, 0.16, 5, new THREE.Vector3(0, 1, 0), [0.8, 1.2]),
-      this.createInstancedVegetation("assets/models/fbx/Rock", 4000, 0.16, 5, new THREE.Vector3(0, 1, 0), [0.8, 1.2]),
+      this.createInstancedVegetation("assets/models/fbx/Rock", 400, 0.16, 5, new THREE.Vector3(0, 1, 0), [0.8, 1.2]),
       this.createInstancedVegetation("assets/models/fbx/BigRock", 100, 0.16, 3, new THREE.Vector3(0, 1, 0), [0.8, 1.2]),
       this.createInstancedVegetation("assets/models/fbx/Reeds", 100, 0.16, 1, new THREE.Vector3(0, 1, 0), [0.6, 0.7]),
       this.createInstancedVegetation("assets/models/fbx/House", 3, 0.16, 1, new THREE.Vector3(0, 1, 0), [1, 1]),
