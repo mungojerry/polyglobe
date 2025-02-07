@@ -6,6 +6,7 @@ import { ModelLoader } from "../managers/ModelLoader";
 class LowPolyPlanet {
   private noise: SimplexNoise;
   private radius: number;
+  private detail: number;
   private scene: THREE.Scene;
   private modelLoader: ModelLoader;
   private camera: THREE.PerspectiveCamera;
@@ -17,8 +18,9 @@ class LowPolyPlanet {
   private waterMaterial!: THREE.ShaderMaterial;
   private clock: THREE.Clock = new THREE.Clock();
 
-  constructor(radius = 10) {
+  constructor(radius = 10, detail = 10) {
     this.radius = radius;
+    this.detail = detail;
     this.noise = new SimplexNoise();
     this.modelLoader = new ModelLoader(4000);
 
@@ -79,7 +81,7 @@ class LowPolyPlanet {
   }
 
   private createTerrainGeometry(): THREE.IcosahedronGeometry {
-    const geometry = new THREE.IcosahedronGeometry(this.radius, 8);
+    const geometry = new THREE.IcosahedronGeometry(this.radius, this.detail);
     const positions = geometry.attributes.position.array;
 
     for (let i = 0; i < positions.length; i += 3) {
@@ -184,13 +186,17 @@ class LowPolyPlanet {
 
   private createPlanet(): void {
     // Ocean with animated waves and foam near shore
-    const oceanGeometry = new THREE.IcosahedronGeometry(this.radius * 1.03, 10);
+    const oceanGeometry = new THREE.IcosahedronGeometry(this.radius * 1.1, this.detail);
     const terrainGeometry = this.createTerrainGeometry();
 
     // Precompute distances
+    // Inside createPlanet(), right after computing distances:
     const waterPositions = oceanGeometry.attributes.position.array;
     const landPositions = terrainGeometry.attributes.position.array;
     const distances = new Float32Array(waterPositions.length / 3);
+
+    let minFound = Infinity;
+    let maxFound = -Infinity;
 
     for (let i = 0; i < waterPositions.length; i += 3) {
       let minDist = Infinity;
@@ -203,64 +209,103 @@ class LowPolyPlanet {
       }
 
       distances[i / 3] = minDist;
+      minFound = Math.min(minFound, minDist);
+      maxFound = Math.max(maxFound, minDist);
     }
 
-    oceanGeometry.setAttribute("distanceToShore", new THREE.BufferAttribute(distances, 1));
+    console.log("Distance range:", { minFound, maxFound });
 
+    // Normalize with a much smaller range to make differences more visible
+    for (let i = 0; i < distances.length; i++) {
+      // Normalize to [0,1] with enhanced contrast
+      distances[i] = Math.max(0, Math.min(1, (distances[i] - minFound) / (maxFound - minFound)));
+    }
+
+    // Log some sample distances
+    console.log("Sample normalized distances:", distances.slice(0, 5), distances.slice(Math.floor(distances.length / 2), Math.floor(distances.length / 2) + 5));
+
+    oceanGeometry.setAttribute("distanceToShore", new THREE.BufferAttribute(distances, 1));
     this.waterMaterial = new THREE.ShaderMaterial({
       uniforms: {
         time: { value: 0 },
         oceanColor: { value: new THREE.Color(0x4a9fff) },
         foamColor: { value: new THREE.Color(0xffffff) },
-        radius: { value: this.radius }, // Pass the planet radius
+        radius: { value: this.radius },
       },
       vertexShader: `
         uniform float time;
-        uniform float radius;
-        varying vec3 vWorldPosition;
-        varying vec3 vNormal;
         varying float vDistanceToShore;
         attribute float distanceToShore;
-
+    
         void main() {
-          vNormal = normal;
           vDistanceToShore = distanceToShore;
-          // Calculate the height of the original vertex
-          float height = length(position);
-          // Calculate wave effect based on height
-          float wave = sin(position.x * 10.0 + time) * 0.005 + sin(position.y * 10.0 + time) * 0.005;
-          // Attenuate wave effect based on height
-          float shoreWaveFactor = smoothstep(radius * 0.98, radius * 1.02, height);
-          wave *= shoreWaveFactor;
-          vec3 newPosition = position + normal * wave;
-          vec4 worldPosition = modelMatrix * vec4(newPosition, 1.0);
-          vWorldPosition = worldPosition.xyz;
-          gl_Position = projectionMatrix * viewMatrix * worldPosition;
+          // Add gentle wave motion
+          vec3 newPosition = position + normal * (sin(position.x * 2.0 + time) * 0.03 + 
+                                                sin(position.z * 2.0 + time * 1.5) * 0.03) * 
+                                                (1.0 - distanceToShore);
+          gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(newPosition, 1.0);
         }
       `,
+      // Replace the existing fragmentShader with:
       fragmentShader: `
-        uniform vec3 oceanColor;
-        uniform vec3 foamColor;
-        uniform float radius;
-        uniform float time; // Declare the time uniform
-        varying vec3 vWorldPosition;
-        varying float vDistanceToShore;
+uniform float time;
+uniform vec3 oceanColor;
+uniform vec3 foamColor;
+varying float vDistanceToShore;
 
-        void main() {
-          // Create cartoon foam effect
-          float foamEffect = sin(vDistanceToShore * 20.0 + time * 2.0) * 0.2; // Increased foamEffect intensity
-          foamEffect = clamp(foamEffect, 0.0, 1.0);
+float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
+}
 
-          // Only show foam effect near the shore
-          float shoreFactor = smoothstep(0.0, 0.5, vDistanceToShore); // Adjust the range as needed
-          foamEffect *= shoreFactor;
+float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    
+    float a = hash(i);
+    float b = hash(i + vec2(1.0, 0.0));
+    float c = hash(i + vec2(0.0, 1.0));
+    float d = hash(i + vec2(1.0, 1.0));
+    
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(a, b, u.x) +
+            (c - a) * u.y * (1.0 - u.x) +
+            (d - b) * u.x * u.y;
+}
 
-          vec3 color = mix(oceanColor, foamColor, foamEffect);
-          gl_FragColor = vec4(color, 0.7); // Set alpha to 0.7 for transparency
-        }
-      `,
-      transparent: true, // Enable transparency for the material
-      side: THREE.DoubleSide, // Render both sides of the ocean geometry
+void main() {
+    // Wider shore transition and further from shore
+    float shoreWidth = 0.5;
+    float shoreMask = 1.0 - smoothstep(0.0, shoreWidth, vDistanceToShore);
+    
+    // More complex wave wrapping
+    float foam = 0.0;
+    if (shoreMask > 0.01) {
+        vec2 foamCoord = vec2(
+            vDistanceToShore * 30.0 + time * 0.5, 
+            time * 0.3
+        );
+        
+        // Wrapped noise for more organic wave patterns
+        float wavePattern = sin(vDistanceToShore * 100.0 - time * 3.0) * 0.5 + 0.5;
+        float wrappedNoise = sin(noise(foamCoord * 3.0) * 10.0);
+        
+        // Combine wave patterns with wrapped noise
+        foam = shoreMask * (wavePattern * 0.6 + wrappedNoise * 0.4);
+        foam = smoothstep(0.3, 0.9, foam);
+        
+        // Additional random variation
+        foam *= (1.0 + noise(foamCoord * 15.0) * 0.2);
+    }
+    
+    // Enhanced color and opacity
+    vec3 finalColor = mix(oceanColor, foamColor, foam * 1.3);
+    float alpha = mix(0.4, 1.0, foam);
+    
+    gl_FragColor = vec4(finalColor, alpha);
+}
+`,
+      transparent: true,
+      side: THREE.DoubleSide,
     });
 
     const ocean = new THREE.Mesh(oceanGeometry, this.waterMaterial);
