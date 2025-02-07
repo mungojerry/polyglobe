@@ -3,17 +3,6 @@ import { OrbitControls } from "three-stdlib";
 import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise";
 import { ModelLoader } from "../managers/ModelLoader";
 
-type MaterialConfig = {
-  type: "phong" | "basic";
-  color: number;
-  flatShading?: boolean;
-  reflectivity?: number;
-  shininess?: number;
-  specular?: number;
-  transparent?: boolean;
-  opacity?: number;
-};
-
 class LowPolyPlanet {
   private noise: SimplexNoise;
   private radius: number;
@@ -25,6 +14,8 @@ class LowPolyPlanet {
   private clouds: THREE.Group;
   private sun!: THREE.Mesh;
   private controls: OrbitControls;
+  private waterMaterial!: THREE.ShaderMaterial;
+  private clock: THREE.Clock = new THREE.Clock();
 
   constructor(radius = 10) {
     this.radius = radius;
@@ -68,31 +59,6 @@ class LowPolyPlanet {
     const controls = new OrbitControls(this.camera, this.renderer.domElement);
     controls.enableDamping = true;
     return controls;
-  }
-
-  private createMaterial(config: MaterialConfig): THREE.Material {
-    const baseConfig = {
-      color: config.color,
-      flatShading: config.flatShading,
-    };
-
-    switch (config.type) {
-      case "phong":
-        return new THREE.MeshPhongMaterial({
-          ...baseConfig,
-          reflectivity: config.reflectivity,
-          shininess: config.shininess,
-          specular: config.specular,
-        });
-      case "basic":
-        return new THREE.MeshBasicMaterial({
-          ...baseConfig,
-          transparent: config.transparent,
-          opacity: config.opacity,
-        });
-      default:
-        throw new Error(`Unsupported material type: ${config.type}`);
-    }
   }
 
   private generateNoise(normalized: THREE.Vector3): number {
@@ -193,6 +159,7 @@ class LowPolyPlanet {
             mesh.instancedMesh.count++;
 
             if (mesh.instancedMesh.count === 1) {
+              mesh.instancedMesh.frustumCulled = true;
               mesh.instancedMesh.castShadow = true;
               mesh.instancedMesh.receiveShadow = true;
               this.planet.add(mesh.instancedMesh);
@@ -208,42 +175,125 @@ class LowPolyPlanet {
     }
   }
 
-  private createCelestialBody(geometry: THREE.BufferGeometry, materialConfig: MaterialConfig): THREE.Mesh {
-    const material = this.createMaterial(materialConfig);
+  private createCelestialBody(geometry: THREE.BufferGeometry, material: THREE.Material): THREE.Mesh {
     const mesh = new THREE.Mesh(geometry, material);
     mesh.receiveShadow = true;
+    mesh.castShadow = true;
     return mesh;
   }
 
   private createPlanet(): void {
-    // Ocean
-    const ocean = this.createCelestialBody(new THREE.IcosahedronGeometry(this.radius, 2), {
-      type: "phong",
-      color: 0x4a9fff,
-      reflectivity: 100,
-      shininess: 100,
-      specular: 0x3366ff,
-      flatShading: true,
+    // Ocean with animated waves and foam near shore
+    const oceanGeometry = new THREE.IcosahedronGeometry(this.radius * 1.03, 10);
+    const terrainGeometry = this.createTerrainGeometry();
+
+    // Precompute distances
+    const waterPositions = oceanGeometry.attributes.position.array;
+    const landPositions = terrainGeometry.attributes.position.array;
+    const distances = new Float32Array(waterPositions.length / 3);
+
+    for (let i = 0; i < waterPositions.length; i += 3) {
+      let minDist = Infinity;
+      const waterVertex = new THREE.Vector3(waterPositions[i], waterPositions[i + 1], waterPositions[i + 2]);
+
+      for (let j = 0; j < landPositions.length; j += 3) {
+        const landVertex = new THREE.Vector3(landPositions[j], landPositions[j + 1], landPositions[j + 2]);
+        const dist = waterVertex.distanceTo(landVertex);
+        minDist = Math.min(minDist, dist);
+      }
+
+      distances[i / 3] = minDist;
+    }
+
+    oceanGeometry.setAttribute("distanceToShore", new THREE.BufferAttribute(distances, 1));
+
+    this.waterMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        time: { value: 0 },
+        oceanColor: { value: new THREE.Color(0x4a9fff) },
+        foamColor: { value: new THREE.Color(0xffffff) },
+        radius: { value: this.radius }, // Pass the planet radius
+      },
+      vertexShader: `
+        uniform float time;
+        uniform float radius;
+        varying vec3 vWorldPosition;
+        varying vec3 vNormal;
+        varying float vDistanceToShore;
+        attribute float distanceToShore;
+
+        void main() {
+          vNormal = normal;
+          vDistanceToShore = distanceToShore;
+          // Calculate the height of the original vertex
+          float height = length(position);
+          // Calculate wave effect based on height
+          float wave = sin(position.x * 10.0 + time) * 0.005 + sin(position.y * 10.0 + time) * 0.005;
+          // Attenuate wave effect based on height
+          float shoreWaveFactor = smoothstep(radius * 0.98, radius * 1.02, height);
+          wave *= shoreWaveFactor;
+          vec3 newPosition = position + normal * wave;
+          vec4 worldPosition = modelMatrix * vec4(newPosition, 1.0);
+          vWorldPosition = worldPosition.xyz;
+          gl_Position = projectionMatrix * viewMatrix * worldPosition;
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 oceanColor;
+        uniform vec3 foamColor;
+        uniform float radius;
+        uniform float time; // Declare the time uniform
+        varying vec3 vWorldPosition;
+        varying float vDistanceToShore;
+
+        void main() {
+          // Create cartoon foam effect
+          float foamEffect = sin(vDistanceToShore * 20.0 + time * 2.0) * 0.2; // Increased foamEffect intensity
+          foamEffect = clamp(foamEffect, 0.0, 1.0);
+
+          // Only show foam effect near the shore
+          float shoreFactor = smoothstep(0.0, 0.5, vDistanceToShore); // Adjust the range as needed
+          foamEffect *= shoreFactor;
+
+          vec3 color = mix(oceanColor, foamColor, foamEffect);
+          gl_FragColor = vec4(color, 0.7); // Set alpha to 0.7 for transparency
+        }
+      `,
+      transparent: true, // Enable transparency for the material
+      side: THREE.DoubleSide, // Render both sides of the ocean geometry
     });
+
+    const ocean = new THREE.Mesh(oceanGeometry, this.waterMaterial);
     ocean.scale.setScalar(0.985);
+    ocean.receiveShadow = true;
 
-    // Shore
-    const shore = this.createCelestialBody(new THREE.IcosahedronGeometry(this.radius * 0.995, 5), {
-      type: "phong",
-      color: 0x3d8b99,
-      shininess: 40,
-      specular: 0x225566,
-      flatShading: true,
-    });
+    // Shore remains unchanged
+    const shore = this.createCelestialBody(
+      new THREE.IcosahedronGeometry(this.radius * 0.995, 5),
+      new THREE.MeshPhongMaterial({
+        color: 0x3d8b99,
+        shininess: 40,
+        reflectivity: 100,
+        transparent: false,
+        opacity: 1,
+        specular: 0x225566,
+        flatShading: true,
+      })
+    );
 
-    // Terrain
-    const terrain = this.createCelestialBody(this.createTerrainGeometry(), {
-      type: "phong",
-      color: 0x7acc6d,
-      shininess: 30,
-      specular: 0x224422,
-      flatShading: true,
-    });
+    // Terrain remains unchanged
+    const terrain = this.createCelestialBody(
+      terrainGeometry,
+      new THREE.MeshPhongMaterial({
+        color: 0x7acc6d,
+        shininess: 30,
+        reflectivity: 100,
+        opacity: 1,
+        transparent: false,
+        specular: 0x224422,
+        flatShading: true,
+      })
+    );
 
     this.planet.add(ocean, shore, terrain);
     this.scene.add(this.planet);
@@ -251,17 +301,27 @@ class LowPolyPlanet {
 
   private createAtmosphere(): void {
     // Sun
-    this.sun = new THREE.Mesh(new THREE.IcosahedronGeometry(3, 1), this.createMaterial({ type: "basic", color: 0xffff44 }));
+    this.sun = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(3, 1),
+      new THREE.MeshPhongMaterial({
+        reflectivity: 100,
+        opacity: 1,
+        transparent: false,
+        flatShading: false,
+        color: 0xffff44,
+      })
+    );
     this.sun.position.set(-20, 10, -15);
 
     // Sun glow
     [3.3, 3.6, 3.9].forEach((size, i) => {
       const glow = new THREE.Mesh(
         new THREE.IcosahedronGeometry(size, 1),
-        this.createMaterial({
-          type: "basic",
+        new THREE.MeshBasicMaterial({
           color: 0xffff44 + i * 0x4444,
           transparent: true,
+          reflectivity: 0,
+
           opacity: 0.3 - i * 0.1,
         })
       );
@@ -269,10 +329,10 @@ class LowPolyPlanet {
     });
 
     // Clouds
-    const cloudMaterial = this.createMaterial({ type: "phong", color: 0xffffff, flatShading: true });
+    const cloudMaterial = new THREE.MeshPhongMaterial({ color: 0xffffff, flatShading: true });
     const cloudGeometries = [new THREE.DodecahedronGeometry(0.8), new THREE.IcosahedronGeometry(1), new THREE.DodecahedronGeometry(1.2)];
 
-    Array.from({ length: 12 }).forEach(() => {
+    Array.from({ length: 20 }).forEach(() => {
       const cluster = new THREE.Group();
       const cloudCount = 2 + Math.floor(Math.random());
 
@@ -282,7 +342,7 @@ class LowPolyPlanet {
         cluster.add(cloud);
       });
 
-      const spherical = new THREE.Spherical(this.radius * 1.3, Math.random() * Math.PI, Math.random() * Math.PI * 2);
+      const spherical = new THREE.Spherical(this.radius * 1.5, Math.random() * Math.PI, Math.random() * Math.PI * 2);
       cluster.position.setFromSpherical(spherical);
       this.clouds.add(cluster);
     });
@@ -315,7 +375,7 @@ class LowPolyPlanet {
 
     await Promise.all([
       this.createInstancedVegetation("assets/models/fbx/tree", 1000, 0.12, 6, new THREE.Vector3(0, 1, 0), [0.9, 1.1]),
-      this.createInstancedVegetation("assets/models/fbx/Grass", 4000, 0.16, 5, new THREE.Vector3(0, 1, 0), [0.8, 1.2]),
+      this.createInstancedVegetation("assets/models/fbx/Grass", 14000, 0.16, 5, new THREE.Vector3(0, 1, 0), [0.8, 1.2]),
     ]);
 
     this.animate();
@@ -324,6 +384,11 @@ class LowPolyPlanet {
   private animate(): void {
     requestAnimationFrame(() => this.animate());
     this.controls.update();
+
+    // Update water animation time
+    if (this.waterMaterial) {
+      this.waterMaterial.uniforms.time.value = this.clock.getElapsedTime();
+    }
 
     this.clouds.children.forEach((cluster, i) => {
       cluster.rotation.y += 0.001 * (i % 2 ? 1 : -1);
