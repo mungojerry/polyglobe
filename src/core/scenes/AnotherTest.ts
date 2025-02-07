@@ -252,6 +252,8 @@ uniform float time;
 uniform vec3 oceanColor;
 uniform vec3 foamColor;
 varying float vDistanceToShore;
+varying vec3 vViewPosition;
+varying vec3 vNormal;
 
 float circularNoise(vec2 p) {
     vec2 center = vec2(0.5);
@@ -259,7 +261,7 @@ float circularNoise(vec2 p) {
     float angle = atan(p.y - center.y, p.x - center.x);
     
     float noiseScale = 10.0;
-    float timeScale = time * -0.3; // Negative time scale for reverse animation
+    float timeScale = time * -0.3;
     
     float wave = sin(dist * noiseScale + timeScale) * 
                  cos(angle * 3.0 + timeScale * 1.5) * 
@@ -273,8 +275,8 @@ void main() {
     float shoreMask = smoothstep(0.0, shoreWidth, vDistanceToShore);
     
     vec2 waveCoord = vec2(
-        cos(vDistanceToShore * 20.0 - time * 0.2), // Subtract time for reverse direction
-        sin(vDistanceToShore * 20.0 - time * 0.3)  // Subtract time for reverse direction
+        cos(vDistanceToShore * 20.0 - time * 0.2),
+        sin(vDistanceToShore * 20.0 - time * 0.3)
     );
     
     float wavePattern = circularNoise(waveCoord * 0.5 + 0.5);
@@ -282,10 +284,41 @@ void main() {
     float foam = shoreMask * wavePattern;
     foam = smoothstep(0.4, 0.9, foam);
     
-    vec3 finalColor = mix(oceanColor, foamColor, foam);
-    float alpha = mix(0.4, 1.0, foam);
+    // Specular reflection calculation
+    vec3 viewDir = normalize(vViewPosition);
+    vec3 normal = normalize(vNormal);
+    vec3 reflectionDir = reflect(-viewDir, normal);
+    float specular = pow(max(dot(reflectionDir, viewDir), 0.0), 50.0);
+    
+    // Enhanced color with high reflectivity
+    vec3 baseColor = mix(oceanColor, foamColor, foam);
+    vec3 finalColor = baseColor + vec3(specular * 0.8);
+    
+    float alpha = mix(0.6, 1.0, foam + specular * 0.2);
     
     gl_FragColor = vec4(finalColor, alpha);
+}
+`,
+      vertexShader: `
+uniform float time;
+attribute float distanceToShore;
+varying float vDistanceToShore;
+varying vec3 vViewPosition;
+varying vec3 vNormal;
+
+void main() {
+    vDistanceToShore = distanceToShore;
+    
+    // Add gentle wave motion
+    vec3 newPosition = position + normal * (sin(position.x * 2.0 + time) * 0.03 + 
+                                            sin(position.z * 2.0 + time * 1.5) * 0.03) * 
+                                            (1.0 - distanceToShore);
+    
+    vNormal = normalMatrix * normal;
+    vec4 mvPosition = modelViewMatrix * vec4(newPosition, 1.0);
+    vViewPosition = -mvPosition.xyz;
+    
+    gl_Position = projectionMatrix * mvPosition;
 }
 `,
       transparent: true,
