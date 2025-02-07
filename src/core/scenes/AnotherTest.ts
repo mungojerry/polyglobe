@@ -14,6 +14,8 @@ class LowPolyPlanet {
   private planet: THREE.Group;
   private clouds: THREE.Group;
   private sun!: THREE.Mesh;
+  private moon!: THREE.Mesh;
+  private moonLight!: THREE.DirectionalLight;
   private controls: OrbitControls;
   private waterMaterial!: THREE.ShaderMaterial;
   private clock: THREE.Clock = new THREE.Clock();
@@ -232,20 +234,20 @@ class LowPolyPlanet {
         foamColor: { value: new THREE.Color(0xffffff) },
         radius: { value: this.radius },
       },
-      vertexShader: `
-        uniform float time;
-        varying float vDistanceToShore;
-        attribute float distanceToShore;
-    
-        void main() {
-          vDistanceToShore = distanceToShore;
-          // Add gentle wave motion
-          vec3 newPosition = position + normal * (sin(position.x * 2.0 + time) * 0.03 + 
-                                                sin(position.z * 2.0 + time * 1.5) * 0.03) * 
-                                                (1.0 - distanceToShore);
-          gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(newPosition, 1.0);
-        }
-      `,
+      // vertexShader: `
+      //   uniform float time;
+      //   varying float vDistanceToShore;
+      //   attribute float distanceToShore;
+
+      //   void main() {
+      //     vDistanceToShore = distanceToShore;
+      //     // Add gentle wave motion
+      //     vec3 newPosition = position + normal * (sin(position.x * 2.0 + time) * 0.03 +
+      //                                           sin(position.z * 2.0 + time * 1.5) * 0.03) *
+      //                                           (1.0 - distanceToShore);
+      //     gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(newPosition, 1.0);
+      //   }
+      // `,
       // Replace the existing fragmentShader with:
       fragmentShader: `
 uniform float time;
@@ -410,6 +412,32 @@ void main() {
     });
 
     this.scene.add(this.sun, this.clouds);
+
+    // Create the moon after the sun is set up
+    this.createMoon();
+  }
+
+  private createMoon(): void {
+    // Create a moon with a sphere geometry (adjust size as needed)
+    const moonGeometry = new THREE.SphereGeometry(this.radius * 0.3, 32, 32);
+    const moonMaterial = new THREE.MeshPhongMaterial({
+      color: 0xdddddd,
+      shininess: 10,
+    });
+    this.moon = new THREE.Mesh(moonGeometry, moonMaterial);
+
+    // Position the moon 180 degrees from the sun
+    this.moon.position.copy(this.sun.position).multiplyScalar(-1);
+    // Optionally adjust the distance from the planet
+    this.moon.position.setLength(this.radius * 2);
+
+    this.scene.add(this.moon);
+
+    // Create a directional light for the moon
+    this.moonLight = new THREE.DirectionalLight(0xeeeeff, 0.3);
+    this.moonLight.position.copy(this.moon.position);
+    this.moonLight.castShadow = true;
+    this.scene.add(this.moonLight);
   }
 
   private setupLighting(): void {
@@ -427,17 +455,22 @@ void main() {
     const rimLight = new THREE.DirectionalLight(0x6699ff, 0.2);
     rimLight.position.copy(sunLight.position).multiplyScalar(-1);
 
+    // Lighting for the moon has been set up in createMoon()
     this.scene.add(ambient, sunLight, rimLight);
   }
 
   private async init(): Promise<void> {
     this.createPlanet();
-    this.createAtmosphere();
+    this.createAtmosphere(); // now creates the sun and moon
     this.setupLighting();
 
     await Promise.all([
-      this.createInstancedVegetation("assets/models/fbx/tree", 1000, 0.12, 6, new THREE.Vector3(0, 1, 0), [0.9, 1.1]),
+      this.createInstancedVegetation("assets/models/fbx/tree", 500, 0.12, 16, new THREE.Vector3(0, 1, 0), [0.9, 1.1]),
       this.createInstancedVegetation("assets/models/fbx/Grass", 14000, 0.16, 5, new THREE.Vector3(0, 1, 0), [0.8, 1.2]),
+      this.createInstancedVegetation("assets/models/fbx/Rock", 4000, 0.16, 5, new THREE.Vector3(0, 1, 0), [0.8, 1.2]),
+      this.createInstancedVegetation("assets/models/fbx/BigRock", 100, 0.16, 3, new THREE.Vector3(0, 1, 0), [0.8, 1.2]),
+      this.createInstancedVegetation("assets/models/fbx/Reeds", 100, 0.16, 1, new THREE.Vector3(0, 1, 0), [0.6, 0.7]),
+      this.createInstancedVegetation("assets/models/fbx/House", 3, 0.16, 1, new THREE.Vector3(0, 1, 0), [1, 1]),
     ]);
 
     this.animate();
