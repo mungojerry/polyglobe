@@ -186,7 +186,7 @@ class LowPolyPlanet {
 
   private createPlanet(): void {
     // Ocean with animated waves and foam near shore
-    const oceanGeometry = new THREE.IcosahedronGeometry(this.radius * 1.1, this.detail);
+    const oceanGeometry = new THREE.IcosahedronGeometry(this.radius, this.detail);
     const terrainGeometry = this.createTerrainGeometry();
 
     // Precompute distances
@@ -253,52 +253,36 @@ uniform vec3 oceanColor;
 uniform vec3 foamColor;
 varying float vDistanceToShore;
 
-float hash(vec2 p) {
-    return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
-}
-
-float noise(vec2 p) {
-    vec2 i = floor(p);
-    vec2 f = fract(p);
+float circularNoise(vec2 p) {
+    vec2 center = vec2(0.5);
+    float dist = distance(p, center);
+    float angle = atan(p.y - center.y, p.x - center.x);
     
-    float a = hash(i);
-    float b = hash(i + vec2(1.0, 0.0));
-    float c = hash(i + vec2(0.0, 1.0));
-    float d = hash(i + vec2(1.0, 1.0));
+    float noiseScale = 10.0;
+    float timeScale = time * -0.3; // Negative time scale for reverse animation
     
-    vec2 u = f * f * (3.0 - 2.0 * f);
-    return mix(a, b, u.x) +
-            (c - a) * u.y * (1.0 - u.x) +
-            (d - b) * u.x * u.y;
+    float wave = sin(dist * noiseScale + timeScale) * 
+                 cos(angle * 3.0 + timeScale * 1.5) * 
+                 (1.0 - abs(dist - 0.5));
+    
+    return wave * 0.5 + 0.5;
 }
 
 void main() {
-    // Wider shore transition and further from shore
-    float shoreWidth = 0.5;
-    float shoreMask = 1.0 - smoothstep(0.0, shoreWidth, vDistanceToShore);
+    float shoreWidth = 0.4;
+    float shoreMask = smoothstep(0.0, shoreWidth, vDistanceToShore);
     
-    // More complex wave wrapping
-    float foam = 0.0;
-    if (shoreMask > 0.01) {
-        vec2 foamCoord = vec2(
-            vDistanceToShore * 30.0 + time * 0.5, 
-            time * 0.3
-        );
-        
-        // Wrapped noise for more organic wave patterns
-        float wavePattern = sin(vDistanceToShore * 100.0 - time * 3.0) * 0.5 + 0.5;
-        float wrappedNoise = sin(noise(foamCoord * 3.0) * 10.0);
-        
-        // Combine wave patterns with wrapped noise
-        foam = shoreMask * (wavePattern * 0.6 + wrappedNoise * 0.4);
-        foam = smoothstep(0.3, 0.9, foam);
-        
-        // Additional random variation
-        foam *= (1.0 + noise(foamCoord * 15.0) * 0.2);
-    }
+    vec2 waveCoord = vec2(
+        cos(vDistanceToShore * 20.0 - time * 0.2), // Subtract time for reverse direction
+        sin(vDistanceToShore * 20.0 - time * 0.3)  // Subtract time for reverse direction
+    );
     
-    // Enhanced color and opacity
-    vec3 finalColor = mix(oceanColor, foamColor, foam * 1.3);
+    float wavePattern = circularNoise(waveCoord * 0.5 + 0.5);
+    
+    float foam = shoreMask * wavePattern;
+    foam = smoothstep(0.4, 0.9, foam);
+    
+    vec3 finalColor = mix(oceanColor, foamColor, foam);
     float alpha = mix(0.4, 1.0, foam);
     
     gl_FragColor = vec4(finalColor, alpha);
@@ -309,7 +293,7 @@ void main() {
     });
 
     const ocean = new THREE.Mesh(oceanGeometry, this.waterMaterial);
-    ocean.scale.setScalar(0.985);
+    ocean.scale.setScalar(1.03);
     ocean.receiveShadow = true;
 
     // Shore remains unchanged
