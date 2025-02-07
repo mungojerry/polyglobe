@@ -1,6 +1,8 @@
 import * as THREE from "three";
 import { OrbitControls } from "three-stdlib";
 import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise";
+import { Moon } from "../entities/Moon";
+import { Sun } from "../entities/Sun";
 import { ModelLoader } from "../managers/ModelLoader";
 
 class LowPolyPlanet {
@@ -13,16 +15,18 @@ class LowPolyPlanet {
   private renderer: THREE.WebGLRenderer;
   private planet: THREE.Group;
   private clouds: THREE.Group;
-  private sun!: THREE.Mesh;
-  private moon!: THREE.Mesh;
-  private moonLight!: THREE.DirectionalLight;
+  private sun!: Sun;
+  private moon!: Moon;
   private controls: OrbitControls;
   private waterMaterial!: THREE.ShaderMaterial;
   private clock: THREE.Clock = new THREE.Clock();
+  private orbitalRadius: number;
+  private orbitalSpeed: number = 0.1;
 
   constructor(radius = 10, detail = 10) {
     this.radius = radius;
     this.detail = detail;
+    this.orbitalRadius = radius * 2;
     this.noise = new SimplexNoise();
     this.modelLoader = new ModelLoader(4000);
 
@@ -234,21 +238,6 @@ class LowPolyPlanet {
         foamColor: { value: new THREE.Color(0xffffff) },
         radius: { value: this.radius },
       },
-      // vertexShader: `
-      //   uniform float time;
-      //   varying float vDistanceToShore;
-      //   attribute float distanceToShore;
-
-      //   void main() {
-      //     vDistanceToShore = distanceToShore;
-      //     // Add gentle wave motion
-      //     vec3 newPosition = position + normal * (sin(position.x * 2.0 + time) * 0.03 +
-      //                                           sin(position.z * 2.0 + time * 1.5) * 0.03) *
-      //                                           (1.0 - distanceToShore);
-      //     gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(newPosition, 1.0);
-      //   }
-      // `,
-      // Replace the existing fragmentShader with:
       fragmentShader: `
 uniform float time;
 uniform vec3 oceanColor;
@@ -364,35 +353,11 @@ void main() {
   }
 
   private createAtmosphere(): void {
-    // Sun
-    this.sun = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(3, 1),
-      new THREE.MeshPhongMaterial({
-        reflectivity: 100,
-        opacity: 1,
-        transparent: false,
-        flatShading: false,
-        color: 0xffff44,
-      })
-    );
-    this.sun.position.set(-20, 10, -15);
+    // Create Sun and Moon instances
+    this.sun = new Sun(this.scene, this.orbitalRadius);
+    this.moon = new Moon(this.scene, this.orbitalRadius);
 
-    // Sun glow
-    [3.3, 3.6, 3.9].forEach((size, i) => {
-      const glow = new THREE.Mesh(
-        new THREE.IcosahedronGeometry(size, 1),
-        new THREE.MeshBasicMaterial({
-          color: 0xffff44 + i * 0x4444,
-          transparent: true,
-          reflectivity: 0,
-
-          opacity: 0.3 - i * 0.1,
-        })
-      );
-      this.sun.add(glow);
-    });
-
-    // Clouds
+    // Create clouds
     const cloudMaterial = new THREE.MeshPhongMaterial({ color: 0xffffff, flatShading: true });
     const cloudGeometries = [new THREE.DodecahedronGeometry(0.8), new THREE.IcosahedronGeometry(1), new THREE.DodecahedronGeometry(1.2)];
 
@@ -411,57 +376,17 @@ void main() {
       this.clouds.add(cluster);
     });
 
-    this.scene.add(this.sun, this.clouds);
-
-    // Create the moon after the sun is set up
-    this.createMoon();
-  }
-
-  private createMoon(): void {
-    // Create a moon with a sphere geometry (adjust size as needed)
-    const moonGeometry = new THREE.SphereGeometry(this.radius * 0.3, 32, 32);
-    const moonMaterial = new THREE.MeshPhongMaterial({
-      color: 0xdddddd,
-      shininess: 10,
-    });
-    this.moon = new THREE.Mesh(moonGeometry, moonMaterial);
-
-    // Position the moon 180 degrees from the sun
-    this.moon.position.copy(this.sun.position).multiplyScalar(-1);
-    // Optionally adjust the distance from the planet
-    this.moon.position.setLength(this.radius * 2);
-
-    this.scene.add(this.moon);
-
-    // Create a directional light for the moon
-    this.moonLight = new THREE.DirectionalLight(0xeeeeff, 0.3);
-    this.moonLight.position.copy(this.moon.position);
-    this.moonLight.castShadow = true;
-    this.scene.add(this.moonLight);
+    this.scene.add(this.clouds);
   }
 
   private setupLighting(): void {
     const ambient = new THREE.AmbientLight(0x666666, 0.4);
-    const sunLight = new THREE.DirectionalLight(0xffffff, 1.5);
-    sunLight.position.copy(this.sun.position);
-    sunLight.castShadow = true;
-
-    sunLight.shadow.mapSize.set(4096, 4096);
-    sunLight.shadow.camera = new THREE.OrthographicCamera(-35, 35, 35, -35, 0.1, 100);
-    sunLight.shadow.bias = -0.0001;
-    sunLight.shadow.normalBias = 0.001;
-    sunLight.shadow.radius = 2;
-
-    const rimLight = new THREE.DirectionalLight(0x6699ff, 0.2);
-    rimLight.position.copy(sunLight.position).multiplyScalar(-1);
-
-    // Lighting for the moon has been set up in createMoon()
-    this.scene.add(ambient, sunLight, rimLight);
+    this.scene.add(ambient);
   }
 
   private async init(): Promise<void> {
     this.createPlanet();
-    this.createAtmosphere(); // now creates the sun and moon
+    this.createAtmosphere();
     this.setupLighting();
 
     await Promise.all([
@@ -484,6 +409,12 @@ void main() {
     if (this.waterMaterial) {
       this.waterMaterial.uniforms.time.value = this.clock.getElapsedTime();
     }
+
+    const time = this.clock.getElapsedTime() * this.orbitalSpeed;
+
+    // Update sun and moon positions
+    this.sun.update(time);
+    this.moon.update(time);
 
     this.clouds.children.forEach((cluster, i) => {
       cluster.rotation.y += 0.001 * (i % 2 ? 1 : -1);

@@ -3,7 +3,7 @@ import * as THREE from "three";
 export class Moon {
   private moonMesh: THREE.Sprite;
   private directionalLight: THREE.DirectionalLight;
-  private moonSize: number = 300; // Slightly smaller than the sun
+  private moonSize: number = 3; // Slightly smaller than the sun
 
   constructor(scene: THREE.Scene, private radius: number = 1700) {
     // Moon light (dimmer and bluer than the sun)
@@ -37,6 +37,7 @@ export class Moon {
       transparent: true,
     });
     this.moonMesh = new THREE.Sprite(moonMaterial);
+    this.moonMesh.scale.set(this.moonSize, this.moonSize, 1);
     this.moonMesh.position.copy(this.directionalLight.position);
     scene.add(this.moonMesh);
   }
