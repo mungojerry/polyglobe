@@ -28,7 +28,7 @@ export class Stars {
       colors[i * 3 + 2] = brightness;
 
       // Increased range of random sizes for more variety
-      sizes[i] = 1 + Math.random() * 4; // Base size of 1 with random addition up to 4
+      sizes[i] = 0.001 + Math.random() * 0.004; // Base size of 1 with random addition up to 4
     }
 
     geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
@@ -37,11 +37,11 @@ export class Stars {
 
     // Create material with emissive properties
     this.material = new THREE.PointsMaterial({
-      size: 8, // Increased base size from 1 to 2
+      size: 2, // Increased base size from 1 to 2
       transparent: false,
       vertexColors: true,
       blending: THREE.NormalBlending,
-      sizeAttenuation: true,
+      sizeAttenuation: false,
       depthWrite: false,
       depthTest: true,
     });

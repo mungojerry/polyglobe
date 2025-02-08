@@ -12,18 +12,13 @@ export class Moon {
     this.directionalLight.castShadow = true;
 
     // Configure shadow properties
-    this.directionalLight.shadow.mapSize.width = 2048;
-    this.directionalLight.shadow.mapSize.height = 2048;
-
-    const shadowCameraSize = radius;
-    this.directionalLight.shadow.camera.left = -shadowCameraSize;
-    this.directionalLight.shadow.camera.right = shadowCameraSize;
-    this.directionalLight.shadow.camera.top = shadowCameraSize;
-    this.directionalLight.shadow.camera.bottom = -shadowCameraSize;
-    this.directionalLight.shadow.camera.near = 0.1;
-    this.directionalLight.shadow.camera.far = 2500;
+    this.directionalLight.castShadow = true;
+    this.directionalLight.shadow.mapSize.set(4096, 4096);
+    this.directionalLight.shadow.camera = new THREE.OrthographicCamera(-35, 35, 35, -35, 0.1, 100);
     this.directionalLight.shadow.bias = -0.0001;
-    this.directionalLight.shadow.normalBias = 0.05;
+    this.directionalLight.shadow.normalBias = 0.001;
+    this.directionalLight.shadow.radius = 2;
+
     scene.add(this.directionalLight);
     this.directionalLight.name = "moon";
     // Load moon texture

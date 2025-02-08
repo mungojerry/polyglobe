@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three-stdlib";
 import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise";
 import { Moon } from "../entities/Moon";
+import { Stars } from "../entities/Stars";
 import { Sun } from "../entities/Sun";
 import { ModelLoader } from "../managers/ModelLoader";
 
@@ -22,6 +23,7 @@ class LowPolyPlanet {
   private clock: THREE.Clock = new THREE.Clock();
   private orbitalRadius: number;
   private orbitalSpeed: number = 0.1;
+  private stars!: Stars;
 
   constructor(radius = 10, detail = 10) {
     this.radius = radius;
@@ -43,7 +45,7 @@ class LowPolyPlanet {
 
   private createScene(): THREE.Scene {
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x1a4a4a);
+    scene.background = new THREE.Color(0x1a1a1a);
     return scene;
   }
 
@@ -70,9 +72,9 @@ class LowPolyPlanet {
   }
 
   private generateNoise(normalized: THREE.Vector3): number {
-    const baseFreq = 0.8;
-    const frequencies = [1, 1.5, 2];
-    const amplitudes = [0.4, 0.15, 0.05];
+    const baseFreq = 0.5;
+    const frequencies = [1, 1.5, 2, 3, 4]; // Added higher frequencies
+    const amplitudes = [0.4, 0.2, 0.15, 0.1, 0.05]; // Adjusted amplitudes
 
     let totalNoise = 0;
     let totalAmplitude = 0;
@@ -83,7 +85,9 @@ class LowPolyPlanet {
       totalAmplitude += amplitudes[i];
     });
 
-    return (totalNoise / totalAmplitude + 1) * 0.5;
+    // Add non-linear scaling for more dramatic peaks
+    const normalizedNoise = (totalNoise / totalAmplitude + 1) * 0.5;
+    return Math.pow(normalizedNoise, 0.8); // Makes peaks more pronounced
   }
 
   private createTerrainGeometry(): THREE.IcosahedronGeometry {
@@ -98,8 +102,8 @@ class LowPolyPlanet {
       if (noiseValue > 0.45) {
         const transitionZone = 0.02;
         const cliffFactor = Math.min(1, (noiseValue - 0.45) / transitionZone);
-        const baseCliffHeight = 0.035 * cliffFactor;
-        const terrainHeight = (noiseValue - 0.45) * 0.18;
+        const baseCliffHeight = 0.05 * cliffFactor; // Increased from 0.035
+        const terrainHeight = Math.pow((noiseValue - 0.45) * 2, 1.5) * 0.2; // More dramatic height scaling
         const totalHeight = baseCliffHeight + terrainHeight;
         vertex.multiplyScalar(this.radius * (1 + totalHeight));
       } else {
@@ -142,7 +146,7 @@ class LowPolyPlanet {
       const surfaceNormal = position.clone().normalize();
       const noiseValue = this.generateNoise(surfaceNormal);
 
-      if (noiseValue > 0.45) {
+      if (noiseValue > 0.5) {
         const totalHeight = 0.035 * Math.min(1, (noiseValue - 0.45) / 0.02) + (noiseValue - 0.45) * 0.18;
         position.multiplyScalar(1 + totalHeight);
 
@@ -317,22 +321,8 @@ void main() {
     });
 
     const ocean = new THREE.Mesh(oceanGeometry, this.waterMaterial);
-    ocean.scale.setScalar(1.03);
+    ocean.scale.setScalar(1.06);
     ocean.receiveShadow = true;
-
-    // Shore remains unchanged
-    const shore = this.createCelestialBody(
-      new THREE.IcosahedronGeometry(this.radius * 0.995, 5),
-      new THREE.MeshPhongMaterial({
-        color: 0x3d8b99,
-        shininess: 40,
-        reflectivity: 100,
-        transparent: false,
-        opacity: 1,
-        specular: 0x225566,
-        flatShading: true,
-      })
-    );
 
     // Terrain remains unchanged
     const terrain = this.createCelestialBody(
@@ -348,7 +338,7 @@ void main() {
       })
     );
 
-    this.planet.add(ocean, shore, terrain);
+    this.planet.add(ocean, terrain);
     this.scene.add(this.planet);
   }
 
@@ -377,6 +367,48 @@ void main() {
     });
 
     this.scene.add(this.clouds);
+
+    this.stars = new Stars(this.radius * 5);
+    this.scene.add(this.stars.getObject());
+  }
+
+  private createAtmosphereGlow(): void {
+    // Create a canvas texture with a radial gradient
+    const size = 256;
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext("2d")!;
+
+    // Create a radial gradient from center (opaque) to edge (transparent)
+    const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    gradient.addColorStop(0, "rgba(255, 165, 0, 1)"); // glow color at center (orange)
+    gradient.addColorStop(1, "rgba(255, 165, 0, 0)"); // fades to transparent
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, size, size);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    const spriteMaterial = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthTest: true,
+    });
+
+    const glowSprite = new THREE.Sprite(spriteMaterial);
+
+    // Scale the sprite relative to the planet's radius.
+    // Adjust the multiplier as needed for a larger or smaller glow.
+    const glowScale = this.radius * 2.7;
+    glowSprite.scale.set(glowScale, glowScale, 1);
+
+    // Position the sprite behind the planet.
+    // (A small negative offset on the Z-axis ensures it renders behind.)
+    glowSprite.position.set(0, 0, -0.1);
+    glowSprite.renderOrder = -10;
+
+    // Add the glow sprite to the planet group so it follows the planet's position.
+    this.planet.add(glowSprite);
   }
 
   private setupLighting(): void {
@@ -386,6 +418,8 @@ void main() {
 
   private async init(): Promise<void> {
     this.createPlanet();
+    this.createAtmosphereGlow();
+
     this.createAtmosphere();
     this.setupLighting();
 

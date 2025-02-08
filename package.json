@@ -19,9 +19,11 @@
     "@dimforge/rapier3d": "^0.14.0",
     "fast-simplex-noise": "^4.0.0",
     "gsap": "^3.12.5",
+    "kdbush": "^4.0.2",
     "simplex-noise": "^4.0.3",
     "stats.js": "^0.17.0",
     "three": "^0.171.0",
+    "three-csm": "^4.2.1",
     "three-mesh-bvh": "^0.8.3",
     "three-stdlib": "^2.35.7"
   }
