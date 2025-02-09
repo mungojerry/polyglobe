@@ -1,4 +1,4 @@
-import LowPolyPlanet from "./core/scenes/AnotherTest";
+import { ProceduralTerrain } from "./core/scenes/WaterEroisoon";
 import "./style.css";
 
 console.log("starting...");
@@ -6,11 +6,12 @@ console.log("starting...");
 // new FBXViewerScene();
 // new HelicopterScene();
 // new GameScene();
-new LowPolyPlanet();
+// new LowPolyPlanet();
 // new CartoonPlanetGenerator();
 // new ZarchFlyScene();
 // new HelicopterGlobeSimulation();
 // new ZarchGameSpherical();
 // new LowPolyPlanet();
 // new MarchingCubesDemo();
+new ProceduralTerrain();
 console.log("should be running");
