@@ -21,15 +21,15 @@ export class ProceduralTerrain {
   waterVertices!: Float32Array;
   colors!: Float32Array;
   size: number = 100;
-  divisions: number = 100;
+  divisions: number = 200;
 
   // Adjusted erosion parameters for stability
   readonly WATER_RETENTION = 0.1; // Increased
   readonly EVAPORATION_RATE = 0.01; // Reduced
-  readonly RAINFALL_RATE = 0.01; // Increased
+  readonly RAINFALL_RATE = 0.02; // Increased
   readonly MAX_WATER_DEPTH = 1.0; // Increased
 
-  readonly EROSION_RATE = 0.001; // Reduced from 0.003
+  readonly EROSION_RATE = 0.03; // Reduced from 0.003
   readonly DEPOSITION_RATE = 0.005; // Reduced from 0.01
   readonly SEDIMENT_CAPACITY = 0.01; // Reduced from 0.04
   readonly MIN_SLOPE_FOR_FLOW = 0.01; // Reduced from 0.03
@@ -106,37 +106,54 @@ export class ProceduralTerrain {
     const vertexCount = this.vertices.length / 3;
     this.colors = new Float32Array(vertexCount * 3);
 
-    // Improved terrain generation with smoother noise
+    // Warp parameters
+    const warpFrequency = 0.8;
+    const warpAmount = 2.0;
+
+    // Improved terrain generation with added warping and smoother noise
     for (let i = 0; i < this.vertices.length; i += 3) {
-      const x = this.vertices[i];
-      const z = this.vertices[i + 2];
+      let x = this.vertices[i];
+      let y = this.vertices[i + 1];
+      let z = this.vertices[i + 2];
+
+      // Add warping offsets based on noise, distorting x and z coordinates
+      const warpX = this.noise.noise3d(x * warpFrequency, 0, z * warpFrequency) * warpAmount;
+      const warpZ = this.noise.noise3d(x * warpFrequency, 0, z * warpFrequency + 1000) * warpAmount;
+      const warpedX = x + warpX;
+      const warpedZ = z + warpZ;
+
+      // Use warped coordinates for height calculations
       let height = 0;
-      let amplitude = 4;
-      let frequency = 0.02;
+      let amplitude = 1;
+      let frequency = 0.2;
 
       // Add multiple noise layers for natural variation
       for (let o = 0; o < 5; o++) {
-        const noiseValue = this.noise.noise(x * frequency + o * 100, z * frequency + o * 100);
+        const noiseValue = this.noise.noise3d(warpedX * frequency + o * 1000, y * frequency + o * 1000, warpedZ * frequency + o * 1000);
         height += noiseValue * amplitude;
         amplitude *= 0.5;
         frequency *= 2.0;
       }
 
       // Add large-scale mountain shapes
-      const mountainNoise = this.noise.noise(x * 0.005, z * 0.005) * 10;
+      const mountainNoise = this.noise.noise3d(warpedX * 0.05, y * 0.05, warpedZ * 0.05) * 4;
       height += Math.max(0, mountainNoise) * 2;
 
       // Add medium-scale detail
-      const detailNoise = this.noise.noise(x * 0.1, z * 0.1) * 1.5;
+      const detailNoise = this.noise.noise3d(warpedX * 0.1, y * 0.1, warpedZ * 0.1) * 1.5;
       height += detailNoise;
+
+      // Add additional small-scale detail
+      const additionalDetailNoise = this.noise.noise3d(warpedX * 0.5, y * 0.5, warpedZ * 0.5) * 0.5;
+      height += additionalDetailNoise;
 
       this.vertices[i + 1] = height;
       this.updateTerrainColor(i, height);
     }
 
-    // Smooth the terrain
-    this.smoothTerrain(2);
-    this.removeGeometrySeams();
+    // Optionally smooth terrain and remove seams here
+    // this.smoothTerrain(3);
+    // this.removeGeometrySeams();
 
     this.geometry.setAttribute("color", new THREE.BufferAttribute(this.colors, 3));
     this.geometry.computeVertexNormals();
@@ -233,16 +250,20 @@ export class ProceduralTerrain {
     waterGeometry.rotateX(-Math.PI / 2);
     this.waterVertices = waterGeometry.attributes.position.array as Float32Array;
 
-    this.waterMaterial = new THREE.MeshStandardMaterial({
+    this.waterMaterial = new THREE.MeshPhysicalMaterial({
       color: 0x3366ff,
       transparent: true,
-      opacity: 0.8, // Increased opacity
-      roughness: 0.1, // More reflective
-      metalness: 0.9, // More reflective
+      opacity: 0.6,
+      roughness: 0.2,
+      metalness: 0.8,
+      envMapIntensity: 1.5,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.1,
     });
 
     this.water = new THREE.Mesh(waterGeometry, this.waterMaterial);
     this.water.position.y = 0.01; // Reduced to prevent z-fighting
+    this.water.receiveShadow = true;
     this.scene.add(this.water);
   }
 
@@ -250,11 +271,20 @@ export class ProceduralTerrain {
     const tempWaterMap = new Float32Array(this.waterMap);
     const tempSedimentMap = new Float32Array(this.sedimentMap);
 
-    for (let i = 0; i < this.vertices.length; i += 3) {
-      const index = i / 3;
-      // Always process the cell so that evaporation and rainfall are applied.
+    // Apply hydraulic erosion
+    // process cells in random order
+    const indices = Array.from({ length: this.vertices.length / 3 }, (_, i) => i);
+    indices.sort(() => Math.random() - 0.5);
+
+    for (let i = 0; i < indices.length; i++) {
+      const index = indices[i];
       this.processCell(index, tempWaterMap, tempSedimentMap);
     }
+
+    // Apply thermal erosion periodically (every 10 frames for example)
+    // if (Math.random() < 0.1) {
+    this.applyThermalErosion();
+    // }
 
     // Update maps
     this.waterMap = tempWaterMap;
@@ -269,17 +299,20 @@ export class ProceduralTerrain {
     const currentHeight = this.vertices[index * 3 + 1];
     const neighbors = this.getNeighbors(index);
 
-    // Add more consistent rainfall
+    // Add rainfall
     if (Math.random() < this.RAINFALL_RATE) {
       tempWaterMap[index] += this.RAINFALL_RATE * 2;
     }
 
     let totalDownhill = 0;
     const flowDirections: number[] = [];
+    const heightDifferences: number[] = [];
 
+    // Calculate flow directions and height differences
     neighbors.forEach((neighbor, i) => {
       if (neighbor === null) {
         flowDirections.push(0);
+        heightDifferences.push(0);
         return;
       }
 
@@ -288,32 +321,106 @@ export class ProceduralTerrain {
 
       if (currentTotal > neighborHeight) {
         const difference = currentTotal - neighborHeight;
-        // Add momentum-based flow
         const momentum = Math.abs(this.waterVelocities[index]) * 0.5;
         flowDirections.push(difference + momentum);
+        heightDifferences.push(difference);
         totalDownhill += difference + momentum;
       } else {
         flowDirections.push(0);
+        heightDifferences.push(0);
       }
     });
 
     if (totalDownhill > 0) {
-      // Reduce flow rate for more stability
-      const waterToMove = this.waterMap[index] * 0.3; // Reduced from 0.5
+      const waterToMove = this.waterMap[index] * 0.3;
+      let totalEroded = 0;
 
+      // Calculate local slope for erosion
+      const maxHeightDiff = Math.max(...heightDifferences);
+      const slope = maxHeightDiff / (this.size / this.divisions);
+
+      // Calculate water velocity based on slope
+      const velocity = Math.sqrt(2 * this.GRAVITY * maxHeightDiff);
+      this.waterVelocities[index] = velocity;
+
+      // Calculate sediment capacity based on slope and velocity
+      const sedimentCapacity = Math.max(slope * velocity * this.SEDIMENT_CAPACITY, 0);
+
+      // Erode or deposit based on current sediment load
+      if (slope > this.MIN_SLOPE_FOR_FLOW) {
+        const currentSediment = this.sedimentMap[index];
+
+        if (currentSediment < sedimentCapacity) {
+          // Erode
+          const erosionAmount = Math.min(this.EROSION_RATE * (sedimentCapacity - currentSediment), this.MAX_EROSION_DEPTH);
+
+          this.vertices[index * 3 + 1] -= erosionAmount;
+          tempSedimentMap[index] += erosionAmount;
+          totalEroded += erosionAmount;
+        } else {
+          // Deposit
+          const depositionAmount = this.DEPOSITION_RATE * (currentSediment - sedimentCapacity);
+          this.vertices[index * 3 + 1] += depositionAmount;
+          tempSedimentMap[index] -= depositionAmount;
+        }
+      }
+
+      // Distribute water and sediment to neighbors
       neighbors.forEach((neighbor, i) => {
         if (neighbor === null || flowDirections[i] === 0) return;
 
         const flowAmount = (flowDirections[i] / totalDownhill) * waterToMove;
-        // Gradually transfer water
         const actualFlow = Math.min(flowAmount, this.waterMap[index] * 0.5);
+
+        // Move water
         tempWaterMap[index] -= actualFlow;
         tempWaterMap[neighbor] += actualFlow;
+
+        // Move sediment with water
+        if (totalEroded > 0) {
+          const sedimentAmount = (flowAmount / totalDownhill) * totalEroded;
+          tempSedimentMap[index] -= sedimentAmount;
+          tempSedimentMap[neighbor] += sedimentAmount;
+        }
       });
     }
 
-    // Ensure minimum water level is maintained
+    // Apply evaporation and ensure minimum water level
     tempWaterMap[index] = Math.max(0.01, tempWaterMap[index] * (1 - this.EVAPORATION_RATE));
+
+    // Limit maximum sediment capacity
+    tempSedimentMap[index] = Math.min(tempSedimentMap[index], this.MAX_SEDIMENT);
+  }
+
+  // Add this helper method to class
+  private applyThermalErosion() {
+    const talus = 0.5; // Maximum stable slope angle (in rise/run)
+    const erosionRate = 0.001;
+
+    for (let z = 0; z < this.divisions; z++) {
+      for (let x = 0; x < this.divisions; x++) {
+        const index = z * this.divisions + x;
+        const currentHeight = this.vertices[index * 3 + 1];
+        const neighbors = this.getNeighbors(index);
+
+        neighbors.forEach((neighbor) => {
+          if (neighbor === null) return;
+
+          const neighborHeight = this.vertices[neighbor * 3 + 1];
+          const heightDiff = currentHeight - neighborHeight;
+          const distance = this.size / this.divisions;
+          const slope = Math.abs(heightDiff) / distance;
+
+          if (slope > talus) {
+            const adjustment = (slope - talus) * distance * erosionRate;
+            if (heightDiff > 0) {
+              this.vertices[index * 3 + 1] -= adjustment;
+              this.vertices[neighbor * 3 + 1] += adjustment;
+            }
+          }
+        });
+      }
+    }
   }
 
   private getNeighbors(index: number): (number | null)[] {
