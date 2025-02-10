@@ -4,19 +4,22 @@ import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise";
 import { pseudoRandom } from "../utils/PseudoRandom";
 const TERRAIN_CONFIG = {
   // Adjusted erosion parameters for stability
-  EVAPORATION_RATE: 0.004, // Reduced
+  EVAPORATION_RATE: 0.00004, // Reduced
   RAINFALL_RATE: 0.02, // Increased
   MAX_WATER_DEPTH: 1.0, // Increased
 
-  WATER_RETENTION: 0.1, // Reduced from 0.2 for faster flow
+  WATER_RETENTION: 0.05, // Reduced for better pooling
   EROSION_RATE: 0.05, // Increased for more visible erosion
   DEPOSITION_RATE: 0.05, // Matched to erosion rate
   SEDIMENT_CAPACITY: 0.05, // Increased for more sediment transport
-  MIN_SLOPE_FOR_FLOW: 0.001, // Reduced for better pooling
-  GRAVITY: 9.81, // Real gravity for more realistic flow
+  MIN_SLOPE_FOR_FLOW: 0.0002, // Further reduced
+  GRAVITY: 19.81, // Real gravity for more realistic flow
 
   MAX_SEDIMENT: 0.3, // Reduced from 0.8
   MAX_EROSION_DEPTH: 1.0, // Reduced from 3.0
+  HYDROSTATIC_PRESSURE: 0.05, // Reduced to prevent over-aggressive flow
+  FLOW_RESISTANCE: 0.3, // Increased to slow down water movement
+  POOLING_FACTOR: 2.0, // Increased to encourage more pooling
 };
 export class ProceduralTerrain {
   scene!: THREE.Scene;
@@ -32,7 +35,7 @@ export class ProceduralTerrain {
   waterMap!: Float32Array;
   sedimentMap!: Float32Array;
   velocityMap!: THREE.Vector2[];
-  waterMaterial!: THREE.MeshStandardMaterial;
+  waterMaterial!: THREE.MeshPhongMaterial;
   water!: THREE.Mesh;
   waterVertices!: Float32Array;
   colors!: Float32Array;
@@ -51,9 +54,9 @@ export class ProceduralTerrain {
     MIN_VISIBLE: 0.04,
     SMOOTHING_RADIUS: 2,
     SURFACE_TENSION: 0.3,
-    DAMPING: 0.85,
-    TEMPORAL_SMOOTHING: 0.15,
-    MAX_VELOCITY: 0.1,
+    DAMPING: 0.75, // lowered from 0.85
+    TEMPORAL_SMOOTHING: 0.1, // lowered from 0.15
+    MAX_VELOCITY: 0.15, // increased to allow faster flow
     EDGE_BUFFER: 2,
   };
 
@@ -217,15 +220,11 @@ export class ProceduralTerrain {
     waterGeometry.rotateX(-Math.PI / 2);
     this.waterVertices = waterGeometry.attributes.position.array as Float32Array;
 
-    this.waterMaterial = new THREE.MeshPhysicalMaterial({
+    this.waterMaterial = new THREE.MeshPhongMaterial({
       color: 0x3366ff,
       transparent: true,
-      opacity: 0.4,
-      roughness: 0.2,
-      metalness: 0.8,
-      envMapIntensity: 0.1,
-      clearcoat: 0.1,
-      clearcoatRoughness: 0.1,
+      shininess: 100,
+      opacity: 0.8,
     });
 
     this.water = new THREE.Mesh(waterGeometry, this.waterMaterial);
@@ -280,14 +279,15 @@ export class ProceduralTerrain {
     const z = Math.floor(index / this.divisions);
     const currentHeight = this.vertices[index * 3 + 1];
     const currentWaterHeight = currentHeight + this.waterMap[index];
+    const cellSize = this.size / this.divisions;
 
     // Add rainfall
     if (Math.random() < TERRAIN_CONFIG.RAINFALL_RATE) {
       tempWaterMap[index] += TERRAIN_CONFIG.RAINFALL_RATE * 2;
     }
 
-    // Get neighbors with better boundary checking
-    const neighbors = [];
+    // Get neighbors with heights
+    const neighborData = [];
     const directions = [
       [-1, 0],
       [1, 0],
@@ -299,65 +299,67 @@ export class ProceduralTerrain {
       const newX = x + dx;
       const newZ = z + dz;
       if (newX >= 0 && newX < this.divisions && newZ >= 0 && newZ < this.divisions) {
-        neighbors.push(newZ * this.divisions + newX);
+        const nIdx = newZ * this.divisions + newX;
+        const nHeight = this.vertices[nIdx * 3 + 1];
+        const nWater = this.waterMap[nIdx];
+        neighborData.push({
+          index: nIdx,
+          totalHeight: nHeight + nWater,
+          waterHeight: nWater,
+          baseHeight: nHeight,
+        });
       }
     }
 
-    let totalOutflow = 0;
-    const outflows = new Array(neighbors.length).fill(0);
+    // Sort neighbors by height difference
+    neighborData.sort((a, b) => a.totalHeight - b.totalHeight);
 
-    // Calculate outflows to each neighbor
-    neighbors.forEach((neighborIdx, i) => {
-      const neighborHeight = this.vertices[neighborIdx * 3 + 1];
-      const neighborWater = this.waterMap[neighborIdx];
-      const neighborTotalHeight = neighborHeight + neighborWater;
+    let waterToDistribute = this.waterMap[index];
+    const hydrostaticPressure = waterToDistribute * TERRAIN_CONFIG.HYDROSTATIC_PRESSURE;
 
-      if (currentWaterHeight > neighborTotalHeight) {
-        const heightDiff = currentWaterHeight - neighborTotalHeight;
-        // Use cross-sectional area for flow calculation
-        const flow = heightDiff * TERRAIN_CONFIG.WATER_RETENTION * (this.size / this.divisions); // Scale by cell size
-        outflows[i] = Math.min(flow, this.waterMap[index]);
-        totalOutflow += outflows[i];
+    // Calculate local pooling factor based on surrounding terrain
+    const avgNeighborHeight = neighborData.reduce((sum, n) => sum + n.baseHeight, 0) / neighborData.length;
+    const isInBasin = currentHeight < avgNeighborHeight;
+    const poolingMultiplier = isInBasin ? TERRAIN_CONFIG.POOLING_FACTOR : 1.0;
+
+    // Distribute water with consideration for pooling
+    neighborData.forEach((neighbor) => {
+      if (waterToDistribute <= 0) return;
+
+      const heightDiff = currentWaterHeight - neighbor.totalHeight;
+      if (heightDiff > 0) {
+        // Calculate flow based on height difference and pressure
+        const baseFlow = heightDiff * TERRAIN_CONFIG.WATER_RETENTION;
+        const pressureFlow = hydrostaticPressure * Math.sqrt(heightDiff);
+
+        // Apply resistance based on uphill flow
+        const terrainDiff = neighbor.baseHeight - currentHeight;
+        const resistance = Math.max(0, terrainDiff * TERRAIN_CONFIG.FLOW_RESISTANCE);
+
+        // Calculate final flow amount
+        let flow = ((baseFlow + pressureFlow) * (1 - resistance)) / poolingMultiplier;
+        // Boost flow when height differences are significant to promote stream channels.
+        if (heightDiff > 0.2) {
+          flow *= 1.5;
+        }
+        flow = Math.min(flow, waterToDistribute);
+
+        // Apply the flow
+        waterToDistribute -= flow;
+        tempWaterMap[index] -= flow;
+        tempWaterMap[neighbor.index] += flow;
       }
     });
 
-    // Adjust outflows if total is too high
-    if (totalOutflow > this.waterMap[index]) {
-      const scale = this.waterMap[index] / totalOutflow;
-      outflows.forEach((_, i) => (outflows[i] *= scale));
-      totalOutflow = this.waterMap[index];
+    // Apply minimum water level for stable pools
+    if (isInBasin && tempWaterMap[index] < 0.02) {
+      tempWaterMap[index] = Math.max(tempWaterMap[index], 0.02);
     }
 
-    // Apply water movements
-    tempWaterMap[index] -= totalOutflow;
-    neighbors.forEach((neighborIdx, i) => {
-      if (outflows[i] > 0) {
-        tempWaterMap[neighborIdx] += outflows[i];
-      }
-    });
-
-    // Apply evaporation
-    tempWaterMap[index] *= 1 - TERRAIN_CONFIG.EVAPORATION_RATE;
+    // Apply evaporation with spatial variation
+    const evaporationRate = isInBasin ? TERRAIN_CONFIG.EVAPORATION_RATE * 0.5 : TERRAIN_CONFIG.EVAPORATION_RATE; // Reduced evaporation in basins
+    tempWaterMap[index] *= 1 - evaporationRate;
     tempWaterMap[index] = Math.max(0, Math.min(tempWaterMap[index], TERRAIN_CONFIG.MAX_WATER_DEPTH));
-
-    // Handle sediment transport
-    if (totalOutflow > 0) {
-      const velocity = Math.sqrt(2 * TERRAIN_CONFIG.GRAVITY * totalOutflow);
-      const slope = totalOutflow / (this.size / this.divisions);
-      const capacity = velocity * slope * TERRAIN_CONFIG.SEDIMENT_CAPACITY;
-
-      if (this.sedimentMap[index] > capacity) {
-        // Deposit excess sediment
-        const depositionAmount = (this.sedimentMap[index] - capacity) * TERRAIN_CONFIG.DEPOSITION_RATE;
-        this.vertices[index * 3 + 1] += depositionAmount;
-        tempSedimentMap[index] -= depositionAmount;
-      } else if (slope > TERRAIN_CONFIG.MIN_SLOPE_FOR_FLOW) {
-        // Erode based on deficit
-        const erosionAmount = (capacity - this.sedimentMap[index]) * TERRAIN_CONFIG.EROSION_RATE;
-        this.vertices[index * 3 + 1] -= erosionAmount;
-        tempSedimentMap[index] += erosionAmount;
-      }
-    }
   }
 
   // Add this helper method to class
@@ -444,20 +446,12 @@ export class ProceduralTerrain {
     this.geometry.attributes.color.needsUpdate = true;
   }
 
-  // Add these properties to the class
-  private previousWaterHeights!: Float32Array;
-  private waterVelocities!: Float32Array;
-
   // Add this to initErosion() method
   private initErosion() {
     const vertexCount = this.vertices.length / 3;
     this.waterMap = new Float32Array(vertexCount).fill(0);
     this.sedimentMap = new Float32Array(vertexCount).fill(0);
     this.velocityMap = new Array(vertexCount).fill(null).map(() => new THREE.Vector2());
-
-    // Initialize temporal smoothing arrays
-    this.previousWaterHeights = new Float32Array(vertexCount).fill(0);
-    this.waterVelocities = new Float32Array(vertexCount).fill(0);
   }
 
   private initGaussianWeights() {
@@ -475,59 +469,56 @@ export class ProceduralTerrain {
   }
 
   private updateWater() {
-    const { MIN_VISIBLE, SMOOTHING_RADIUS, SURFACE_TENSION } = this.WATER_PARAMS;
+    const { MIN_VISIBLE, SMOOTHING_RADIUS } = this.WATER_PARAMS;
     const smoothedHeights = new Float32Array(this.waterMap.length);
-
-    // First pass: Calculate stable water surface
     for (let i = 0; i < this.waterMap.length; i++) {
-      if (this.waterMap[i] <= MIN_VISIBLE) continue;
-
+      if (this.waterMap[i] <= MIN_VISIBLE) {
+        // If very little water, hide water (avoid floating artifacts)
+        this.waterVertices[i * 3 + 1] = this.vertices[i * 3 + 1] - 1;
+        continue;
+      }
       const x = i % this.divisions;
       const z = Math.floor(i / this.divisions);
       let totalHeight = 0;
       let weightSum = 0;
-
-      // Sample neighborhood with variable radius based on water depth
-      const radius = Math.max(1, Math.min(SMOOTHING_RADIUS, Math.floor(this.waterMap[i] * 3)));
-
-      for (let dz = -radius; dz <= radius; dz++) {
+      let localMin = Infinity;
+      for (let dz = -SMOOTHING_RADIUS; dz <= SMOOTHING_RADIUS; dz++) {
         const nz = z + dz;
         if (nz < 0 || nz >= this.divisions) continue;
-
-        for (let dx = -radius; dx <= radius; dx++) {
+        for (let dx = -SMOOTHING_RADIUS; dx <= SMOOTHING_RADIUS; dx++) {
           const nx = x + dx;
           if (nx < 0 || nx >= this.divisions) continue;
-
           const nIdx = nz * this.divisions + nx;
-          if (this.waterMap[nIdx] <= MIN_VISIBLE) continue;
-
-          const dist = Math.sqrt(dx * dx + dz * dz);
-          const weight = Math.exp((-dist * dist) / (radius * radius));
-
-          totalHeight += (this.vertices[nIdx * 3 + 1] + this.waterMap[nIdx]) * weight;
-          weightSum += weight;
+          if (this.waterMap[nIdx] > MIN_VISIBLE) {
+            const dist = Math.sqrt(dx * dx + dz * dz);
+            const weight = Math.exp((-dist * dist) / SMOOTHING_RADIUS);
+            const neighborHeight = this.vertices[nIdx * 3 + 1] + this.waterMap[nIdx];
+            totalHeight += neighborHeight * weight;
+            weightSum += weight;
+            if (neighborHeight < localMin) {
+              localMin = neighborHeight;
+            }
+          }
         }
       }
-
       if (weightSum > 0) {
-        const averageHeight = totalHeight / weightSum;
-        const currentHeight = this.vertices[i * 3 + 1] + this.waterMap[i];
-        smoothedHeights[i] = currentHeight * (1 - SURFACE_TENSION) + averageHeight * SURFACE_TENSION;
+        const targetHeight = totalHeight / weightSum;
+        const current = this.vertices[i * 3 + 1] + this.waterMap[i];
+        // New blending weights: reduce current influence, boost local minimum
+        const computedHeight = 0.2 * current + 0.3 * targetHeight + 0.5 * localMin;
+        const terrainHeight = this.vertices[i * 3 + 1];
+        const desiredHeight = terrainHeight + this.waterMap[i] * 0.5;
+        // Adjust blend: favor computed height even more to let water settle
+        const finalHeight = 0.7 * computedHeight + 0.3 * desiredHeight;
+        smoothedHeights[i] = Math.max(finalHeight, terrainHeight + MIN_VISIBLE);
       }
     }
-
-    // Apply smoothed heights to water surface
     for (let i = 0; i < this.waterVertices.length; i += 3) {
       const idx = i / 3;
-      const terrainHeight = this.vertices[i + 1];
-
       if (this.waterMap[idx] > MIN_VISIBLE) {
-        this.waterVertices[i + 1] = Math.max(terrainHeight + 0.01, smoothedHeights[idx]);
-      } else {
-        this.waterVertices[i + 1] = terrainHeight - 1;
+        this.waterVertices[i + 1] = smoothedHeights[idx];
       }
     }
-
     this.water.geometry.attributes.position.needsUpdate = true;
     this.water.geometry.computeVertexNormals();
   }
