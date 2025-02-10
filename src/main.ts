@@ -13,5 +13,6 @@ console.log("starting...");
 // new ZarchGameSpherical();
 // new LowPolyPlanet();
 // new MarchingCubesDemo();
+// new ProceduralTerrain();
 new ProceduralTerrain();
 console.log("should be running");
