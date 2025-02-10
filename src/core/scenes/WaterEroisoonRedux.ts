@@ -28,15 +28,18 @@ export class ProceduralTerrainRedux {
   }[] = [];
   private maxWaterDroplets: number = 10000;
   private waterEvaporationRate: number = 0.0001; // Water loss
-  private smoothingFactor: number = 0.1; // Interpolation smoothness
+  private waterLevels: number[][] = [];
+  private gridSize: number = 200; // Match with divisions
 
   constructor() {
     this.initScene();
     this.createTerrain();
+    this.initWaterGrid();
     this.initWaterSystem();
     this.setupEventListeners();
     this.animate();
   }
+
   private addWaterAtPoint(x: number, z: number) {
     if (this.waterDroplets.length >= this.maxWaterDroplets) {
       this.waterDroplets.shift();
@@ -48,6 +51,7 @@ export class ProceduralTerrainRedux {
       water: 1.0, // Full water volume
     });
   }
+
   private initScene() {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x87ceeb);
@@ -212,11 +216,20 @@ export class ProceduralTerrainRedux {
       }
     });
   }
+
+  private initWaterGrid() {
+    // Initialize water level grid
+    this.waterLevels = Array(this.gridSize)
+      .fill(0)
+      .map(() => Array(this.gridSize).fill(0));
+  }
+
   private initWaterSystem() {
     this.waterGeometry = new THREE.BufferGeometry();
+    // Increase particle size so that lakes fill up
     const waterMaterial = new THREE.PointsMaterial({
       color: 0x0000ff,
-      size: 0.3,
+      size: 0.3, // increased from 0.3
       transparent: true,
       opacity: 0.5,
       depthWrite: false,
@@ -228,78 +241,119 @@ export class ProceduralTerrainRedux {
 
   private updateWaterSystem() {
     const positions: number[] = [];
-    const newWaterDroplets: typeof this.waterDroplets = [];
-
     this.waterDroplets.forEach((droplet) => {
       let { x, y, z } = droplet.position;
-
-      // Get terrain height at the droplet's location
       const groundHeight = this.getTerrainHeightAtPoint(x, z);
 
-      // Smooth Y movement to prevent bouncing
       if (y > groundHeight) {
-        // Falling naturally
-        droplet.velocity.y -= 0.01; // Simulate gravity
+        droplet.velocity.y -= 0.005;
         y += droplet.velocity.y;
       } else {
-        // Droplet reaches terrain surface
-        droplet.velocity.y = 0; // Stop bouncing
-
-        // Apply smooth interpolation instead of snapping
-        y = THREE.MathUtils.lerp(y, groundHeight, 0.2);
-
-        // Calculate the steepest slope for downhill flow
         const offsets = [
-          { dx: 0.1, dz: 0 },
-          { dx: -0.1, dz: 0 },
-          { dx: 0, dz: 0.1 },
-          { dx: 0, dz: -0.1 },
+          { dx: 0.5, dz: 0 },
+          { dx: -0.5, dz: 0 },
+          { dx: 0, dz: 0.5 },
+          { dx: 0, dz: -0.5 },
         ];
 
-        let steepestSlope = { dx: 0, dz: 0, slope: 0 };
-
+        let lowestPoint = { height: groundHeight, dx: 0, dz: 0 };
         offsets.forEach(({ dx, dz }) => {
           const neighborHeight = this.getTerrainHeightAtPoint(x + dx, z + dz);
-          const slope = groundHeight - neighborHeight;
-
-          if (slope > steepestSlope.slope) {
-            steepestSlope = { dx, dz, slope };
+          if (neighborHeight < lowestPoint.height) {
+            lowestPoint = { height: neighborHeight, dx, dz };
           }
         });
 
-        // Apply gradual movement downhill
-        if (steepestSlope.slope > 0) {
-          droplet.velocity.x = THREE.MathUtils.lerp(droplet.velocity.x, steepestSlope.dx * 0.05, 0.3);
-          droplet.velocity.z = THREE.MathUtils.lerp(droplet.velocity.z, steepestSlope.dz * 0.05, 0.3);
+        // Only transfer to grid if nearly stationary and at a local minimum
+        const isMovingSlow = Math.abs(droplet.velocity.x) < 0.01 && Math.abs(droplet.velocity.z) < 0.01;
+        const isAtMinimum = lowestPoint.height >= groundHeight - 0.01;
+
+        if (isMovingSlow && isAtMinimum) {
+          // Convert world coordinates to grid coordinates more accurately
+          const gridX = Math.floor(((x + this.size / 2) / this.size) * (this.gridSize - 1));
+          const gridZ = Math.floor(((z + this.size / 2) / this.size) * (this.gridSize - 1));
+
+          if (gridX >= 0 && gridX < this.gridSize && gridZ >= 0 && gridZ < this.gridSize) {
+            this.waterLevels[gridX][gridZ] += droplet.water;
+            droplet.water = 0;
+            this.spreadWater(gridX, gridZ);
+          }
+        } else if (lowestPoint.height < groundHeight - 0.01) {
+          // Continue flowing downhill
+          const slope = groundHeight - lowestPoint.height;
+          droplet.velocity.x = THREE.MathUtils.lerp(droplet.velocity.x, lowestPoint.dx * slope, 0.3);
+          droplet.velocity.z = THREE.MathUtils.lerp(droplet.velocity.z, lowestPoint.dz * slope, 0.3);
+          droplet.velocity.y = Math.max(0, -droplet.velocity.y * 0.03);
         }
 
-        // Move the droplet
         x += droplet.velocity.x;
         z += droplet.velocity.z;
-
-        // Reduce velocity slightly to prevent infinite motion
+        y = Math.max(y + droplet.velocity.y, groundHeight + 0.01); // Keep slightly above ground
         droplet.velocity.x *= 0.98;
         droplet.velocity.z *= 0.98;
       }
 
-      // Prevent sinking under terrain
-      y = Math.max(y, groundHeight);
-
-      // Update droplet position
       droplet.position.set(x, y, z);
-
-      // Evaporation / water loss
-      droplet.water -= this.waterEvaporationRate;
       if (droplet.water > 0) {
         positions.push(x, y, z);
-        newWaterDroplets.push(droplet);
       }
     });
 
-    // Update water geometry
+    // Remove empty droplets
+    this.waterDroplets = this.waterDroplets.filter((d) => d.water > 0);
+
+    // Render accumulated water with proper height offset
+    for (let i = 0; i < this.gridSize; i++) {
+      for (let j = 0; j < this.gridSize; j++) {
+        if (this.waterLevels[i][j] > 0.01) {
+          const x = (i / (this.gridSize - 1)) * this.size - this.size / 2;
+          const z = (j / (this.gridSize - 1)) * this.size - this.size / 2;
+          const groundHeight = this.getTerrainHeightAtPoint(x, z);
+          const y = groundHeight + 0.02; // Keep slightly above ground
+          positions.push(x, y, z);
+        }
+      }
+    }
+
     this.waterGeometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
     this.waterGeometry.attributes.position.needsUpdate = true;
-    this.waterDroplets = newWaterDroplets;
+  }
+
+  private spreadWater(gridX: number, gridZ: number) {
+    const currentHeight = this.getTerrainHeightAtPoint(
+      (gridX / (this.gridSize - 1)) * this.size - this.size / 2,
+      (gridZ / (this.gridSize - 1)) * this.size - this.size / 2
+    );
+    const currentWaterLevel = this.waterLevels[gridX][gridZ];
+    const totalHeight = currentHeight + currentWaterLevel;
+
+    const neighbors = [
+      { dx: -1, dz: 0 },
+      { dx: 1, dz: 0 },
+      { dx: 0, dz: -1 },
+      { dx: 0, dz: 1 },
+    ];
+
+    neighbors.forEach(({ dx, dz }) => {
+      const newX = gridX + dx;
+      const newZ = gridZ + dz;
+
+      if (newX >= 0 && newX < this.gridSize && newZ >= 0 && newZ < this.gridSize) {
+        const neighborHeight = this.getTerrainHeightAtPoint(
+          (newX / this.gridSize) * this.size - this.size / 2,
+          (newZ / this.gridSize) * this.size - this.size / 2
+        );
+        const neighborWaterLevel = this.waterLevels[newX][newZ];
+        const neighborTotal = neighborHeight + neighborWaterLevel;
+
+        if (totalHeight > neighborTotal) {
+          // Transfer water to lower neighbor
+          const transfer = Math.min((totalHeight - neighborTotal) * 0.5, currentWaterLevel);
+          this.waterLevels[gridX][gridZ] -= transfer;
+          this.waterLevels[newX][newZ] += transfer;
+        }
+      }
+    });
   }
 
   private getTerrainHeightAtPoint(x: number, z: number): number {
