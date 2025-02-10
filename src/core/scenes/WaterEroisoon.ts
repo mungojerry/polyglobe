@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise";
+import { pseudoRandom } from "../utils/PseudoRandom";
 
 export class ProceduralTerrain {
   scene!: THREE.Scene;
@@ -24,24 +25,32 @@ export class ProceduralTerrain {
   divisions: number = 200;
 
   // Adjusted erosion parameters for stability
-  readonly WATER_RETENTION = 0.1; // Increased
-  readonly EVAPORATION_RATE = 0.01; // Reduced
+  readonly EVAPORATION_RATE = 0.004; // Reduced
   readonly RAINFALL_RATE = 0.02; // Increased
   readonly MAX_WATER_DEPTH = 1.0; // Increased
 
-  readonly EROSION_RATE = 0.03; // Reduced from 0.003
-  readonly DEPOSITION_RATE = 0.005; // Reduced from 0.01
-  readonly SEDIMENT_CAPACITY = 0.01; // Reduced from 0.04
-  readonly MIN_SLOPE_FOR_FLOW = 0.01; // Reduced from 0.03
-  readonly GRAVITY = 1.0; // Reduced from 2.5
+  readonly WATER_RETENTION = 0.2; // Increased for more stable flow
+  readonly EROSION_RATE = 0.05; // Increased for more visible erosion
+  readonly DEPOSITION_RATE = 0.05; // Matched to erosion rate
+  readonly SEDIMENT_CAPACITY = 0.05; // Increased for more sediment transport
+  readonly MIN_SLOPE_FOR_FLOW = 0.01; // Lowered for more widespread erosion
+  readonly GRAVITY = 9.81; // Real gravity for more realistic flow
+
   readonly MAX_SEDIMENT = 0.3; // Reduced from 0.8
   readonly MAX_EROSION_DEPTH = 1.0; // Reduced from 3.0
+
+  rain!: THREE.Points;
+  rainGeo!: THREE.BufferGeometry;
+  rainMaterial!: THREE.PointsMaterial;
+  rainCount: number = 1000; // adjust number of raindrops as needed
+  rainSpeed: number = 0.8; // drop speed
 
   constructor() {
     this.initScene();
     this.createTerrain();
     this.initErosion();
     this.createWater();
+    this.createRain(); // Initialize rain particles
     this.setupEventListeners();
     this.animate();
   }
@@ -74,86 +83,64 @@ export class ProceduralTerrain {
     const hemisphereLight = new THREE.HemisphereLight(0xffffbb, 0x080820, 0.5);
     this.scene.add(hemisphereLight);
   }
-  private removeGeometrySeams() {
-    const positions = this.geometry.attributes.position.array as Float32Array;
-    const verticesPerRow = this.divisions + 2;
-
-    // Blend vertices along potential seam lines
-    for (let i = 0; i < verticesPerRow; i++) {
-      for (let j = 0; j < verticesPerRow; j++) {
-        const index = (i * verticesPerRow + j) * 3;
-        if (i > 0 && i < verticesPerRow - 1 && j > 0 && j < verticesPerRow - 1) {
-          // Average heights with neighbors
-          const height = positions[index + 1];
-          const neighbors = [
-            positions[index - verticesPerRow * 3 + 1], // up
-            positions[index + verticesPerRow * 3 + 1], // down
-            positions[index - 3 + 1], // left
-            positions[index + 3 + 1], // right
-          ];
-          positions[index + 1] = (height + neighbors.reduce((a, b) => a + b, 0) / 4) / 2;
-        }
-      }
-    }
-    this.geometry.attributes.position.needsUpdate = true;
-  }
   private createTerrain() {
     this.geometry = new THREE.PlaneGeometry(this.size, this.size, this.divisions + 1, this.divisions + 1);
     this.geometry.rotateX(-Math.PI / 2);
 
-    this.noise = new SimplexNoise();
+    pseudoRandom.setSeed(101010);
+    this.noise = new SimplexNoise(pseudoRandom);
     this.vertices = this.geometry.attributes.position.array as Float32Array;
     const vertexCount = this.vertices.length / 3;
     this.colors = new Float32Array(vertexCount * 3);
 
-    // Warp parameters
-    const warpFrequency = 0.8;
-    const warpAmount = 2.0;
+    // **New Randomization Variables**
+    const warpStrength = 1.0; // Increases terrain randomness
+    const jitterAmount = 0.5; // Adds jitter to vertices
+    const randomOffsetX = Math.random() * 1000;
+    const randomOffsetZ = Math.random() * 1000;
 
-    // Improved terrain generation with added warping and smoother noise
     for (let i = 0; i < this.vertices.length; i += 3) {
       let x = this.vertices[i];
       let y = this.vertices[i + 1];
       let z = this.vertices[i + 2];
 
-      // Add warping offsets based on noise, distorting x and z coordinates
-      const warpX = this.noise.noise3d(x * warpFrequency, 0, z * warpFrequency) * warpAmount;
-      const warpZ = this.noise.noise3d(x * warpFrequency, 0, z * warpFrequency + 1000) * warpAmount;
+      // **1. Apply Jitter (breaks strict grid alignment)**
+      x += (Math.random() - 0.5) * jitterAmount;
+      z += (Math.random() - 0.5) * jitterAmount;
+
+      // **2. Add Directional Warping**
+      const warpX = this.noise.noise3d(x * 0.2, y * 0.2, z * 0.2) * warpStrength;
+      const warpZ = this.noise.noise3d(x * 0.2 + 1000, y * 0.2, z * 0.2) * warpStrength;
       const warpedX = x + warpX;
       const warpedZ = z + warpZ;
 
-      // Use warped coordinates for height calculations
+      // **3. Multi-Layered Noise with Random Offsets**
       let height = 0;
       let amplitude = 1;
-      let frequency = 0.2;
+      let frequency = 0.1;
 
-      // Add multiple noise layers for natural variation
       for (let o = 0; o < 5; o++) {
-        const noiseValue = this.noise.noise3d(warpedX * frequency + o * 1000, y * frequency + o * 1000, warpedZ * frequency + o * 1000);
+        const noiseValue = this.noise.noise3d(
+          warpedX * frequency + o * 500 + randomOffsetX,
+          y * frequency + o * 250,
+          warpedZ * frequency + o * 750 + randomOffsetZ
+        );
         height += noiseValue * amplitude;
-        amplitude *= 0.5;
-        frequency *= 2.0;
+        amplitude *= 0.55; // Slightly reduce contribution per octave
+        frequency *= 2; // Change factor to avoid perfect doubling
       }
 
-      // Add large-scale mountain shapes
+      // **4. Add Large-Scale Warped Mountain Shapes**
       const mountainNoise = this.noise.noise3d(warpedX * 0.05, y * 0.05, warpedZ * 0.05) * 4;
-      height += Math.max(0, mountainNoise) * 2;
+      height += Math.max(0, mountainNoise) * 3.5; // Increase effect
 
-      // Add medium-scale detail
-      const detailNoise = this.noise.noise3d(warpedX * 0.1, y * 0.1, warpedZ * 0.1) * 1.5;
-      height += detailNoise;
-
-      // Add additional small-scale detail
-      const additionalDetailNoise = this.noise.noise3d(warpedX * 0.5, y * 0.5, warpedZ * 0.5) * 0.5;
-      height += additionalDetailNoise;
+      // **5. Add Medium & Small-Scale Detail**
+      height += this.noise.noise3d(warpedX * 0.2, y * 0.2, warpedZ * 0.2) * 1.5;
+      height += this.noise.noise3d(warpedX * 0.6, y * 0.6, warpedZ * 0.6) * 0.5;
 
       this.vertices[i + 1] = height;
       this.updateTerrainColor(i, height);
     }
-
-    // Optionally smooth terrain and remove seams here
-    // this.smoothTerrain(3);
-    // this.removeGeometrySeams();
 
     this.geometry.setAttribute("color", new THREE.BufferAttribute(this.colors, 3));
     this.geometry.computeVertexNormals();
@@ -169,6 +156,7 @@ export class ProceduralTerrain {
     this.terrain.receiveShadow = true;
     this.scene.add(this.terrain);
   }
+
   private smoothTerrain(iterations: number) {
     const smoothKernel = [0.1, 0.15, 0.5, 0.15, 0.1];
     for (let iter = 0; iter < iterations; iter++) {
@@ -290,6 +278,19 @@ export class ProceduralTerrain {
     this.waterMap = tempWaterMap;
     this.sedimentMap = tempSedimentMap;
 
+    const kernel = [0.2, 0.5, 1.0, 0.5, 0.2];
+    const smoothedErosion = new Float32Array(this.sedimentMap.length);
+    for (let i = 2; i < this.sedimentMap.length - 2; i++) {
+      smoothedErosion[i] =
+        (this.sedimentMap[i - 2] * kernel[0] +
+          this.sedimentMap[i - 1] * kernel[1] +
+          this.sedimentMap[i] * kernel[2] +
+          this.sedimentMap[i + 1] * kernel[3] +
+          this.sedimentMap[i + 2] * kernel[4]) /
+        2.4;
+    }
+    this.sedimentMap.set(smoothedErosion);
+
     // Update geometry and water visualization
     this.updateGeometry();
     this.updateWater();
@@ -297,105 +298,138 @@ export class ProceduralTerrain {
 
   private processCell(index: number, tempWaterMap: Float32Array, tempSedimentMap: Float32Array) {
     const currentHeight = this.vertices[index * 3 + 1];
-    const neighbors = this.getNeighbors(index);
+    const x = index % this.divisions;
+    const z = Math.floor(index / this.divisions);
 
     // Add rainfall
     if (Math.random() < this.RAINFALL_RATE) {
       tempWaterMap[index] += this.RAINFALL_RATE * 2;
     }
 
-    let totalDownhill = 0;
-    const flowDirections: number[] = [];
-    const heightDifferences: number[] = [];
+    // Calculate water surface height
+    const currentWaterHeight = currentHeight + this.waterMap[index];
 
-    // Calculate flow directions and height differences
-    neighbors.forEach((neighbor, i) => {
+    // Get all 4 direct neighbors (north, east, south, west)
+    const directNeighbors = [
+      z > 0 ? (z - 1) * this.divisions + x : null, // north
+      x < this.divisions - 1 ? z * this.divisions + (x + 1) : null, // east
+      z < this.divisions - 1 ? (z + 1) * this.divisions + x : null, // south
+      x > 0 ? z * this.divisions + (x - 1) : null, // west
+    ];
+
+    let totalFlow = 0;
+    const flows: number[] = [];
+    const heightDiffs: number[] = [];
+    let lowestNeighborHeight = Infinity;
+    let lowestNeighborIndex = -1;
+
+    // Calculate height differences and identify lowest neighbor
+    directNeighbors.forEach((neighbor, i) => {
       if (neighbor === null) {
-        flowDirections.push(0);
-        heightDifferences.push(0);
+        flows.push(0);
+        heightDiffs.push(0);
         return;
       }
 
-      const neighborHeight = this.vertices[neighbor * 3 + 1] + this.waterMap[neighbor];
-      const currentTotal = currentHeight + this.waterMap[index];
+      const neighborHeight = this.vertices[neighbor * 3 + 1];
+      const neighborWaterHeight = neighborHeight + this.waterMap[neighbor];
 
-      if (currentTotal > neighborHeight) {
-        const difference = currentTotal - neighborHeight;
-        const momentum = Math.abs(this.waterVelocities[index]) * 0.5;
-        flowDirections.push(difference + momentum);
-        heightDifferences.push(difference);
-        totalDownhill += difference + momentum;
+      if (neighborWaterHeight < lowestNeighborHeight) {
+        lowestNeighborHeight = neighborWaterHeight;
+        lowestNeighborIndex = i;
+      }
+
+      // Calculate height difference
+      const heightDiff = currentWaterHeight - neighborWaterHeight;
+      heightDiffs.push(heightDiff);
+
+      // Only flow if current water level is higher
+      if (heightDiff > 0) {
+        // Use modified flow calculation that considers direction
+        const flow = heightDiff * this.WATER_RETENTION * (1 + Math.random() * 0.1); // Small random variation
+        flows.push(flow);
+        totalFlow += flow;
       } else {
-        flowDirections.push(0);
-        heightDifferences.push(0);
+        flows.push(0);
       }
     });
 
-    if (totalDownhill > 0) {
-      const waterToMove = this.waterMap[index] * 0.3;
-      let totalEroded = 0;
-
-      // Calculate local slope for erosion
-      const maxHeightDiff = Math.max(...heightDifferences);
-      const slope = maxHeightDiff / (this.size / this.divisions);
-
-      // Calculate water velocity based on slope
+    if (totalFlow > 0) {
+      // Calculate velocity based on steepest descent
+      const maxHeightDiff = Math.max(...heightDiffs);
       const velocity = Math.sqrt(2 * this.GRAVITY * maxHeightDiff);
       this.waterVelocities[index] = velocity;
 
-      // Calculate sediment capacity based on slope and velocity
-      const sedimentCapacity = Math.max(slope * velocity * this.SEDIMENT_CAPACITY, 0);
+      // Calculate local slope using steepest descent
+      const slope = maxHeightDiff / (this.size / this.divisions);
 
-      // Erode or deposit based on current sediment load
-      if (slope > this.MIN_SLOPE_FOR_FLOW) {
-        const currentSediment = this.sedimentMap[index];
+      // Modified sediment capacity calculation
+      const sedimentCapacity = Math.max(
+        velocity * slope * this.SEDIMENT_CAPACITY * (1 + Math.abs(Math.sin((2 * Math.PI * x) / this.divisions)) * 0.1), // Slight variation based on position
+        0
+      );
 
-        if (currentSediment < sedimentCapacity) {
-          // Erode
-          const erosionAmount = Math.min(this.EROSION_RATE * (sedimentCapacity - currentSediment), this.MAX_EROSION_DEPTH);
+      // Erosion and deposition logic
+      const currentSediment = this.sedimentMap[index];
+      const capacityDiff = sedimentCapacity - currentSediment;
 
-          this.vertices[index * 3 + 1] -= erosionAmount;
-          tempSedimentMap[index] += erosionAmount;
-          totalEroded += erosionAmount;
-        } else {
-          // Deposit
-          const depositionAmount = this.DEPOSITION_RATE * (currentSediment - sedimentCapacity);
-          this.vertices[index * 3 + 1] += depositionAmount;
-          tempSedimentMap[index] -= depositionAmount;
-        }
+      if (capacityDiff > 0 && slope > this.MIN_SLOPE_FOR_FLOW) {
+        // Erode with position-dependent variation
+        const erosionAmount = Math.min(
+          this.EROSION_RATE * capacityDiff * (1 + Math.random() * 0.2), // Add randomness to break patterns
+          this.MAX_EROSION_DEPTH
+        );
+
+        // Apply erosion to terrain height
+        this.vertices[index * 3 + 1] -= erosionAmount;
+        tempSedimentMap[index] += erosionAmount;
+
+        // Distribute sediment to neighbors based on flow and direction
+        directNeighbors.forEach((neighbor, i) => {
+          if (neighbor === null || flows[i] === 0) return;
+
+          // Weight flow distribution by direction and height difference
+          const directionWeight = 1 + (i === lowestNeighborIndex ? 0.2 : 0);
+          const sedimentAmount = (flows[i] / totalFlow) * erosionAmount * directionWeight;
+          tempSedimentMap[neighbor] += sedimentAmount;
+        });
+      } else if (capacityDiff < 0) {
+        // Modified deposition with position-dependent variation
+        const depositionAmount = Math.min(
+          this.DEPOSITION_RATE * -capacityDiff * (1 + Math.abs(Math.cos((2 * Math.PI * z) / this.divisions)) * 0.1), // Slight variation
+          currentSediment
+        );
+
+        this.vertices[index * 3 + 1] += depositionAmount;
+        tempSedimentMap[index] -= depositionAmount;
       }
 
-      // Distribute water and sediment to neighbors
-      neighbors.forEach((neighbor, i) => {
-        if (neighbor === null || flowDirections[i] === 0) return;
+      // Distribute water with modified flow pattern
+      const waterToMove = Math.min(this.waterMap[index], totalFlow);
+      directNeighbors.forEach((neighbor, i) => {
+        if (neighbor === null || flows[i] === 0) return;
 
-        const flowAmount = (flowDirections[i] / totalDownhill) * waterToMove;
-        const actualFlow = Math.min(flowAmount, this.waterMap[index] * 0.5);
-
-        // Move water
-        tempWaterMap[index] -= actualFlow;
-        tempWaterMap[neighbor] += actualFlow;
-
-        // Move sediment with water
-        if (totalEroded > 0) {
-          const sedimentAmount = (flowAmount / totalDownhill) * totalEroded;
-          tempSedimentMap[index] -= sedimentAmount;
-          tempSedimentMap[neighbor] += sedimentAmount;
-        }
+        // Weight water distribution by direction and height difference
+        const directionWeight = 1 + (i === lowestNeighborIndex ? 0.1 : 0);
+        const waterAmount = (flows[i] / totalFlow) * waterToMove * directionWeight;
+        tempWaterMap[index] -= waterAmount;
+        tempWaterMap[neighbor] += waterAmount;
       });
     }
 
-    // Apply evaporation and ensure minimum water level
-    tempWaterMap[index] = Math.max(0.01, tempWaterMap[index] * (1 - this.EVAPORATION_RATE));
+    // Apply evaporation with slight position-dependent variation
+    const evaporationFactor = 1 - this.EVAPORATION_RATE * (1 + Math.sin(x * z * 0.1) * 0.1); // Slight spatial variation
+    tempWaterMap[index] *= evaporationFactor;
+    tempWaterMap[index] = Math.max(0, tempWaterMap[index]);
 
-    // Limit maximum sediment capacity
-    tempSedimentMap[index] = Math.min(tempSedimentMap[index], this.MAX_SEDIMENT);
+    // Ensure sediment stays within bounds
+    tempSedimentMap[index] = Math.max(0, Math.min(tempSedimentMap[index], this.MAX_SEDIMENT));
   }
 
   // Add this helper method to class
   private applyThermalErosion() {
     const talus = 0.5; // Maximum stable slope angle (in rise/run)
-    const erosionRate = 0.001;
+    const erosionRate = 0.0001;
 
     for (let z = 0; z < this.divisions; z++) {
       for (let x = 0; x < this.divisions; x++) {
@@ -549,6 +583,7 @@ export class ProceduralTerrain {
 
         // Clamp velocity to prevent extreme changes
         velocity = Math.max(-MAX_VELOCITY, Math.min(MAX_VELOCITY, velocity));
+
         this.waterVelocities[index] = velocity;
 
         // Apply temporal smoothing
@@ -589,6 +624,47 @@ export class ProceduralTerrain {
     this.water.geometry.computeVertexNormals();
   }
 
+  private createRain() {
+    this.rainGeo = new THREE.BufferGeometry();
+    const rainPositions = new Float32Array(this.rainCount * 3);
+    // Create raindrops at random positions above the scene
+    for (let i = 0; i < this.rainCount; i++) {
+      const x = (Math.random() - 0.5) * this.size;
+      const y = Math.random() * 50 + 50; // drops start high
+      const z = (Math.random() - 0.5) * this.size;
+      rainPositions[i * 3] = x;
+      rainPositions[i * 3 + 1] = y;
+      rainPositions[i * 3 + 2] = z;
+    }
+    this.rainGeo.setAttribute("position", new THREE.BufferAttribute(rainPositions, 3));
+
+    this.rainMaterial = new THREE.PointsMaterial({
+      color: 0x0000ff,
+      size: 0.4,
+      transparent: true,
+      opacity: 0.6,
+      depthWrite: false,
+    });
+
+    this.rain = new THREE.Points(this.rainGeo, this.rainMaterial);
+    this.scene.add(this.rain);
+  }
+
+  private updateRain() {
+    const positions = (this.rainGeo.attributes.position as THREE.BufferAttribute).array as Float32Array;
+    for (let i = 0; i < this.rainCount; i++) {
+      // Move each drop downward
+      positions[i * 3 + 1] -= this.rainSpeed;
+      // Reset if the drop goes below the terrain (assume terrain height ~ -5)
+      if (positions[i * 3 + 1] < 0) {
+        positions[i * 3 + 1] = Math.random() * 50 + 50; // reset drop high above
+        positions[i * 3] = (Math.random() - 0.5) * this.size;
+        positions[i * 3 + 2] = (Math.random() - 0.5) * this.size;
+      }
+    }
+    (this.rainGeo.attributes.position as THREE.BufferAttribute).needsUpdate = true;
+  }
+
   private setupEventListeners() {
     this.renderer.domElement.addEventListener("click", (event) => {
       const raycaster = new THREE.Raycaster();
@@ -620,6 +696,7 @@ export class ProceduralTerrain {
   animate() {
     requestAnimationFrame(() => this.animate());
     this.applyErosion();
+    this.updateRain(); // update rain drops each frame
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
   }
