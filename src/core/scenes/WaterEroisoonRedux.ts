@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise";
+import { MarchingCubes } from "three/examples/jsm/objects/MarchingCubes.js";
 import { pseudoRandom } from "../utils/PseudoRandom";
 
 export class ProceduralTerrainRedux {
@@ -30,6 +31,8 @@ export class ProceduralTerrainRedux {
   private waterEvaporationRate: number = 0.0001; // Water loss
   private waterLevels: number[][] = [];
   private gridSize: number = 200; // Match with divisions
+  private waterMesh!: MarchingCubes;
+  private settledDroplets: { position: THREE.Vector3; radius: number }[] = [];
 
   constructor() {
     this.initScene();
@@ -225,14 +228,33 @@ export class ProceduralTerrainRedux {
   }
 
   private initWaterSystem() {
+    // Create marching cubes mesh for water surface
+    const resolution = 64;
+    this.waterMesh = new MarchingCubes(
+      resolution,
+      new THREE.MeshPhongMaterial({
+        color: 0x0055ff,
+        transparent: true,
+        opacity: 0.6,
+        shininess: 80,
+      }),
+      true,
+      true
+    );
+
+    this.waterMesh.position.set(0, 0, 0);
+    this.waterMesh.scale.set(this.size, this.size / 2, this.size);
+    this.waterMesh.isolation = 1.0;
+
+    this.scene.add(this.waterMesh);
+
+    // Create particle system for active droplets
     this.waterGeometry = new THREE.BufferGeometry();
-    // Increase particle size so that lakes fill up
     const waterMaterial = new THREE.PointsMaterial({
-      color: 0x0000ff,
-      size: 0.3, // increased from 0.3
+      color: 0x0066ff,
+      size: 0.3,
       transparent: true,
       opacity: 0.5,
-      depthWrite: false,
     });
 
     this.waterSystem = new THREE.Points(this.waterGeometry, waterMaterial);
@@ -241,12 +263,13 @@ export class ProceduralTerrainRedux {
 
   private updateWaterSystem() {
     const positions: number[] = [];
+
     this.waterDroplets.forEach((droplet) => {
       let { x, y, z } = droplet.position;
       const groundHeight = this.getTerrainHeightAtPoint(x, z);
 
       if (y > groundHeight) {
-        droplet.velocity.y -= 0.005;
+        droplet.velocity.y -= 0.01;
         y += droplet.velocity.y;
       } else {
         const offsets = [
@@ -264,31 +287,27 @@ export class ProceduralTerrainRedux {
           }
         });
 
-        // Only transfer to grid if nearly stationary and at a local minimum
+        // Check if droplet should settle
         const isMovingSlow = Math.abs(droplet.velocity.x) < 0.01 && Math.abs(droplet.velocity.z) < 0.01;
         const isAtMinimum = lowestPoint.height >= groundHeight - 0.01;
 
         if (isMovingSlow && isAtMinimum) {
-          // Convert world coordinates to grid coordinates more accurately
-          const gridX = Math.floor(((x + this.size / 2) / this.size) * (this.gridSize - 1));
-          const gridZ = Math.floor(((z + this.size / 2) / this.size) * (this.gridSize - 1));
-
-          if (gridX >= 0 && gridX < this.gridSize && gridZ >= 0 && gridZ < this.gridSize) {
-            this.waterLevels[gridX][gridZ] += droplet.water;
-            droplet.water = 0;
-            this.spreadWater(gridX, gridZ);
-          }
-        } else if (lowestPoint.height < groundHeight - 0.01) {
-          // Continue flowing downhill
+          // Convert to settled droplet
+          this.settledDroplets.push({
+            position: new THREE.Vector3(x, groundHeight + 0.1, z),
+            radius: 0.5 + Math.random() * 0.5,
+          });
+          droplet.water = 0;
+        } else {
           const slope = groundHeight - lowestPoint.height;
           droplet.velocity.x = THREE.MathUtils.lerp(droplet.velocity.x, lowestPoint.dx * slope, 0.3);
           droplet.velocity.z = THREE.MathUtils.lerp(droplet.velocity.z, lowestPoint.dz * slope, 0.3);
-          droplet.velocity.y = Math.max(0, -droplet.velocity.y * 0.03);
         }
 
         x += droplet.velocity.x;
         z += droplet.velocity.z;
-        y = Math.max(y + droplet.velocity.y, groundHeight + 0.01); // Keep slightly above ground
+        y = Math.max(y, groundHeight + 0.1);
+
         droplet.velocity.x *= 0.98;
         droplet.velocity.z *= 0.98;
       }
@@ -299,24 +318,23 @@ export class ProceduralTerrainRedux {
       }
     });
 
-    // Remove empty droplets
+    // Update active droplets
     this.waterDroplets = this.waterDroplets.filter((d) => d.water > 0);
-
-    // Render accumulated water with proper height offset
-    for (let i = 0; i < this.gridSize; i++) {
-      for (let j = 0; j < this.gridSize; j++) {
-        if (this.waterLevels[i][j] > 0.01) {
-          const x = (i / (this.gridSize - 1)) * this.size - this.size / 2;
-          const z = (j / (this.gridSize - 1)) * this.size - this.size / 2;
-          const groundHeight = this.getTerrainHeightAtPoint(x, z);
-          const y = groundHeight + 0.02; // Keep slightly above ground
-          positions.push(x, y, z);
-        }
-      }
-    }
-
     this.waterGeometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
     this.waterGeometry.attributes.position.needsUpdate = true;
+
+    // Update water surface
+    this.waterMesh.reset();
+    this.settledDroplets.forEach((droplet) => {
+      const { x, y, z } = droplet.position;
+      // Convert world position to marching cubes grid space
+      const gridX = ((x + this.size / 2) / this.size) * this.waterMesh.resolution;
+      const gridY = (y / (this.size / 2)) * this.waterMesh.resolution;
+      const gridZ = ((z + this.size / 2) / this.size) * this.waterMesh.resolution;
+
+      // Add metaball influence
+      this.waterMesh.addBall(gridX, gridY, gridZ, droplet.radius * 3, 0.5);
+    });
   }
 
   private spreadWater(gridX: number, gridZ: number) {
