@@ -157,43 +157,6 @@ export class ProceduralTerrain {
     this.scene.add(this.terrain);
   }
 
-  private smoothTerrain(iterations: number) {
-    const smoothKernel = [0.1, 0.15, 0.5, 0.15, 0.1];
-    for (let iter = 0; iter < iterations; iter++) {
-      // Create a temporary array to store the new heights.
-      const tempHeights = new Float32Array(this.vertices.length / 3);
-      for (let z = 0; z < this.divisions; z++) {
-        for (let x = 0; x < this.divisions; x++) {
-          const index = z * this.divisions + x;
-          let smoothed = 0;
-          let totalWeight = 0;
-          // Loop over neighbors using kernel indices.
-          for (let dz = -2; dz <= 2; dz++) {
-            for (let dx = -2; dx <= 2; dx++) {
-              const newX = x + dx;
-              const newZ = z + dz;
-              // Only include valid neighbors.
-              if (newX >= 0 && newX < this.divisions && newZ >= 0 && newZ < this.divisions) {
-                const nIndex = newZ * this.divisions + newX;
-                const weight = smoothKernel[dz + 2] * smoothKernel[dx + 2];
-                smoothed += this.vertices[nIndex * 3 + 1] * weight;
-                totalWeight += weight;
-              }
-            }
-          }
-          tempHeights[index] = smoothed / totalWeight;
-        }
-      }
-      // Update the heights in vertices using the temporary values.
-      for (let z = 0; z < this.divisions; z++) {
-        for (let x = 0; x < this.divisions; x++) {
-          const index = z * this.divisions + x;
-          this.vertices[index * 3 + 1] = tempHeights[index];
-        }
-      }
-    }
-  }
-
   private updateTerrainColor(index: number, height: number) {
     const normalizedHeight = (height + 4) / 12; // Adjusted normalization
 
