@@ -4,6 +4,8 @@ import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise";
 import { PseudoRandomNumberGenerator } from "../utils/PseudoRandom";
 import { edgeTable, triTable } from "./MCDefs";
 
+const EPSILON = 1e-5;
+
 type Biome = {
   name: string;
   color: THREE.Color;
@@ -35,7 +37,7 @@ const BIOMES: Biome[] = [
     temperatureRange: [0.0, 0.3],
     humidityRange: [0.0, 0.4],
     terrainScale: 0.04,
-    terrainHeight: 32,
+    terrainHeight: 28,
   },
   {
     name: "forest",
@@ -65,7 +67,7 @@ export class InfiniteLandscape {
   private simplex: SimplexNoise;
   private gridSize = 33; // Changed from 32 to ensure overlap
   private cubeSize = 1;
-  private isoLevel = 0.5; // Changed from 0.4 for better surface generation
+  private isoLevel = 0.6; // Changed from 0.4 for better surface generation
   private raycaster = new THREE.Raycaster();
   private temperatureNoise: SimplexNoise;
   private humidityNoise: SimplexNoise;
@@ -75,6 +77,11 @@ export class InfiniteLandscape {
   private currentCenterChunk: THREE.Vector2 = new THREE.Vector2();
 
   constructor() {
+    console.log("Edge table length:", edgeTable.length); // Should be 256
+
+    // Check some known cases
+    console.log("Case 1:", triTable[1]); // Should have valid indices and end with -1
+    console.log("Case 255:", triTable[255]); // Should be empty case (all vertices inside)
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x87ceeb);
 
@@ -170,12 +177,20 @@ export class InfiniteLandscape {
   }
 
   private createChunk(chunkX: number, chunkZ: number): TerrainChunk {
-    // Offset position by 1 to account for overlap
-    const position = new THREE.Vector3(chunkX * (this.gridSize - 2) * this.cubeSize, 0, chunkZ * (this.gridSize - 2) * this.cubeSize);
+    // Ensure consistent positioning across chunk boundaries
+    const chunkSize = (this.gridSize - 2) * this.cubeSize;
+    const position = new THREE.Vector3(chunkX * chunkSize, 0, chunkZ * chunkSize);
 
     const scalarField = this.createScalarField(chunkX, chunkZ);
-
     const geometry = this.generateChunkGeometry(scalarField, position);
+
+    // Add validation for degenerate geometry
+    if (geometry.attributes.position.count === 0) {
+      console.warn(`Empty geometry generated at chunk ${chunkX},${chunkZ}`);
+      // Generate a small placeholder geometry to avoid rendering issues
+      return this.createPlaceholderChunk(position);
+    }
+
     const mesh = new THREE.Mesh(geometry, this.material);
     mesh.position.copy(position);
     mesh.castShadow = true;
@@ -189,17 +204,47 @@ export class InfiniteLandscape {
     return chunk;
   }
 
+  private createPlaceholderChunk(position: THREE.Vector3): TerrainChunk {
+    const geometry = new THREE.BoxGeometry(1, 1, 1);
+    geometry.translate(0.5, 0.5, 0.5);
+    const mesh = new THREE.Mesh(geometry, this.material);
+    mesh.position.copy(position);
+    mesh.visible = false; // Hide placeholder geometry
+
+    // Create empty scalar field
+    const scalarField: number[][][] = Array(this.gridSize)
+      .fill(0)
+      .map(() =>
+        Array(this.gridSize)
+          .fill(0)
+          .map(() => Array(this.gridSize).fill(1))
+      );
+
+    return { mesh, position, scalarField };
+  }
+
   private createScalarField(chunkX: number, chunkZ: number): number[][][] {
     const field: number[][][] = [];
-    const offsetX = chunkX * (this.gridSize - 1);
-    const offsetZ = chunkZ * (this.gridSize - 1);
+    const overlap = 1;
+    const offsetX = chunkX * (this.gridSize - 1 - overlap);
+    const offsetZ = chunkZ * (this.gridSize - 1 - overlap);
 
     for (let x = 0; x < this.gridSize; x++) {
       field[x] = [];
       for (let y = 0; y < this.gridSize; y++) {
         field[x][y] = [];
         for (let z = 0; z < this.gridSize; z++) {
-          field[x][y][z] = this.generateNoiseValue(x + offsetX, y, z + offsetZ);
+          // Use EPSILON to ensure consistent sampling across chunk boundaries
+          const worldX = x + offsetX + EPSILON;
+          const worldY = y + EPSILON;
+          const worldZ = z + offsetZ + EPSILON;
+
+          let value = this.generateNoiseValue(worldX, worldY, worldZ);
+          // Ensure value is never exactly equal to isoLevel
+          if (Math.abs(value - this.isoLevel) < EPSILON) {
+            value += EPSILON;
+          }
+          field[x][y][z] = value;
         }
       }
     }
@@ -211,6 +256,12 @@ export class InfiniteLandscape {
     const normals: number[] = [];
     const colors: number[] = [];
 
+    const validateVertices = (v1: THREE.Vector3, v2: THREE.Vector3, v3: THREE.Vector3): boolean => {
+      const isValid = (v: THREE.Vector3) =>
+        Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z) && !Number.isNaN(v.x) && !Number.isNaN(v.y) && !Number.isNaN(v.z);
+
+      return isValid(v1) && isValid(v2) && isValid(v3);
+    };
     // Correct edge to vertex mapping according to standard MC implementation
     const edgeToVertex = [
       [0, 1],
@@ -259,9 +310,10 @@ export class InfiniteLandscape {
             }
           }
 
-          if (edgeTable[cubeIndex] === 0) continue;
+          if (Number(edgeTable[cubeIndex]) === 0) continue;
 
           const triangles = triTable[cubeIndex];
+          if (!triangles || triangles.length === 0) continue;
           for (let i = 0; triangles[i] !== -1; i += 3) {
             const vertexIndices = [triangles[i], triangles[i + 1], triangles[i + 2]].map((edgeIndex) => {
               const [v1Index, v2Index] = edgeToVertex[edgeIndex];
@@ -270,11 +322,16 @@ export class InfiniteLandscape {
 
             let [v1, v2, v3] = vertexIndices;
 
+            // In the generateChunkGeometry function, before adding vertices:
+            if (!validateVertices(v1, v2, v3)) {
+              continue; // Skip invalid triangles
+            }
+
             // Calculate face normal
-            // const normal = new THREE.Vector3().crossVectors(new THREE.Vector3().subVectors(v2, v1), new THREE.Vector3().subVectors(v3, v1)).normalize();
-            const normal = new THREE.Vector3().crossVectors(new THREE.Vector3().subVectors(v2, v1), new THREE.Vector3().subVectors(v3, v1));
+            const edge1 = new THREE.Vector3().subVectors(v2, v1);
+            const edge2 = new THREE.Vector3().subVectors(v3, v1);
+            const normal = new THREE.Vector3().crossVectors(edge1, edge2);
             if (normal.lengthSq() === 0) {
-              // If normal calculation fails, provide a fallback
               normal.set(0, 1, 0);
             } else {
               normal.normalize();
@@ -365,6 +422,15 @@ export class InfiniteLandscape {
         ? Math.max(0, 1 - Math.pow(y / baseHeight, 1.2)) // Less falloff for mountains
         : Math.max(0, 1 - Math.pow(y / baseHeight, 1.5));
 
+    //      const edgeFade = 0.1;
+    // const xDist = Math.min(x % (this.gridSize - 1), (this.gridSize - 1) - (x % (this.gridSize - 1)));
+    // const zDist = Math.min(z % (this.gridSize - 1), (this.gridSize - 1) - (z % (this.gridSize - 1)));
+    // const edgeFactor = Math.min(
+    //     Math.min(xDist, zDist) / (edgeFade * (this.gridSize - 1)),
+    //     1
+    // );
+
+    // noiseValue *= edgeFactor;
     return (noiseValue * 0.5 + 0.5) * heightFalloff;
   }
 
@@ -442,9 +508,23 @@ export class InfiniteLandscape {
   }
 
   private interpolateVertex(v1: THREE.Vector3, v2: THREE.Vector3, val1: number, val2: number): THREE.Vector3 {
+    if (!Number.isFinite(val1) || !Number.isFinite(val2)) {
+      return v1.clone().lerp(v2, 0.5);
+    }
     const denominator = val2 - val1;
-    const t = denominator !== 0 ? (this.isoLevel - val1) / denominator : 0;
-    return new THREE.Vector3(v1.x + t * (v2.x - v1.x), v1.y + t * (v2.y - v1.y), v1.z + t * (v2.z - v1.z));
+    let t: number;
+
+    if (Math.abs(denominator) < EPSILON) {
+      t = 0.5;
+    } else if (Math.abs(val1 - this.isoLevel) < EPSILON) {
+      t = 0;
+    } else if (Math.abs(val2 - this.isoLevel) < EPSILON) {
+      t = 1;
+    } else {
+      t = (this.isoLevel - val1) / denominator;
+      t = Math.max(EPSILON, Math.min(1 - EPSILON, t));
+    }
+    return v1.clone().lerp(v2, t);
   }
 
   private setupEventListeners(): void {
