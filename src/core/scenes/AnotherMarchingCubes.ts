@@ -1,8 +1,53 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
 import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise";
-import { pseudoRandom } from "../utils/PseudoRandom";
+import { PseudoRandomNumberGenerator } from "../utils/PseudoRandom";
 import { edgeTable, triTable } from "./MCDefs";
+
+type Biome = {
+  name: string;
+  color: THREE.Color;
+  temperatureRange: [number, number];
+  humidityRange: [number, number];
+  terrainScale: number;
+  terrainHeight: number;
+};
+const BIOMES: Biome[] = [
+  {
+    name: "plains",
+    color: new THREE.Color(0x91b165), // Softer, more natural green
+    temperatureRange: [0.3, 0.6],
+    humidityRange: [0.4, 0.7],
+    terrainScale: 0.03,
+    terrainHeight: 16,
+  },
+  {
+    name: "desert",
+    color: new THREE.Color(0xd6c087), // Warmer, sandy color
+    temperatureRange: [0.7, 1.0],
+    humidityRange: [0.0, 0.3],
+    terrainScale: 0.02,
+    terrainHeight: 12,
+  },
+  {
+    name: "mountain",
+    color: new THREE.Color(0x9b928a), // Warmer grey for rocks
+    temperatureRange: [0.0, 0.3],
+    humidityRange: [0.0, 0.4],
+    terrainScale: 0.04,
+    terrainHeight: 32,
+  },
+  {
+    name: "forest",
+    color: new THREE.Color(0x4a6b3d), // Rich forest green
+    temperatureRange: [0.4, 0.7],
+    humidityRange: [0.6, 1.0],
+    terrainScale: 0.04,
+    terrainHeight: 18,
+  },
+];
+
+const DEFAULT_BIOME: Biome = BIOMES[0];
 
 interface TerrainChunk {
   mesh: THREE.Mesh;
@@ -22,6 +67,8 @@ export class InfiniteLandscape {
   private cubeSize = 1;
   private isoLevel = 0.5; // Changed from 0.4 for better surface generation
   private raycaster = new THREE.Raycaster();
+  private temperatureNoise: SimplexNoise;
+  private humidityNoise: SimplexNoise;
 
   private chunks: Map<string, TerrainChunk> = new Map();
   private viewDistance = 5; // Number of chunks visible in each direction
@@ -56,9 +103,10 @@ export class InfiniteLandscape {
     this.scene.add(hemisphereLight);
 
     this.material = new THREE.MeshPhongMaterial({
-      color: 0x55aa55,
+      vertexColors: true,
       side: THREE.FrontSide,
       flatShading: true,
+      color: 0xffffff,
     });
 
     const groundGeometry = new THREE.PlaneGeometry(1000, 1000);
@@ -71,7 +119,9 @@ export class InfiniteLandscape {
     ground.position.y = -10;
     this.scene.add(ground);
     this.setupEventListeners();
-    this.simplex = new SimplexNoise(pseudoRandom);
+    this.simplex = new SimplexNoise(new PseudoRandomNumberGenerator(234));
+    this.temperatureNoise = new SimplexNoise(new PseudoRandomNumberGenerator(23444));
+    this.humidityNoise = new SimplexNoise(new PseudoRandomNumberGenerator(23445));
     this.currentCenterChunk = this.getChunkCoordinates(this.camera.position);
     this.updateChunks(this.currentCenterChunk.x, this.currentCenterChunk.y);
 
@@ -125,7 +175,7 @@ export class InfiniteLandscape {
 
     const scalarField = this.createScalarField(chunkX, chunkZ);
 
-    const geometry = this.generateChunkGeometry(scalarField);
+    const geometry = this.generateChunkGeometry(scalarField, position);
     const mesh = new THREE.Mesh(geometry, this.material);
     mesh.position.copy(position);
     mesh.castShadow = true;
@@ -156,9 +206,10 @@ export class InfiniteLandscape {
     return field;
   }
 
-  private generateChunkGeometry(scalarField: number[][][]): THREE.BufferGeometry {
+  private generateChunkGeometry(scalarField: number[][][], chunkPosition: THREE.Vector3): THREE.BufferGeometry {
     const vertices: number[] = [];
     const normals: number[] = [];
+    const colors: number[] = [];
 
     // Correct edge to vertex mapping according to standard MC implementation
     const edgeToVertex = [
@@ -217,13 +268,41 @@ export class InfiniteLandscape {
               return this.interpolateVertex(corners[v1Index], corners[v2Index], values[v1Index], values[v2Index]);
             });
 
-            const [v1, v2, v3] = vertexIndices;
+            let [v1, v2, v3] = vertexIndices;
 
             // Calculate face normal
-            const normal = new THREE.Vector3().crossVectors(new THREE.Vector3().subVectors(v2, v1), new THREE.Vector3().subVectors(v3, v1)).normalize();
+            // const normal = new THREE.Vector3().crossVectors(new THREE.Vector3().subVectors(v2, v1), new THREE.Vector3().subVectors(v3, v1)).normalize();
+            const normal = new THREE.Vector3().crossVectors(new THREE.Vector3().subVectors(v2, v1), new THREE.Vector3().subVectors(v3, v1));
+            if (normal.lengthSq() === 0) {
+              // If normal calculation fails, provide a fallback
+              normal.set(0, 1, 0);
+            } else {
+              normal.normalize();
+            }
 
-            // Add vertices and normals
+            const getColor = (vertex: THREE.Vector3) => {
+              const worldX = chunkPosition.x + vertex.x;
+              const worldZ = chunkPosition.z + vertex.z;
+              const temperature = this.getTemperature(worldX, worldZ);
+              const humidity = this.getHumidity(worldX, worldZ);
+              return this.getBiomeColor(temperature, humidity, vertex.y);
+            };
+            const validateVertex = (v: THREE.Vector3) => {
+              if (!Number.isFinite(v.x) || !Number.isFinite(v.y) || !Number.isFinite(v.z)) {
+                return new THREE.Vector3(0, 0, 0);
+              }
+              return v;
+            };
+            v1 = validateVertex(v1);
+            v2 = validateVertex(v2);
+            v3 = validateVertex(v3);
+            const c1 = getColor(v1);
+            const c2 = getColor(v2);
+            const c3 = getColor(v3);
+
+            // Add vertices, normals, and colors
             vertices.push(v1.x, v1.y, v1.z, v2.x, v2.y, v2.z, v3.x, v3.y, v3.z);
+            colors.push(c1.r, c1.g, c1.b, c2.r, c2.g, c2.b, c3.r, c3.g, c3.b);
 
             for (let j = 0; j < 3; j++) {
               normals.push(normal.x, normal.y, normal.z);
@@ -236,39 +315,130 @@ export class InfiniteLandscape {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
     geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+    geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
     return geometry;
   }
 
   private generateNoiseValue(x: number, y: number, z: number): number {
-    const baseHeight = 16;
-    const scale = 0.03;
-    const persistence = 0.5; // Changed from 0.2 for more solid terrain
-    const octaves = 6; // Reduced from 8 for smoother terrain
+    const temperature = this.getTemperature(x, z);
+    const humidity = this.getHumidity(x, z);
+    const biome = this.getBiome(temperature, humidity);
+
+    const scale = biome.terrainScale;
+    const baseHeight = biome.terrainHeight;
+    const persistence = 0.6; // Increased from 0.5 for more variation
+    const octaves = 7; // Increased from 6 for more detail
 
     let amplitude = 1.0;
-    let frequency = 1.0; // Changed from 2.0 for smoother transitions
+    let frequency = 1.0;
     let noiseValue = 0;
     let maxValue = 0;
 
-    // Add a small offset to prevent precision issues
     const eps = 0.00001;
     x += eps;
     y += eps;
     z += eps;
 
+    // Add ridged multifractal noise for sharper peaks
     for (let i = 0; i < octaves; i++) {
-      noiseValue += this.simplex.noise3d(x * scale * frequency, y * scale * frequency, z * scale * frequency) * amplitude;
-
+      const n = Math.abs(this.simplex.noise3d(x * scale * frequency, y * scale * frequency, z * scale * frequency));
+      noiseValue += (1.0 - n) * amplitude; // Invert noise for ridged effect
       maxValue += amplitude;
       amplitude *= persistence;
-      frequency *= 2;
+      frequency *= 2.1; // Slightly higher frequency multiplier
     }
 
     noiseValue = noiseValue / maxValue;
 
-    // Create a height-based falloff that's more dramatic
-    const heightFalloff = Math.max(0, 1 - Math.pow(y / baseHeight, 1.5));
+    // Add some turbulence for more interesting mountain shapes
+    const turbulence = Math.abs(this.simplex.noise3d(x * 0.1, y * 0.1, z * 0.1));
+    noiseValue = noiseValue * (1 + turbulence * 0.5);
+
+    // Enhance mountain peaks with a power function
+    if (biome.name === "mountain") {
+      noiseValue = Math.pow(noiseValue, 0.8); // Makes peaks more pronounced
+    }
+
+    // Create a height-based falloff that's more dramatic for mountains
+    const heightFalloff =
+      biome.name === "mountain"
+        ? Math.max(0, 1 - Math.pow(y / baseHeight, 1.2)) // Less falloff for mountains
+        : Math.max(0, 1 - Math.pow(y / baseHeight, 1.5));
+
     return (noiseValue * 0.5 + 0.5) * heightFalloff;
+  }
+
+  private getTemperature(x: number, z: number): number {
+    const scale = 0.02; // Reduced scale for smoother transitions
+    return (this.temperatureNoise.noise3d(x * scale, 0, z * scale) + 1) * 0.5;
+  }
+
+  private getHumidity(x: number, z: number): number {
+    const scale = 0.015; // Even smoother humidity transitions
+    return (this.humidityNoise.noise3d(x * scale, 0, z * scale) + 1) * 0.5;
+  }
+
+  private getBiome(temperature: number, humidity: number): Biome {
+    for (const biome of BIOMES) {
+      if (
+        temperature >= biome.temperatureRange[0] &&
+        temperature <= biome.temperatureRange[1] &&
+        humidity >= biome.humidityRange[0] &&
+        humidity <= biome.humidityRange[1]
+      ) {
+        return biome;
+      }
+    }
+    return DEFAULT_BIOME;
+  }
+
+  private getBiomeColor(temperature: number, humidity: number, height: number): THREE.Color {
+    // Calculate biome influence factors for smoother transitions
+    let totalWeight = 0;
+    const biomeWeights = BIOMES.map((b) => {
+      const tCenter = (b.temperatureRange[0] + b.temperatureRange[1]) / 2;
+      const hCenter = (b.humidityRange[0] + b.humidityRange[1]) / 2;
+
+      // Calculate distance from current point to biome center
+      const tDist = 1 - Math.min(1, Math.abs(temperature - tCenter) / 0.3);
+      const hDist = 1 - Math.min(1, Math.abs(humidity - hCenter) / 0.3);
+
+      // Combined weight with smooth falloff
+      const weight = Math.max(0.0001, Math.pow(tDist * hDist, 2)); // Ensure weight is never zero
+      totalWeight += weight;
+      return { biome: b, weight };
+    });
+
+    // Blend colors based on weights
+    const blendedColor = new THREE.Color(0, 0, 0);
+    biomeWeights.forEach(({ biome: b, weight }) => {
+      const normalizedWeight = weight / totalWeight;
+      const biomeColor = b.color.clone();
+      blendedColor.add(biomeColor.multiplyScalar(normalizedWeight));
+    });
+
+    // Apply height-based shading and variations
+    const heightFactor = Math.min(1, Math.max(0, height / 32)); // Clamp height factor between 0 and 1
+
+    // Add slight color variations based on height
+    if (heightFactor > 0.7) {
+      // Mountain peaks
+      blendedColor.lerp(new THREE.Color(0xc0c0c0), Math.min(1, (heightFactor - 0.7) / 0.3));
+    } else if (heightFactor < 0.2) {
+      // Lower areas
+      blendedColor.lerp(new THREE.Color(0x385321), Math.min(1, 0.3 * (1 - heightFactor / 0.2)));
+    }
+
+    // Apply ambient occlusion effect for valleys with clamping
+    const valleyDarkening = Math.min(1, Math.max(0.3, 0.7 + 0.3 * heightFactor));
+    blendedColor.multiplyScalar(valleyDarkening);
+
+    // Ensure color components stay in valid range
+    blendedColor.r = Math.min(1, Math.max(0.01, blendedColor.r));
+    blendedColor.g = Math.min(1, Math.max(0.01, blendedColor.g));
+    blendedColor.b = Math.min(1, Math.max(0.01, blendedColor.b));
+
+    return blendedColor;
   }
 
   private interpolateVertex(v1: THREE.Vector3, v2: THREE.Vector3, val1: number, val2: number): THREE.Vector3 {
@@ -338,7 +508,7 @@ export class InfiniteLandscape {
       }
     }
 
-    const newGeometry = this.generateChunkGeometry(chunk.scalarField);
+    const newGeometry = this.generateChunkGeometry(chunk.scalarField, chunk.position);
     chunk.mesh.geometry.dispose();
     chunk.mesh.geometry = newGeometry;
   }
