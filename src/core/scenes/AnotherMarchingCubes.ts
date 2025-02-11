@@ -4,7 +4,52 @@ import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise";
 import { PseudoRandomNumberGenerator } from "../utils/PseudoRandom";
 import { edgeTable, triTable } from "./MCDefs";
 
-const EPSILON = 1e-5;
+function visualizeScalarFieldSlice(field: number[][][], yIndex: number): void {
+  // Create a canvas that's as big as the X-Z plane of the scalar field
+  const width = field.length;
+  const height = field[0][0]?.length || 0;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  canvas.style.position = "absolute";
+  canvas.style.top = "0";
+  canvas.style.left = "0";
+  canvas.style.zIndex = "100";
+  canvas.style.width = "256px";
+  canvas.style.height = "256px";
+
+  canvas.style.border = "1px solid black ";
+  document.body.appendChild(canvas);
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    console.error("Could not get canvas context.");
+    return;
+  }
+
+  // Create an image data object to manipulate pixel values
+  const imageData = ctx.createImageData(width, height);
+
+  // Loop over the X-Z plane at the specified y-index
+  for (let x = 0; x < width; x++) {
+    for (let z = 0; z < height; z++) {
+      // Clamp yIndex within bounds
+      const y = Math.min(Math.max(yIndex, 0), field[x].length - 1);
+      let value = field[x][y][z];
+      // Normalize value to [0, 255] for grayscale (adjust normalization as needed)
+      const grayscale = Math.floor(255 * Math.min(1, Math.max(0, value)));
+
+      const index = (x + z * width) * 4;
+      imageData.data[index] = grayscale; // red
+      imageData.data[index + 1] = grayscale; // green
+      imageData.data[index + 2] = grayscale; // blue
+      imageData.data[index + 3] = 255; // alpha
+    }
+  }
+
+  ctx.putImageData(imageData, 0, 0);
+}
+const EPSILON = 0.00000001; //1e-5 / 10;
 
 type Biome = {
   name: string;
@@ -65,9 +110,9 @@ export class InfiniteLandscape {
   light: THREE.DirectionalLight;
   private material: THREE.MeshPhongMaterial;
   private simplex: SimplexNoise;
-  private gridSize = 33; // Changed from 32 to ensure overlap
+  private gridSize = 37; // Changed from 32 to ensure overlap
   private cubeSize = 1;
-  private isoLevel = 0.6; // Changed from 0.4 for better surface generation
+  private isoLevel = 0.5; // Changed from 0.4 for better surface generation
   private raycaster = new THREE.Raycaster();
   private temperatureNoise: SimplexNoise;
   private humidityNoise: SimplexNoise;
@@ -77,10 +122,12 @@ export class InfiniteLandscape {
   private currentCenterChunk: THREE.Vector2 = new THREE.Vector2();
 
   constructor() {
-    console.log("Edge table length:", edgeTable.length); // Should be 256
+    console.log(edgeTable);
+    console.log(triTable);
 
     // Check some known cases
     console.log("Case 1:", triTable[1]); // Should have valid indices and end with -1
+    console.log("Case 3:", triTable[3]);
     console.log("Case 255:", triTable[255]); // Should be empty case (all vertices inside)
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x87ceeb);
@@ -94,9 +141,9 @@ export class InfiniteLandscape {
     this.renderer.shadowMap.enabled = true;
     document.body.appendChild(this.renderer.domElement);
 
-    this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-    this.controls.enableDamping = true;
-    this.controls.dampingFactor = 0.05;
+    // this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+    // this.controls.enableDamping = true;
+    // this.controls.dampingFactor = 0.05;
 
     this.light = new THREE.DirectionalLight(0xffffff, 1);
     this.light.position.set(50, 100, 50);
@@ -111,14 +158,15 @@ export class InfiniteLandscape {
 
     this.material = new THREE.MeshPhongMaterial({
       vertexColors: true,
-      side: THREE.FrontSide,
+      side: THREE.DoubleSide,
       flatShading: true,
+      wireframe: true,
       color: 0xffffff,
     });
 
     const groundGeometry = new THREE.PlaneGeometry(1000, 1000);
     const groundMaterial = new THREE.MeshBasicMaterial({
-      color: 0x0011ee,
+      color: 0xff00ff,
       side: THREE.DoubleSide,
     });
     const ground = new THREE.Mesh(groundGeometry, groundMaterial);
@@ -126,9 +174,9 @@ export class InfiniteLandscape {
     ground.position.y = -10;
     this.scene.add(ground);
     this.setupEventListeners();
-    this.simplex = new SimplexNoise(new PseudoRandomNumberGenerator(234));
-    this.temperatureNoise = new SimplexNoise(new PseudoRandomNumberGenerator(23444));
-    this.humidityNoise = new SimplexNoise(new PseudoRandomNumberGenerator(23445));
+    this.simplex = new SimplexNoise(new PseudoRandomNumberGenerator(2343));
+    this.temperatureNoise = new SimplexNoise(new PseudoRandomNumberGenerator(234443));
+    this.humidityNoise = new SimplexNoise(new PseudoRandomNumberGenerator(234245));
     this.currentCenterChunk = this.getChunkCoordinates(this.camera.position);
     this.updateChunks(this.currentCenterChunk.x, this.currentCenterChunk.y);
 
@@ -170,6 +218,16 @@ export class InfiniteLandscape {
     const key = this.getChunkKey(chunkX, chunkZ);
     const chunk = this.chunks.get(key);
     if (chunk) {
+      // Remove both the mesh and its grid helper
+      const children = this.scene.children.filter((child) => child.position.equals(chunk.mesh.position) && child instanceof THREE.LineSegments);
+      children.forEach((child) => {
+        this.scene.remove(child);
+        if (child instanceof THREE.LineSegments) {
+          child.geometry.dispose();
+          child.material.dispose();
+        }
+      });
+
       this.scene.remove(chunk.mesh);
       chunk.mesh.geometry.dispose();
       this.chunks.delete(key);
@@ -182,6 +240,7 @@ export class InfiniteLandscape {
     const position = new THREE.Vector3(chunkX * chunkSize, 0, chunkZ * chunkSize);
 
     const scalarField = this.createScalarField(chunkX, chunkZ);
+    visualizeScalarFieldSlice(scalarField, Math.floor(this.gridSize / 2)); // Visualize the slice at the middle y-index
     const geometry = this.generateChunkGeometry(scalarField, position);
 
     // Add validation for degenerate geometry
@@ -201,7 +260,32 @@ export class InfiniteLandscape {
     this.chunks.set(this.getChunkKey(chunkX, chunkZ), chunk);
     this.scene.add(mesh);
 
+    // Add grid visualization
+    const gridHelper = this.createGridVisualizer(position);
+    this.scene.add(gridHelper);
+
     return chunk;
+  }
+
+  private createGridVisualizer(position: THREE.Vector3): THREE.LineSegments {
+    const size = this.gridSize * this.cubeSize;
+    const geometry = new THREE.BoxGeometry(size, size, size);
+    // Convert BoxGeometry to wireframe
+    const edges = new THREE.EdgesGeometry(geometry);
+    const material = new THREE.LineBasicMaterial({
+      color: 0xff0000, // Red color for visibility
+      linewidth: 1,
+    });
+    const box = new THREE.LineSegments(edges, material);
+
+    // Adjust position to align with chunk
+    box.position.copy(position);
+    // Center the box on the chunk
+    box.position.x += size / 2;
+    box.position.y += size / 2;
+    box.position.z += size / 2;
+
+    return box;
   }
 
   private createPlaceholderChunk(position: THREE.Vector3): TerrainChunk {
@@ -252,17 +336,32 @@ export class InfiniteLandscape {
   }
 
   private generateChunkGeometry(scalarField: number[][][], chunkPosition: THREE.Vector3): THREE.BufferGeometry {
-    const vertices: number[] = [];
-    const normals: number[] = [];
-    const colors: number[] = [];
+    // Arrays for unique vertex data
+    const positions: number[] = [];
+    const normalsAccum: THREE.Vector3[] = [];
+    const colorsAccum: THREE.Color[] = [];
+    const indices: number[] = [];
 
-    const validateVertices = (v1: THREE.Vector3, v2: THREE.Vector3, v3: THREE.Vector3): boolean => {
-      const isValid = (v: THREE.Vector3) =>
-        Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z) && !Number.isNaN(v.x) && !Number.isNaN(v.y) && !Number.isNaN(v.z);
+    // A map from vertex key (position rounded) to index
+    const vertexMap: { [key: string]: number } = {};
 
-      return isValid(v1) && isValid(v2) && isValid(v3);
+    // Helper: get a unique key for a vertex based on position
+    const getVertexKey = (v: THREE.Vector3): string => {
+      const precision = 5; // adjust as needed
+      return `${v.x.toFixed(precision)}_${v.y.toFixed(precision)}_${v.z.toFixed(precision)}`;
     };
-    // Correct edge to vertex mapping according to standard MC implementation
+    // Compute per-vertex colors
+    const getColor = (vertex: THREE.Vector3): THREE.Color => {
+      const worldX = chunkPosition.x + vertex.x;
+      const worldZ = chunkPosition.z + vertex.z;
+      const temperature = this.getTemperature(worldX, worldZ);
+      const humidity = this.getHumidity(worldX, worldZ);
+      return this.getBiomeColor(temperature, humidity, vertex.y);
+    };
+
+    const isValid = (v: THREE.Vector3) =>
+      Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z) && !Number.isNaN(v.x) && !Number.isNaN(v.y) && !Number.isNaN(v.z);
+
     const edgeToVertex = [
       [0, 1],
       [1, 3],
@@ -278,20 +377,29 @@ export class InfiniteLandscape {
       [2, 6], // vertical edges
     ];
 
+    // We'll also accumulate face normals into vertex normals
+    const addVertex = (v: THREE.Vector3, color: THREE.Color, faceNormal: THREE.Vector3): number => {
+      const key = getVertexKey(v);
+      if (vertexMap.hasOwnProperty(key)) {
+        const idx = vertexMap[key];
+        // Accumulate face normal
+        normalsAccum[idx].add(faceNormal);
+        return idx;
+      } else {
+        const idx = positions.length / 3;
+        positions.push(v.x, v.y, v.z);
+        normalsAccum.push(faceNormal.clone());
+        colorsAccum.push(color.clone());
+        vertexMap[key] = idx;
+        return idx;
+      }
+    };
+
+    // Iterate cubes in scalar field
     for (let x = 0; x < this.gridSize - 1; x++) {
       for (let y = 0; y < this.gridSize - 1; y++) {
         for (let z = 0; z < this.gridSize - 1; z++) {
-          const corners = [
-            new THREE.Vector3(x, y, z),
-            new THREE.Vector3(x + 1, y, z),
-            new THREE.Vector3(x, y, z + 1),
-            new THREE.Vector3(x + 1, y, z + 1),
-            new THREE.Vector3(x, y + 1, z),
-            new THREE.Vector3(x + 1, y + 1, z),
-            new THREE.Vector3(x, y + 1, z + 1),
-            new THREE.Vector3(x + 1, y + 1, z + 1),
-          ].map((v) => v.multiplyScalar(this.cubeSize));
-
+          const corners = this.getCubeCorners(x, y, z);
           const values = [
             scalarField[x][y][z],
             scalarField[x + 1][y][z],
@@ -311,66 +419,70 @@ export class InfiniteLandscape {
           }
 
           if (Number(edgeTable[cubeIndex]) === 0) continue;
-
           const triangles = triTable[cubeIndex];
           if (!triangles || triangles.length === 0) continue;
-          for (let i = 0; triangles[i] !== -1; i += 3) {
-            const vertexIndices = [triangles[i], triangles[i + 1], triangles[i + 2]].map((edgeIndex) => {
+
+          for (let i = 0; i < triangles.length - 1; i += 3) {
+            // Compute vertices
+            const triangleVertices = [triangles[i], triangles[i + 1], triangles[i + 2]].map((edgeIndex) => {
               const [v1Index, v2Index] = edgeToVertex[edgeIndex];
               return this.interpolateVertex(corners[v1Index], corners[v2Index], values[v1Index], values[v2Index]);
             });
+            let [v1, v2, v3] = triangleVertices;
 
-            let [v1, v2, v3] = vertexIndices;
-
-            // In the generateChunkGeometry function, before adding vertices:
-            if (!validateVertices(v1, v2, v3)) {
-              continue; // Skip invalid triangles
+            if (v1.equals(v2) || v2.equals(v3) || v3.equals(v1)) {
+              // con//sole.warn("Skipping degenerate triangle due to identical vertices.");
+              continue;
             }
 
-            // Calculate face normal
+            if (!isValid(v1) || !isValid(v2) || !isValid(v3)) continue;
+
+            // Compute face normal (flat)
             const edge1 = new THREE.Vector3().subVectors(v2, v1);
             const edge2 = new THREE.Vector3().subVectors(v3, v1);
-            const normal = new THREE.Vector3().crossVectors(edge1, edge2);
-            if (normal.lengthSq() === 0) {
-              normal.set(0, 1, 0);
-            } else {
-              normal.normalize();
+            const faceNormal = new THREE.Vector3().crossVectors(edge1, edge2);
+            if (faceNormal.lengthSq() < EPSILON) {
+              //  console.warn("Skipping degenerate triangle");
+              //   console.log(`Cube Index: ${cubeIndex}, Triangle Indices: [${triangles[i]}, ${triangles[i + 1]}, ${triangles[i + 2]}]`);
+              continue;
             }
 
-            const getColor = (vertex: THREE.Vector3) => {
-              const worldX = chunkPosition.x + vertex.x;
-              const worldZ = chunkPosition.z + vertex.z;
-              const temperature = this.getTemperature(worldX, worldZ);
-              const humidity = this.getHumidity(worldX, worldZ);
-              return this.getBiomeColor(temperature, humidity, vertex.y);
-            };
-            const validateVertex = (v: THREE.Vector3) => {
-              if (!Number.isFinite(v.x) || !Number.isFinite(v.y) || !Number.isFinite(v.z)) {
-                return new THREE.Vector3(0, 0, 0);
-              }
-              return v;
-            };
-            v1 = validateVertex(v1);
-            v2 = validateVertex(v2);
-            v3 = validateVertex(v3);
+            faceNormal.normalize();
+
             const c1 = getColor(v1);
             const c2 = getColor(v2);
             const c3 = getColor(v3);
 
-            // Add vertices, normals, and colors
-            vertices.push(v1.x, v1.y, v1.z, v2.x, v2.y, v2.z, v3.x, v3.y, v3.z);
-            colors.push(c1.r, c1.g, c1.b, c2.r, c2.g, c2.b, c3.r, c3.g, c3.b);
-
-            for (let j = 0; j < 3; j++) {
-              normals.push(normal.x, normal.y, normal.z);
-            }
+            // Add (or reuse) vertices and record triangle indices
+            const idx1 = addVertex(v1, c1, faceNormal);
+            const idx2 = addVertex(v2, c2, faceNormal);
+            const idx3 = addVertex(v3, c3, faceNormal);
+            indices.push(idx1, idx2, idx3);
           }
         }
       }
     }
 
+    // Normalize accumulated normals
+    const normals: number[] = [];
+    normalsAccum.forEach((vec) => {
+      if (vec.lengthSq() < EPSILON) {
+        vec.set(0, 1, 0); // Default upward normal if zero-length
+      } else {
+        vec.normalize();
+      }
+      normals.push(vec.x, vec.y, vec.z);
+    });
+
+    // Prepare color array
+    const colors: number[] = [];
+    colorsAccum.forEach((c) => {
+      colors.push(c.r, c.g, c.b);
+    });
+
     const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
+    geometry.setIndex(indices);
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
     geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
     geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
     return geometry;
@@ -386,34 +498,23 @@ export class InfiniteLandscape {
     const persistence = 0.6; // Increased from 0.5 for more variation
     const octaves = 7; // Increased from 6 for more detail
 
-    let amplitude = 1.0;
-    let frequency = 1.0;
-    let noiseValue = 0;
-    let maxValue = 0;
-
+    // Add a small offset for consistency
     const eps = 0.00001;
     x += eps;
     y += eps;
     z += eps;
 
-    // Add ridged multifractal noise for sharper peaks
-    for (let i = 0; i < octaves; i++) {
-      const n = Math.abs(this.simplex.noise3d(x * scale * frequency, y * scale * frequency, z * scale * frequency));
-      noiseValue += (1.0 - n) * amplitude; // Invert noise for ridged effect
-      maxValue += amplitude;
-      amplitude *= persistence;
-      frequency *= 2.1; // Slightly higher frequency multiplier
-    }
+    let noiseValue = this.generateRidgedNoise(x, y, z, scale, octaves, persistence);
 
-    noiseValue = noiseValue / maxValue;
-
-    // Add some turbulence for more interesting mountain shapes
+    // Add turbulence for more interesting mountain shapes
     const turbulence = Math.abs(this.simplex.noise3d(x * 0.1, y * 0.1, z * 0.1));
     noiseValue = noiseValue * (1 + turbulence * 0.5);
 
-    // Enhance mountain peaks with a power function
+    // return (noiseValue * 0.5 + 0.5) * heightFallo
+
+    // Enhance mountain peaks with a power function if using mountain biome
     if (biome.name === "mountain") {
-      noiseValue = Math.pow(noiseValue, 0.8); // Makes peaks more pronounced
+      noiseValue = Math.pow(noiseValue, 0.8);
     }
 
     // Create a height-based falloff that's more dramatic for mountains
@@ -421,17 +522,46 @@ export class InfiniteLandscape {
       biome.name === "mountain"
         ? Math.max(0, 1 - Math.pow(y / baseHeight, 1.2)) // Less falloff for mountains
         : Math.max(0, 1 - Math.pow(y / baseHeight, 1.5));
+    const STABILIZATION_EPSILON = 0.01;
+    if (Math.abs(noiseValue - this.isoLevel) < STABILIZATION_EPSILON) {
+      noiseValue = this.isoLevel + (noiseValue > this.isoLevel ? STABILIZATION_EPSILON : -STABILIZATION_EPSILON);
+    }
 
-    //      const edgeFade = 0.1;
-    // const xDist = Math.min(x % (this.gridSize - 1), (this.gridSize - 1) - (x % (this.gridSize - 1)));
-    // const zDist = Math.min(z % (this.gridSize - 1), (this.gridSize - 1) - (z % (this.gridSize - 1)));
-    // const edgeFactor = Math.min(
-    //     Math.min(xDist, zDist) / (edgeFade * (this.gridSize - 1)),
-    //     1
-    // );
-
-    // noiseValue *= edgeFactor;
     return (noiseValue * 0.5 + 0.5) * heightFalloff;
+  }
+
+  // Helper: Create and scale the 8 corners of a cube at grid coordinates (x,y,z)
+  private getCubeCorners(x: number, y: number, z: number): THREE.Vector3[] {
+    const corners = [
+      new THREE.Vector3(x, y, z),
+      new THREE.Vector3(x + 1, y, z),
+      new THREE.Vector3(x, y, z + 1),
+      new THREE.Vector3(x + 1, y, z + 1),
+      new THREE.Vector3(x, y + 1, z),
+      new THREE.Vector3(x + 1, y + 1, z),
+      new THREE.Vector3(x, y + 1, z + 1),
+      new THREE.Vector3(x + 1, y + 1, z + 1),
+    ];
+    return corners.map((v) => v.multiplyScalar(this.cubeSize));
+  }
+
+  // Helper: Compute ridged multifractal noise over multiple octaves.
+  private generateRidgedNoise(x: number, y: number, z: number, scale: number, octaves: number, persistence: number): number {
+    let amplitude = 1.0;
+    let frequency = 1.0;
+    let noiseValue = 0;
+    let maxValue = 0;
+
+    for (let i = 0; i < octaves; i++) {
+      const n = Math.abs(this.simplex.noise3d(x * scale * frequency, y * scale * frequency, z * scale * frequency));
+      // Invert noise for a ridged effect
+      noiseValue += (1.0 - n) * amplitude;
+      maxValue += amplitude;
+      amplitude *= persistence;
+      frequency *= 2; // Slightly higher frequency multiplier
+    }
+
+    return noiseValue / maxValue;
   }
 
   private getTemperature(x: number, z: number): number {
@@ -508,46 +638,55 @@ export class InfiniteLandscape {
   }
 
   private interpolateVertex(v1: THREE.Vector3, v2: THREE.Vector3, val1: number, val2: number): THREE.Vector3 {
-    if (!Number.isFinite(val1) || !Number.isFinite(val2)) {
-      return v1.clone().lerp(v2, 0.5);
+    // Handle near-zero denominator
+    if (Math.abs(val2 - val1) < EPSILON) {
+      return v1.clone().add(v2).multiplyScalar(0.5);
     }
-    const denominator = val2 - val1;
-    let t: number;
 
-    if (Math.abs(denominator) < EPSILON) {
-      t = 0.5;
-    } else if (Math.abs(val1 - this.isoLevel) < EPSILON) {
-      t = 0;
-    } else if (Math.abs(val2 - this.isoLevel) < EPSILON) {
-      t = 1;
-    } else {
-      t = (this.isoLevel - val1) / denominator;
-      t = Math.max(EPSILON, Math.min(1 - EPSILON, t));
-    }
-    return v1.clone().lerp(v2, t);
+    let t = (this.isoLevel - val1) / (val2 - val1);
+    t = Math.max(0, Math.min(1, t)); // Clamp to [0,1]
+
+    // Use more precise interpolation
+    return new THREE.Vector3(v1.x + t * (v2.x - v1.x), v1.y + t * (v2.y - v1.y), v1.z + t * (v2.z - v1.z));
   }
-
   private setupEventListeners(): void {
-    window.addEventListener("click", (event) => this.onMouseClick(event));
+    window.addEventListener("mousedown", (event) => this.onMouseDown(event));
+    window.addEventListener("mouseup", (event) => this.onMouseUp(event));
+    window.addEventListener("mousemove", (event) => this.onMouseMove(event));
     window.addEventListener("resize", () => this.onWindowResize());
+    window.addEventListener("keydown", (event) => this.onKeyDown(event));
   }
-
+  private onKeyDown(event: KeyboardEvent): void {
+    if (event.key === "w") {
+      this.material.wireframe = !this.material.wireframe;
+      this.material.needsUpdate = true;
+    }
+  }
   private onWindowResize(): void {
     this.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
   }
 
-  private onMouseClick(event: MouseEvent): void {
-    const mouse = new THREE.Vector2((event.clientX / window.innerWidth) * 2 - 1, -(event.clientY / window.innerHeight) * 2 + 1);
+  private mouseDown = false;
+  private onMouseDown(event: MouseEvent): void {
+    this.mouseDown = true;
+  }
+  private onMouseUp(event: MouseEvent): void {
+    this.mouseDown = false;
+  }
+  private onMouseMove(event: MouseEvent): void {
+    if (this.mouseDown) {
+      const mouse = new THREE.Vector2((event.clientX / window.innerWidth) * 2 - 1, -(event.clientY / window.innerHeight) * 2 + 1);
 
-    const meshes = Array.from(this.chunks.values()).map((chunk) => chunk.mesh);
-    this.raycaster.setFromCamera(mouse, this.camera);
-    const intersects = this.raycaster.intersectObjects(meshes);
+      const meshes = Array.from(this.chunks.values()).map((chunk) => chunk.mesh);
+      this.raycaster.setFromCamera(mouse, this.camera);
+      const intersects = this.raycaster.intersectObjects(meshes);
 
-    if (intersects.length > 0) {
-      const point = intersects[0].point;
-      this.sculptTerrain(point);
+      if (intersects.length > 0) {
+        const point = intersects[0].point;
+        this.sculptTerrain(point);
+      }
     }
   }
 
@@ -602,8 +741,9 @@ export class InfiniteLandscape {
       this.currentCenterChunk.copy(newCenter);
       this.updateChunks(newCenter.x, newCenter.y);
     }
-
-    this.controls.update();
+    // if (!this.mouseDown) {
+    //   this.controls.update();
+    // }
     this.renderer.render(this.scene, this.camera);
   }
 }
