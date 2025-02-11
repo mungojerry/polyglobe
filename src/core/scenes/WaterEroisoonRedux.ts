@@ -228,33 +228,33 @@ export class ProceduralTerrainRedux {
   }
 
   private initWaterSystem() {
-    // Create marching cubes mesh for water surface
+    // Create marching cubes mesh for water surface with adjusted scale
     const resolution = 64;
     this.waterMesh = new MarchingCubes(
       resolution,
       new THREE.MeshPhongMaterial({
-        color: 0x0055ff,
+        color: 0xff0000, //0x0055ff,
         transparent: true,
-        opacity: 0.6,
+        opacity: 0.9,
         shininess: 80,
+        side: THREE.DoubleSide, // Render both sides of the mesh
       }),
       true,
       true
     );
-
-    this.waterMesh.position.set(0, 0, 0);
-    this.waterMesh.scale.set(this.size, this.size / 2, this.size);
-    this.waterMesh.isolation = 1.0;
-
+    // Set horizontal scale to match terrain and vertical scale lower (e.g. 10) for water height
+    this.waterMesh.scale.set(this.size, 10, this.size);
+    this.waterMesh.isolation = 0.75;
+    this.waterMesh.position.set(0, 5, 0);
     this.scene.add(this.waterMesh);
 
-    // Create particle system for active droplets
+    // Create particle system for active droplets remains unchanged
     this.waterGeometry = new THREE.BufferGeometry();
     const waterMaterial = new THREE.PointsMaterial({
       color: 0x0066ff,
       size: 0.3,
       transparent: true,
-      opacity: 0.5,
+      opacity: 0.8,
     });
 
     this.waterSystem = new THREE.Points(this.waterGeometry, waterMaterial);
@@ -318,59 +318,24 @@ export class ProceduralTerrainRedux {
       }
     });
 
-    // Update active droplets
+    // Update active droplets remains unchanged
     this.waterDroplets = this.waterDroplets.filter((d) => d.water > 0);
     this.waterGeometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
     this.waterGeometry.attributes.position.needsUpdate = true;
 
-    // Update water surface
+    // Update water surface with adjusted conversion:
     this.waterMesh.reset();
+    const resolution = this.waterMesh.resolution; // 64
+    const waterHeight = 10; // same as vertical scale
     this.settledDroplets.forEach((droplet) => {
       const { x, y, z } = droplet.position;
-      // Convert world position to marching cubes grid space
-      const gridX = ((x + this.size / 2) / this.size) * this.waterMesh.resolution;
-      const gridY = (y / (this.size / 2)) * this.waterMesh.resolution;
-      const gridZ = ((z + this.size / 2) / this.size) * this.waterMesh.resolution;
-
-      // Add metaball influence
-      this.waterMesh.addBall(gridX, gridY, gridZ, droplet.radius * 3, 0.5);
-    });
-  }
-
-  private spreadWater(gridX: number, gridZ: number) {
-    const currentHeight = this.getTerrainHeightAtPoint(
-      (gridX / (this.gridSize - 1)) * this.size - this.size / 2,
-      (gridZ / (this.gridSize - 1)) * this.size - this.size / 2
-    );
-    const currentWaterLevel = this.waterLevels[gridX][gridZ];
-    const totalHeight = currentHeight + currentWaterLevel;
-
-    const neighbors = [
-      { dx: -1, dz: 0 },
-      { dx: 1, dz: 0 },
-      { dx: 0, dz: -1 },
-      { dx: 0, dz: 1 },
-    ];
-
-    neighbors.forEach(({ dx, dz }) => {
-      const newX = gridX + dx;
-      const newZ = gridZ + dz;
-
-      if (newX >= 0 && newX < this.gridSize && newZ >= 0 && newZ < this.gridSize) {
-        const neighborHeight = this.getTerrainHeightAtPoint(
-          (newX / this.gridSize) * this.size - this.size / 2,
-          (newZ / this.gridSize) * this.size - this.size / 2
-        );
-        const neighborWaterLevel = this.waterLevels[newX][newZ];
-        const neighborTotal = neighborHeight + neighborWaterLevel;
-
-        if (totalHeight > neighborTotal) {
-          // Transfer water to lower neighbor
-          const transfer = Math.min((totalHeight - neighborTotal) * 0.5, currentWaterLevel);
-          this.waterLevels[gridX][gridZ] -= transfer;
-          this.waterLevels[newX][newZ] += transfer;
-        }
-      }
+      // Map world coordinates (x,z) assuming terrain goes from -size/2 to size/2;
+      // Map y relative to waterHeight (assumed [0,10])
+      const gridX = ((x + this.size / 2) / this.size) * resolution;
+      const gridY = (y / waterHeight) * resolution;
+      const gridZ = ((z + this.size / 2) / this.size) * resolution;
+      // Adjust ball radius multiplier and subtract: try using droplet.radius * 1.5 and subtract=0.75
+      this.waterMesh.addBall(gridX, gridY, gridZ, droplet.radius * 1.5, 0.75);
     });
   }
 

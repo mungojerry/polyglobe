@@ -1,4 +1,4 @@
-import { ProceduralTerrainRedux } from "./core/scenes/WaterEroisoonRedux";
+import { InfiniteLandscape } from "./core/scenes/AnotherMarchingCubes";
 import "./style.css";
 
 console.log("starting...");
@@ -14,5 +14,6 @@ console.log("starting...");
 // new LowPolyPlanet();
 // new MarchingCubesDemo();
 // new ProceduralTerrain();
-new ProceduralTerrainRedux();
+new InfiniteLandscape();
+// new ProceduralTerrainRedux();
 console.log("should be running");
