@@ -57,7 +57,7 @@ export class InfiniteLandscape {
 
     this.material = new THREE.MeshPhongMaterial({
       color: 0x55aa55,
-      side: THREE.DoubleSide,
+      side: THREE.FrontSide,
       flatShading: true,
     });
 
@@ -131,6 +131,7 @@ export class InfiniteLandscape {
     mesh.position.copy(position);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
+    mesh.frustumCulled = true;
 
     const chunk: TerrainChunk = { mesh, position, scalarField };
     this.chunks.set(this.getChunkKey(chunkX, chunkZ), chunk);
