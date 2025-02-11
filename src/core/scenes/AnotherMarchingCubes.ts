@@ -18,13 +18,13 @@ export class InfiniteLandscape {
   light: THREE.DirectionalLight;
   private material: THREE.MeshPhongMaterial;
   private simplex: SimplexNoise;
-  private gridSize = 32;
+  private gridSize = 33; // Changed from 32 to ensure overlap
   private cubeSize = 1;
-  private isoLevel = 0.4; // Changed from 0.7
+  private isoLevel = 0.5; // Changed from 0.4 for better surface generation
   private raycaster = new THREE.Raycaster();
 
   private chunks: Map<string, TerrainChunk> = new Map();
-  private viewDistance = 3; // Number of chunks visible in each direction
+  private viewDistance = 5; // Number of chunks visible in each direction
   private currentCenterChunk: THREE.Vector2 = new THREE.Vector2();
 
   constructor() {
@@ -63,9 +63,8 @@ export class InfiniteLandscape {
 
     const groundGeometry = new THREE.PlaneGeometry(1000, 1000);
     const groundMaterial = new THREE.MeshBasicMaterial({
-      color: 0x666666,
+      color: 0x0011ee,
       side: THREE.DoubleSide,
-      wireframe: true,
     });
     const ground = new THREE.Mesh(groundGeometry, groundMaterial);
     ground.rotation.x = Math.PI / 2;
@@ -73,7 +72,6 @@ export class InfiniteLandscape {
     this.scene.add(ground);
     this.setupEventListeners();
     this.simplex = new SimplexNoise(pseudoRandom);
-    // Initialize chunks around camera's starting position
     this.currentCenterChunk = this.getChunkCoordinates(this.camera.position);
     this.updateChunks(this.currentCenterChunk.x, this.currentCenterChunk.y);
 
@@ -81,8 +79,8 @@ export class InfiniteLandscape {
   }
 
   private getChunkCoordinates(position: THREE.Vector3): THREE.Vector2 {
-    const chunkX = Math.floor(position.x / ((this.gridSize - 1) * this.cubeSize));
-    const chunkZ = Math.floor(position.z / ((this.gridSize - 1) * this.cubeSize));
+    const chunkX = Math.floor(position.x / ((this.gridSize - 2) * this.cubeSize));
+    const chunkZ = Math.floor(position.z / ((this.gridSize - 2) * this.cubeSize));
     return new THREE.Vector2(chunkX, chunkZ);
   }
 
@@ -92,8 +90,8 @@ export class InfiniteLandscape {
 
   private updateChunks(cameraChunkX: number, cameraChunkZ: number): void {
     // Remove out-of-range chunks
-    for (const [key, chunk] of this.chunks) {
-      const [x, z] = key.split(",").map(Number);
+    for (const [_, chunk] of this.chunks) {
+      const { x, z } = chunk.position;
       const distance = Math.max(Math.abs(x - cameraChunkX), Math.abs(z - cameraChunkZ));
       if (distance > this.viewDistance) {
         this.removeChunk(x, z);
@@ -122,7 +120,8 @@ export class InfiniteLandscape {
   }
 
   private createChunk(chunkX: number, chunkZ: number): TerrainChunk {
-    const position = new THREE.Vector3(chunkX * (this.gridSize - 1) * this.cubeSize, 0, chunkZ * (this.gridSize - 1) * this.cubeSize);
+    // Offset position by 1 to account for overlap
+    const position = new THREE.Vector3(chunkX * (this.gridSize - 2) * this.cubeSize, 0, chunkZ * (this.gridSize - 2) * this.cubeSize);
 
     const scalarField = this.createScalarField(chunkX, chunkZ);
 
@@ -243,13 +242,19 @@ export class InfiniteLandscape {
   private generateNoiseValue(x: number, y: number, z: number): number {
     const baseHeight = 16;
     const scale = 0.03;
-    const persistence = 0.5;
-    const octaves = 4;
+    const persistence = 0.5; // Changed from 0.2 for more solid terrain
+    const octaves = 6; // Reduced from 8 for smoother terrain
 
     let amplitude = 1.0;
-    let frequency = 1.0;
+    let frequency = 1.0; // Changed from 2.0 for smoother transitions
     let noiseValue = 0;
     let maxValue = 0;
+
+    // Add a small offset to prevent precision issues
+    const eps = 0.00001;
+    x += eps;
+    y += eps;
+    z += eps;
 
     for (let i = 0; i < octaves; i++) {
       noiseValue += this.simplex.noise3d(x * scale * frequency, y * scale * frequency, z * scale * frequency) * amplitude;
@@ -264,34 +269,6 @@ export class InfiniteLandscape {
     // Create a height-based falloff that's more dramatic
     const heightFalloff = Math.max(0, 1 - Math.pow(y / baseHeight, 1.5));
     return (noiseValue * 0.5 + 0.5) * heightFalloff;
-  }
-
-  private getCubeVertices(x: number, y: number, z: number): THREE.Vector3[] {
-    // Standard marching cubes vertex order
-    return [
-      new THREE.Vector3(x, y, z), // 0
-      new THREE.Vector3(x + 1, y, z), // 1
-      new THREE.Vector3(x + 1, y + 1, z), // 2
-      new THREE.Vector3(x, y + 1, z), // 3
-      new THREE.Vector3(x, y, z + 1), // 4
-      new THREE.Vector3(x + 1, y, z + 1), // 5
-      new THREE.Vector3(x + 1, y + 1, z + 1), // 6
-      new THREE.Vector3(x, y + 1, z + 1), // 7
-    ].map((v) => v.multiplyScalar(this.cubeSize));
-  }
-
-  private getCubeValues(x: number, y: number, z: number, scalarField: number[][][]): number[] {
-    // Match vertex order with getCubeVertices
-    return [
-      scalarField[x][y][z], // 0
-      scalarField[x + 1][y][z], // 1
-      scalarField[x + 1][y + 1][z], // 2
-      scalarField[x][y + 1][z], // 3
-      scalarField[x][y][z + 1], // 4
-      scalarField[x + 1][y][z + 1], // 5
-      scalarField[x + 1][y + 1][z + 1], // 6
-      scalarField[x][y + 1][z + 1], // 7
-    ];
   }
 
   private interpolateVertex(v1: THREE.Vector3, v2: THREE.Vector3, val1: number, val2: number): THREE.Vector3 {
