@@ -113,9 +113,9 @@ export class InfiniteLandscape {
   light: THREE.DirectionalLight;
   private material: THREE.MeshPhongMaterial;
   private simplex: SimplexNoise;
-  private gridSize = 32; // Changed from 32 to ensure overlap
+  private gridSize = 20; // Changed from 32 to ensure overlap
   private cubeSize = 1;
-  private isoLevel = 0.3; // Changed from 0.4 for better surface generation
+  private isoLevel = 0.5; // Changed from 0.4 for better surface generation
   private raycaster = new THREE.Raycaster();
   private temperatureNoise: SimplexNoise;
   private humidityNoise: SimplexNoise;
@@ -481,7 +481,7 @@ export class InfiniteLandscape {
   // Helper: Compute ridged multifractal noise over multiple octaves.
   private generateRidgedNoise(x: number, y: number, z: number, scale: number, octaves: number, persistence: number): number {
     let amplitude = 0.5;
-    let frequency = 1.0;
+    let frequency = 0.4;
     let noiseValue = 0;
     let maxValue = 0;
 
@@ -489,7 +489,7 @@ export class InfiniteLandscape {
       const n = Math.abs(this.simplex.noise3d(x * scale * frequency, y * scale * frequency, z * scale * frequency));
 
       // Modified ridged noise calculation
-      const ridge = 1.0 - Math.abs(1 - n);
+      const ridge = 1 - Math.abs(n);
       noiseValue += ridge * ridge * amplitude;
 
       maxValue += amplitude;
@@ -685,9 +685,9 @@ export class InfiniteLandscape {
   }
 
   private setupEventListeners(): void {
-    window.addEventListener("mousedown", (event) => this.onMouseDown(event));
-    window.addEventListener("mouseup", (event) => this.onMouseUp(event));
-    window.addEventListener("mousemove", (event) => this.onMouseMove(event));
+    // window.addEventListener("mousedown", (event) => this.onMouseDown(event));
+    // window.addEventListener("mouseup", (event) => this.onMouseUp(event));
+    // window.addEventListener("mousemove", (event) => this.onMouseMove(event));
     window.addEventListener("resize", () => this.onWindowResize());
     window.addEventListener("keydown", (event) => this.onKeyDown(event));
   }
