@@ -115,9 +115,11 @@ export class InfiniteLandscape {
   private simplex: SimplexNoise;
   private gridSize = 32; // Increased for better resolution
   private cubeSize = 1;
-  private isoLevel = 0.48; // Slightly adjusted for better surface generation
-  private chunkOverlap = 4; // Increased overlap
-  private padding = 2; // New: explicit padding for field values
+  private isoLevel = 0.5; // Slightly adjusted for better surface generation
+  private chunkOverlap = 8; // Increased overlap
+  private padding = 4; // New: explicit padding for field values
+  private boundaryPadding = 2; // New: explicit boundary padding
+  private surfaceThickness = 0.1; // New: control surface thickness
   private raycaster = new THREE.Raycaster();
   private temperatureNoise: SimplexNoise;
   private humidityNoise: SimplexNoise;
@@ -189,10 +191,10 @@ export class InfiniteLandscape {
   }
 
   private getChunkCoordinates(position: THREE.Vector3): THREE.Vector2 {
-    // Adjust chunk size calculation to account for overlap
-    const effectiveSize = (this.gridSize - this.chunkOverlap) * this.cubeSize;
-    const chunkX = Math.floor(position.x / effectiveSize);
-    const chunkZ = Math.floor(position.z / effectiveSize);
+    // Ensure proper chunk alignment with padding
+    const effectiveSize = (this.gridSize - this.chunkOverlap - this.boundaryPadding) * this.cubeSize;
+    const chunkX = Math.floor((position.x + this.boundaryPadding) / effectiveSize);
+    const chunkZ = Math.floor((position.z + this.boundaryPadding) / effectiveSize);
     return new THREE.Vector2(chunkX, chunkZ);
   }
 
@@ -316,27 +318,58 @@ export class InfiniteLandscape {
 
   private createScalarField(chunkX: number, chunkZ: number): number[][][] {
     const field: number[][][] = [];
-    const effectiveSize = this.gridSize - this.chunkOverlap;
+    const effectiveSize = this.gridSize - this.chunkOverlap - this.boundaryPadding;
     const offsetX = chunkX * effectiveSize;
     const offsetZ = chunkZ * effectiveSize;
 
-    // Extended padding for field generation
-    const extendedPadding = this.padding;
+    // Expanded size to include padding
+    const totalSize = this.gridSize + this.padding * 2;
 
-    for (let x = -extendedPadding; x < this.gridSize + extendedPadding; x++) {
-      field[x + extendedPadding] = [];
-      for (let y = -extendedPadding; y < this.gridSize + extendedPadding; y++) {
-        field[x + extendedPadding][y + extendedPadding] = [];
-        for (let z = -extendedPadding; z < this.gridSize + extendedPadding; z++) {
-          const worldX = offsetX + x + EPSILON;
-          const worldY = y + EPSILON;
-          const worldZ = offsetZ + z + EPSILON;
+    for (let x = 0; x < totalSize; x++) {
+      field[x] = [];
+      for (let y = 0; y < totalSize; y++) {
+        field[x][y] = [];
+        for (let z = 0; z < totalSize; z++) {
+          // Adjust world coordinates to include padding
+          const worldX = offsetX + x - this.padding + EPSILON;
+          const worldY = y - this.padding + EPSILON;
+          const worldZ = offsetZ + z - this.padding + EPSILON;
 
-          field[x + extendedPadding][y + extendedPadding][z + extendedPadding] = this.generateNoiseValue(worldX, worldY, worldZ);
+          // Get base noise value
+          let value = this.generateNoiseValue(worldX, worldY, worldZ);
+
+          // Apply boundary smoothing
+          if (this.isNearChunkBoundary(x, y, z)) {
+            value = this.smoothBoundaryValue(worldX, worldY, worldZ, value);
+          }
+
+          field[x][y][z] = value;
         }
       }
     }
     return field;
+  }
+
+  private isNearChunkBoundary(x: number, y: number, z: number): boolean {
+    const totalSize = this.gridSize + this.padding * 2;
+    const boundary = this.boundaryPadding;
+    return x < boundary || x >= totalSize - boundary || y < boundary || y >= totalSize - boundary || z < boundary || z >= totalSize - boundary;
+  }
+
+  private smoothBoundaryValue(worldX: number, worldY: number, worldZ: number, baseValue: number): number {
+    // Sample additional points near the boundary
+    const samples = [
+      this.generateNoiseValue(worldX - 0.5, worldY, worldZ),
+      this.generateNoiseValue(worldX + 0.5, worldY, worldZ),
+      this.generateNoiseValue(worldX, worldY, worldZ - 0.5),
+      this.generateNoiseValue(worldX, worldY, worldZ + 0.5),
+    ];
+
+    // Average with neighboring values
+    const avgValue = samples.reduce((sum, val) => sum + val, baseValue) / (samples.length + 1);
+
+    // Blend between base and average based on proximity to boundary
+    return (baseValue + avgValue) * 0.5;
   }
 
   // Compute per-vertex colors
@@ -398,10 +431,17 @@ export class InfiniteLandscape {
   }
 
   private hasValidFieldValues(field: number[][][], x: number, y: number, z: number): boolean {
-    for (let dx = 0; dx <= 1; dx++) {
-      for (let dy = 0; dy <= 1; dy++) {
-        for (let dz = 0; dz <= 1; dz++) {
-          if (field[x + dx]?.[y + dy]?.[z + dz] === undefined) return false;
+    // Check a larger neighborhood around the point
+    for (let dx = -1; dx <= 2; dx++) {
+      for (let dy = -1; dy <= 2; dy++) {
+        for (let dz = -1; dz <= 2; dz++) {
+          if (!field[x + dx]?.[y + dy]?.[z + dz]) {
+            return false;
+          }
+          const value = field[x + dx][y + dy][z + dz];
+          if (typeof value !== "number" || !Number.isFinite(value)) {
+            return false;
+          }
         }
       }
     }
@@ -459,13 +499,26 @@ export class InfiniteLandscape {
     chunkPosition: THREE.Vector3
   ): void {
     for (let i = 0; i < triangles.length - 1; i += 3) {
-      const triangleVertices = [triangles[i], triangles[i + 1], triangles[i + 2]].map((edgeIndex) => {
-        const [v1Index, v2Index] = this.edgeToVertex[edgeIndex];
-        return this.interpolateVertex(corners[v1Index], corners[v2Index], values[v1Index], values[v2Index]);
-      });
+      const vertices = [];
+      let allValid = true;
 
-      if (this.isValidTriangle(triangleVertices[0], triangleVertices[1], triangleVertices[2])) {
-        this.addVertex(positions, indices, colors, normals, chunkPosition, triangleVertices[0], triangleVertices[1], triangleVertices[2]);
+      // Generate all vertices first and validate
+      for (let j = 0; j < 3; j++) {
+        const edgeIndex = triangles[i + j];
+        const [v1Index, v2Index] = this.edgeToVertex[edgeIndex];
+        const vertex = this.interpolateVertex(corners[v1Index], corners[v2Index], values[v1Index], values[v2Index]);
+
+        // Check if vertex is valid
+        if (!Number.isFinite(vertex.x) || !Number.isFinite(vertex.y) || !Number.isFinite(vertex.z)) {
+          allValid = false;
+          break;
+        }
+        vertices.push(vertex);
+      }
+
+      // Only add triangle if all vertices are valid and triangle is not degenerate
+      if (allValid && this.isValidTriangle(vertices[0], vertices[1], vertices[2])) {
+        this.addVertex(positions, indices, colors, normals, chunkPosition, vertices[0], vertices[1], vertices[2]);
       }
     }
   }
@@ -510,7 +563,15 @@ export class InfiniteLandscape {
     }
 
     // Clamp final value between 0.001 and 0.999
-    return Math.max(0.001, Math.min(0.999, combinedNoise));
+    const value = Math.max(0.001, Math.min(0.999, combinedNoise));
+    const surfaceDist = Math.abs(value - this.isoLevel);
+
+    if (surfaceDist < this.surfaceThickness) {
+      // Force values near the surface to be more distinctly above or below
+      return value > this.isoLevel ? this.isoLevel + this.surfaceThickness : this.isoLevel - this.surfaceThickness;
+    }
+
+    return value;
   }
 
   // Helper: Create and scale the 8 corners of a cube at grid coordinates (x,y,z)
@@ -623,26 +684,24 @@ export class InfiniteLandscape {
   }
 
   private interpolateVertex(v1: THREE.Vector3, v2: THREE.Vector3, val1: number, val2: number): THREE.Vector3 {
-    // More robust interpolation with boundary handling
     const BIAS = 1e-10;
     const d1 = val1 - this.isoLevel;
     const d2 = val2 - this.isoLevel;
 
-    // Handle edge cases more carefully
-    if (Math.abs(d1) < INTERPOLATION_EPSILON && Math.abs(d2) < INTERPOLATION_EPSILON) {
-      // Both points very close to surface - use midpoint
-      return new THREE.Vector3().addVectors(v1, v2).multiplyScalar(0.5);
+    // If values are on opposite sides of the surface, use midpoint
+    if (d1 * d2 < 0) {
+      // Calculate precise interpolation
+      const t = d1 / (d1 - d2);
+      return new THREE.Vector3(v1.x + (v2.x - v1.x) * t, v1.y + (v2.y - v1.y) * t, v1.z + (v2.z - v1.z) * t);
     }
-    if (Math.abs(d1) < INTERPOLATION_EPSILON) return v1.clone();
-    if (Math.abs(d2) < INTERPOLATION_EPSILON) return v2.clone();
-    if (Math.abs(d1 - d2) < INTERPOLATION_EPSILON) {
+
+    // If both points are very close to surface
+    if (Math.abs(d1) < INTERPOLATION_EPSILON || Math.abs(d2) < INTERPOLATION_EPSILON) {
       return new THREE.Vector3().addVectors(v1, v2).multiplyScalar(0.5);
     }
 
-    // Ensure interpolation factor is strictly between 0 and 1
-    let t = (this.isoLevel - val1) / (val2 - val1 + BIAS);
-    t = Math.max(INTERPOLATION_EPSILON, Math.min(1 - INTERPOLATION_EPSILON, t));
-
+    // Default to linear interpolation
+    const t = Math.max(0, Math.min(1, (this.isoLevel - val1) / (val2 - val1 + BIAS)));
     return new THREE.Vector3(v1.x + (v2.x - v1.x) * t, v1.y + (v2.y - v1.y) * t, v1.z + (v2.z - v1.z) * t);
   }
 
