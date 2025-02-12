@@ -3,7 +3,10 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
 import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise";
 import { PseudoRandomNumberGenerator } from "../utils/PseudoRandom";
 import { edgeTable, triTable } from "./MCDefs";
-
+// Adjust epsilon for different checks
+const DEGENERATE_EPSILON = 1e-10; // For degenerate triangle checks
+const INTERPOLATION_EPSILON = 1e-7; // For interpolation calculations
+const POSITION_EPSILON = 1e-6; // For position comparisons
 function visualizeScalarFieldSlice(field: number[][][], yIndex: number): void {
   // Create a canvas that's as big as the X-Z plane of the scalar field
   const width = field.length;
@@ -49,7 +52,7 @@ function visualizeScalarFieldSlice(field: number[][][], yIndex: number): void {
 
   ctx.putImageData(imageData, 0, 0);
 }
-const EPSILON = 0.00000001; //1e-5 / 10;
+const EPSILON = 1e-5;
 
 type Biome = {
   name: string;
@@ -110,15 +113,15 @@ export class InfiniteLandscape {
   light: THREE.DirectionalLight;
   private material: THREE.MeshPhongMaterial;
   private simplex: SimplexNoise;
-  private gridSize = 37; // Changed from 32 to ensure overlap
+  private gridSize = 32; // Changed from 32 to ensure overlap
   private cubeSize = 1;
-  private isoLevel = 0.5; // Changed from 0.4 for better surface generation
+  private isoLevel = 0.3; // Changed from 0.4 for better surface generation
   private raycaster = new THREE.Raycaster();
   private temperatureNoise: SimplexNoise;
   private humidityNoise: SimplexNoise;
 
   private chunks: Map<string, TerrainChunk> = new Map();
-  private viewDistance = 5; // Number of chunks visible in each direction
+  private viewDistance = 3; // Number of chunks visible in each direction
   private currentCenterChunk: THREE.Vector2 = new THREE.Vector2();
 
   constructor() {
@@ -141,9 +144,9 @@ export class InfiniteLandscape {
     this.renderer.shadowMap.enabled = true;
     document.body.appendChild(this.renderer.domElement);
 
-    // this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-    // this.controls.enableDamping = true;
-    // this.controls.dampingFactor = 0.05;
+    this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+    this.controls.enableDamping = true;
+    this.controls.dampingFactor = 0.05;
 
     this.light = new THREE.DirectionalLight(0xffffff, 1);
     this.light.position.set(50, 100, 50);
@@ -159,8 +162,8 @@ export class InfiniteLandscape {
     this.material = new THREE.MeshPhongMaterial({
       vertexColors: true,
       side: THREE.DoubleSide,
-      flatShading: true,
-      wireframe: true,
+      flatShading: false,
+      wireframe: false,
       color: 0xffffff,
     });
 
@@ -309,97 +312,77 @@ export class InfiniteLandscape {
 
   private createScalarField(chunkX: number, chunkZ: number): number[][][] {
     const field: number[][][] = [];
-    const overlap = 1;
-    const offsetX = chunkX * (this.gridSize - 1 - overlap);
-    const offsetZ = chunkZ * (this.gridSize - 1 - overlap);
+    const offsetX = chunkX * (this.gridSize - 1);
+    const offsetZ = chunkZ * (this.gridSize - 1);
+
+    let maxDiff = 0;
+    let prevValue = null;
 
     for (let x = 0; x < this.gridSize; x++) {
       field[x] = [];
       for (let y = 0; y < this.gridSize; y++) {
         field[x][y] = [];
         for (let z = 0; z < this.gridSize; z++) {
-          // Use EPSILON to ensure consistent sampling across chunk boundaries
           const worldX = x + offsetX + EPSILON;
           const worldY = y + EPSILON;
           const worldZ = z + offsetZ + EPSILON;
 
-          let value = this.generateNoiseValue(worldX, worldY, worldZ);
-          // Ensure value is never exactly equal to isoLevel
-          if (Math.abs(value - this.isoLevel) < EPSILON) {
-            value += EPSILON;
+          const value = this.generateNoiseValue(worldX, worldY, worldZ);
+
+          // Check for discontinuities
+          if (prevValue !== null) {
+            const diff = Math.abs(value - prevValue);
+            if (diff > maxDiff) {
+              maxDiff = diff;
+            }
           }
+          prevValue = value;
+
           field[x][y][z] = value;
         }
       }
     }
+
+    // console.log("Maximum value difference in chunk", { maxDiff, chunkX, chunkZ });
     return field;
   }
+  // Compute per-vertex colors
+  getColor(chunkPosition: THREE.Vector3, vertex: THREE.Vector3): THREE.Color {
+    const worldX = chunkPosition.x + vertex.x;
+    const worldZ = chunkPosition.z + vertex.z;
+    const temperature = this.getTemperature(worldX, worldZ);
+    const humidity = this.getHumidity(worldX, worldZ);
+    return this.getBiomeColor(temperature, humidity, vertex.y);
+  }
 
+  private edgeToVertex = [
+    [0, 1], // edge 0: connects vertex 0 to vertex 1
+    [1, 3], // edge 1: connects vertex 1 to vertex 3
+    [2, 3], // edge 2: connects vertex 2 to vertex 3
+    [0, 2], // edge 3: connects vertex 0 to vertex 2
+    [4, 5], // edge 4: connects vertex 4 to vertex 5
+    [5, 7], // edge 5: connects vertex 5 to vertex 7
+    [6, 7], // edge 6: connects vertex 6 to vertex 7
+    [4, 6], // edge 7: connects vertex 4 to vertex 6
+    [0, 4], // edge 8: connects vertex 0 to vertex 4
+    [1, 5], // edge 9: connects vertex 1 to vertex 5
+    [3, 7], // edge 10: connects vertex 3 to vertex 7
+    [2, 6], // edge 11: connects vertex 2 to vertex 6
+  ];
   private generateChunkGeometry(scalarField: number[][][], chunkPosition: THREE.Vector3): THREE.BufferGeometry {
-    // Arrays for unique vertex data
     const positions: number[] = [];
-    const normalsAccum: THREE.Vector3[] = [];
-    const colorsAccum: THREE.Color[] = [];
     const indices: number[] = [];
+    const normals: number[] = [];
+    const colors: number[] = [];
 
-    // A map from vertex key (position rounded) to index
-    const vertexMap: { [key: string]: number } = {};
-
-    // Helper: get a unique key for a vertex based on position
-    const getVertexKey = (v: THREE.Vector3): string => {
-      const precision = 5; // adjust as needed
-      return `${v.x.toFixed(precision)}_${v.y.toFixed(precision)}_${v.z.toFixed(precision)}`;
-    };
-    // Compute per-vertex colors
-    const getColor = (vertex: THREE.Vector3): THREE.Color => {
-      const worldX = chunkPosition.x + vertex.x;
-      const worldZ = chunkPosition.z + vertex.z;
-      const temperature = this.getTemperature(worldX, worldZ);
-      const humidity = this.getHumidity(worldX, worldZ);
-      return this.getBiomeColor(temperature, humidity, vertex.y);
-    };
-
-    const isValid = (v: THREE.Vector3) =>
-      Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z) && !Number.isNaN(v.x) && !Number.isNaN(v.y) && !Number.isNaN(v.z);
-
-    const edgeToVertex = [
-      [0, 1],
-      [1, 3],
-      [2, 3],
-      [0, 2], // bottom face
-      [4, 5],
-      [5, 7],
-      [6, 7],
-      [4, 6], // top face
-      [0, 4],
-      [1, 5],
-      [3, 7],
-      [2, 6], // vertical edges
-    ];
-
-    // We'll also accumulate face normals into vertex normals
-    const addVertex = (v: THREE.Vector3, color: THREE.Color, faceNormal: THREE.Vector3): number => {
-      const key = getVertexKey(v);
-      if (vertexMap.hasOwnProperty(key)) {
-        const idx = vertexMap[key];
-        // Accumulate face normal
-        normalsAccum[idx].add(faceNormal);
-        return idx;
-      } else {
-        const idx = positions.length / 3;
-        positions.push(v.x, v.y, v.z);
-        normalsAccum.push(faceNormal.clone());
-        colorsAccum.push(color.clone());
-        vertexMap[key] = idx;
-        return idx;
-      }
-    };
+    let degenerateTriangles = 0;
 
     // Iterate cubes in scalar field
     for (let x = 0; x < this.gridSize - 1; x++) {
       for (let y = 0; y < this.gridSize - 1; y++) {
         for (let z = 0; z < this.gridSize - 1; z++) {
           const corners = this.getCubeCorners(x, y, z);
+
           const values = [
             scalarField[x][y][z],
             scalarField[x + 1][y][z],
@@ -419,66 +402,26 @@ export class InfiniteLandscape {
           }
 
           if (Number(edgeTable[cubeIndex]) === 0) continue;
+
           const triangles = triTable[cubeIndex];
           if (!triangles || triangles.length === 0) continue;
 
           for (let i = 0; i < triangles.length - 1; i += 3) {
-            // Compute vertices
             const triangleVertices = [triangles[i], triangles[i + 1], triangles[i + 2]].map((edgeIndex) => {
-              const [v1Index, v2Index] = edgeToVertex[edgeIndex];
+              const [v1Index, v2Index] = this.edgeToVertex[edgeIndex];
               return this.interpolateVertex(corners[v1Index], corners[v2Index], values[v1Index], values[v2Index]);
             });
-            let [v1, v2, v3] = triangleVertices;
 
-            if (v1.equals(v2) || v2.equals(v3) || v3.equals(v1)) {
-              // con//sole.warn("Skipping degenerate triangle due to identical vertices.");
+            if (this.isValidTriangle(triangleVertices[0], triangleVertices[1], triangleVertices[2])) {
+              this.addVertex(positions, indices, colors, normals, chunkPosition, triangleVertices[0], triangleVertices[1], triangleVertices[2]);
+            } else {
+              degenerateTriangles++;
               continue;
             }
-
-            if (!isValid(v1) || !isValid(v2) || !isValid(v3)) continue;
-
-            // Compute face normal (flat)
-            const edge1 = new THREE.Vector3().subVectors(v2, v1);
-            const edge2 = new THREE.Vector3().subVectors(v3, v1);
-            const faceNormal = new THREE.Vector3().crossVectors(edge1, edge2);
-            if (faceNormal.lengthSq() < EPSILON) {
-              //  console.warn("Skipping degenerate triangle");
-              //   console.log(`Cube Index: ${cubeIndex}, Triangle Indices: [${triangles[i]}, ${triangles[i + 1]}, ${triangles[i + 2]}]`);
-              continue;
-            }
-
-            faceNormal.normalize();
-
-            const c1 = getColor(v1);
-            const c2 = getColor(v2);
-            const c3 = getColor(v3);
-
-            // Add (or reuse) vertices and record triangle indices
-            const idx1 = addVertex(v1, c1, faceNormal);
-            const idx2 = addVertex(v2, c2, faceNormal);
-            const idx3 = addVertex(v3, c3, faceNormal);
-            indices.push(idx1, idx2, idx3);
           }
         }
       }
     }
-
-    // Normalize accumulated normals
-    const normals: number[] = [];
-    normalsAccum.forEach((vec) => {
-      if (vec.lengthSq() < EPSILON) {
-        vec.set(0, 1, 0); // Default upward normal if zero-length
-      } else {
-        vec.normalize();
-      }
-      normals.push(vec.x, vec.y, vec.z);
-    });
-
-    // Prepare color array
-    const colors: number[] = [];
-    colorsAccum.forEach((c) => {
-      colors.push(c.r, c.g, c.b);
-    });
 
     const geometry = new THREE.BufferGeometry();
     geometry.setIndex(indices);
@@ -493,72 +436,65 @@ export class InfiniteLandscape {
     const humidity = this.getHumidity(x, z);
     const biome = this.getBiome(temperature, humidity);
 
+    const persistence = 0.5;
+    const octaves = 4;
     const scale = biome.terrainScale;
     const baseHeight = biome.terrainHeight;
-    const persistence = 0.6; // Increased from 0.5 for more variation
-    const octaves = 7; // Increased from 6 for more detail
 
-    // Add a small offset for consistency
-    const eps = 0.00001;
-    x += eps;
-    y += eps;
-    z += eps;
+    // Adjust height calculation to be more gradual
+    const heightFalloff = Math.max(0.001, 1.0 - y / baseHeight);
 
+    // Base terrain shape
     let noiseValue = this.generateRidgedNoise(x, y, z, scale, octaves, persistence);
 
-    // Add turbulence for more interesting mountain shapes
-    const turbulence = Math.abs(this.simplex.noise3d(x * 0.1, y * 0.1, z * 0.1));
-    noiseValue = noiseValue * (1 + turbulence * 0.5);
+    // Add large-scale variations
+    const largeScale = scale * 0.3;
+    const baseVariation = this.simplex.noise3d(x * largeScale, 0, z * largeScale);
 
-    // return (noiseValue * 0.5 + 0.5) * heightFallo
+    // Combine noise with height falloff
+    const combinedNoise = noiseValue * (0.7 + 0.3 * heightFalloff);
 
-    // Enhance mountain peaks with a power function if using mountain biome
-    if (biome.name === "mountain") {
-      noiseValue = Math.pow(noiseValue, 0.8);
+    // Add base variation to create more natural valleys and peaks
+    const finalValue = combinedNoise + baseVariation * 0.2;
+
+    // Ensure the ground is solid below certain height
+    if (y < 2) {
+      return 0.9;
     }
 
-    // Create a height-based falloff that's more dramatic for mountains
-    const heightFalloff =
-      biome.name === "mountain"
-        ? Math.max(0, 1 - Math.pow(y / baseHeight, 1.2)) // Less falloff for mountains
-        : Math.max(0, 1 - Math.pow(y / baseHeight, 1.5));
-    const STABILIZATION_EPSILON = 0.01;
-    if (Math.abs(noiseValue - this.isoLevel) < STABILIZATION_EPSILON) {
-      noiseValue = this.isoLevel + (noiseValue > this.isoLevel ? STABILIZATION_EPSILON : -STABILIZATION_EPSILON);
-    }
-
-    return (noiseValue * 0.5 + 0.5) * heightFalloff;
+    return Math.max(0.001, Math.min(0.999, finalValue));
   }
-
   // Helper: Create and scale the 8 corners of a cube at grid coordinates (x,y,z)
   private getCubeCorners(x: number, y: number, z: number): THREE.Vector3[] {
-    const corners = [
-      new THREE.Vector3(x, y, z),
-      new THREE.Vector3(x + 1, y, z),
-      new THREE.Vector3(x, y, z + 1),
-      new THREE.Vector3(x + 1, y, z + 1),
-      new THREE.Vector3(x, y + 1, z),
-      new THREE.Vector3(x + 1, y + 1, z),
-      new THREE.Vector3(x, y + 1, z + 1),
-      new THREE.Vector3(x + 1, y + 1, z + 1),
-    ];
-    return corners.map((v) => v.multiplyScalar(this.cubeSize));
+    return [
+      new THREE.Vector3(x, y, z), // 0: left  bottom back
+      new THREE.Vector3(x + 1, y, z), // 1: right bottom back
+      new THREE.Vector3(x, y, z + 1), // 2: left  bottom front
+      new THREE.Vector3(x + 1, y, z + 1), // 3: right bottom front
+      new THREE.Vector3(x, y + 1, z), // 4: left  top back
+      new THREE.Vector3(x + 1, y + 1, z), // 5: right top back
+      new THREE.Vector3(x, y + 1, z + 1), // 6: left  top front
+      new THREE.Vector3(x + 1, y + 1, z + 1), // 7: right top front
+    ].map((v) => v.multiplyScalar(this.cubeSize));
   }
 
   // Helper: Compute ridged multifractal noise over multiple octaves.
   private generateRidgedNoise(x: number, y: number, z: number, scale: number, octaves: number, persistence: number): number {
-    let amplitude = 1.0;
+    let amplitude = 0.5;
     let frequency = 1.0;
     let noiseValue = 0;
     let maxValue = 0;
 
     for (let i = 0; i < octaves; i++) {
       const n = Math.abs(this.simplex.noise3d(x * scale * frequency, y * scale * frequency, z * scale * frequency));
-      // Invert noise for a ridged effect
-      noiseValue += (1.0 - n) * amplitude;
+
+      // Modified ridged noise calculation
+      const ridge = 1.0 - Math.abs(1 - n);
+      noiseValue += ridge * ridge * amplitude;
+
       maxValue += amplitude;
       amplitude *= persistence;
-      frequency *= 2; // Slightly higher frequency multiplier
+      frequency *= 2.0;
     }
 
     return noiseValue / maxValue;
@@ -638,17 +574,116 @@ export class InfiniteLandscape {
   }
 
   private interpolateVertex(v1: THREE.Vector3, v2: THREE.Vector3, val1: number, val2: number): THREE.Vector3 {
-    // Handle near-zero denominator
-    if (Math.abs(val2 - val1) < EPSILON) {
-      return v1.clone().add(v2).multiplyScalar(0.5);
+    // Add a small bias to ensure consistent interpolation across chunk boundaries
+    const BIAS = 1e-10;
+
+    // Normalize values relative to isolevel to improve precision
+    const d1 = val1 - this.isoLevel;
+    const d2 = val2 - this.isoLevel;
+
+    // If either point is very close to the isolevel, return that point
+    if (Math.abs(d1) < INTERPOLATION_EPSILON) return v1.clone();
+    if (Math.abs(d2) < INTERPOLATION_EPSILON) return v2.clone();
+
+    // If points are on same side of isolevel, pick midpoint
+    if (Math.abs(d1 - d2) < INTERPOLATION_EPSILON) {
+      return new THREE.Vector3((v1.x + v2.x) * 0.5, (v1.y + v2.y) * 0.5, (v1.z + v2.z) * 0.5);
     }
 
-    let t = (this.isoLevel - val1) / (val2 - val1);
-    t = Math.max(0, Math.min(1, t)); // Clamp to [0,1]
+    // Calculate interpolation factor with bias
+    let t = (this.isoLevel - val1) / (val2 - val1 + BIAS);
+    t = Math.max(INTERPOLATION_EPSILON, Math.min(1 - INTERPOLATION_EPSILON, t));
 
-    // Use more precise interpolation
-    return new THREE.Vector3(v1.x + t * (v2.x - v1.x), v1.y + t * (v2.y - v1.y), v1.z + t * (v2.z - v1.z));
+    return new THREE.Vector3(v1.x + (v2.x - v1.x) * t, v1.y + (v2.y - v1.y) * t, v1.z + (v2.z - v1.z) * t);
   }
+
+  // More sophisticated triangle validation
+  private isValidTriangle(v1: THREE.Vector3, v2: THREE.Vector3, v3: THREE.Vector3): boolean {
+    // First check for NaN or infinite values
+    if ([v1, v2, v3].some((v) => !Number.isFinite(v.x) || !Number.isFinite(v.y) || !Number.isFinite(v.z))) {
+      return false;
+    }
+
+    // Calculate edges
+    const edge1 = new THREE.Vector3().subVectors(v2, v1);
+    const edge2 = new THREE.Vector3().subVectors(v3, v1);
+    const edge3 = new THREE.Vector3().subVectors(v3, v2);
+
+    // Check edge lengths (reject if any edge is too short)
+    if (edge1.lengthSq() < DEGENERATE_EPSILON || edge2.lengthSq() < DEGENERATE_EPSILON || edge3.lengthSq() < DEGENERATE_EPSILON) {
+      return false;
+    }
+
+    // Calculate triangle normal and area
+    const normal = new THREE.Vector3().crossVectors(edge1, edge2);
+    const areaSquared = normal.lengthSq() * 0.25;
+
+    // Check for degenerate triangle (too small area)
+    if (areaSquared < DEGENERATE_EPSILON) {
+      return false;
+    }
+
+    // Check for triangle that's too thin (compare area to perimeter)
+    const perimeter = edge1.length() + edge2.length() + edge3.length();
+    const perimeterSq = perimeter * perimeter;
+    if (areaSquared / perimeterSq < DEGENERATE_EPSILON) {
+      return false;
+    }
+
+    return true;
+  }
+
+  // Helper to check if vertices are effectively the same point
+  private isSameVertex(v1: THREE.Vector3, v2: THREE.Vector3): boolean {
+    return v1.distanceToSquared(v2) < POSITION_EPSILON;
+  }
+
+  // Modified vertex addition logic for the geometry generation
+  private addVertex(
+    positions: number[],
+    indices: number[],
+    colors: number[],
+    normals: number[],
+    chunkPosition: THREE.Vector3,
+    v1: THREE.Vector3,
+    v2: THREE.Vector3,
+    v3: THREE.Vector3
+  ): void {
+    // Don't add if any vertices are effectively the same point
+    if (this.isSameVertex(v1, v2) || this.isSameVertex(v2, v3) || this.isSameVertex(v3, v1)) {
+      return;
+    }
+
+    // Calculate normal to ensure consistent winding order
+    const edge1 = new THREE.Vector3().subVectors(v2, v1);
+    const edge2 = new THREE.Vector3().subVectors(v3, v1);
+    const normal = new THREE.Vector3().crossVectors(edge1, edge2);
+
+    // Add vertices with consistent winding order
+    const startIdx = positions.length / 3;
+
+    positions.push(v1.x, v1.y, v1.z);
+    positions.push(v2.x, v2.y, v2.z);
+    positions.push(v3.x, v3.y, v3.z);
+
+    // Add indices with correct winding order based on normal
+    if (normal.y >= 0) {
+      indices.push(startIdx, startIdx + 1, startIdx + 2);
+    } else {
+      indices.push(startIdx, startIdx + 2, startIdx + 1);
+    }
+
+    // add colors and normals
+    const color = this.getColor(v1, chunkPosition);
+    colors.push(color.r, color.g, color.b);
+    colors.push(color.r, color.g, color.b);
+    colors.push(color.r, color.g, color.b);
+
+    normals.push(normal.x, normal.y, normal.z);
+    normals.push(normal.x, normal.y, normal.z);
+    normals.push(normal.x, normal.y, normal.z);
+  }
+
   private setupEventListeners(): void {
     window.addEventListener("mousedown", (event) => this.onMouseDown(event));
     window.addEventListener("mouseup", (event) => this.onMouseUp(event));
