@@ -4,21 +4,6 @@ import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise";
 import { PseudoRandomNumberGenerator } from "../utils/PseudoRandom";
 import { edgeTable, triTable } from "./MCDefs";
 
-// Add these constants at class/file level
-const GROUND_THRESHOLD = 2;
-const TOP_THRESHOLD = 0.95;
-const GROUND_VALUE = 0.9;
-const AIR_VALUE = 0.1;
-const MIN_VALUE = 0.001;
-const MAX_VALUE = 0.999;
-const VARIATION_SCALE = 0.3;
-const VARIATION_STRENGTH = 0.2;
-const FALLOFF_POWER = 1.5;
-
-const INITIAL_AMPLITUDE = 0.5;
-const INITIAL_FREQUENCY = 0.4;
-const FREQUENCY_MULTIPLIER = 2.0;
-const NOISE_PRECISION = 100;
 // Cache chunk key strings
 const getChunkKey = (() => {
   const keyCache = new Map<string, string>();
@@ -33,15 +18,15 @@ const getChunkKey = (() => {
 
 // Pre-compute cube corners offsets
 const CUBE_CORNER_OFFSETS = [
-  new THREE.Vector3(0, 0, 0),
-  new THREE.Vector3(1, 0, 0),
-  new THREE.Vector3(0, 0, 1),
-  new THREE.Vector3(1, 0, 1),
-  new THREE.Vector3(0, 1, 0),
-  new THREE.Vector3(1, 1, 0),
-  new THREE.Vector3(0, 1, 1),
-  new THREE.Vector3(1, 1, 1),
-];
+  [0, 0, 0],
+  [1, 0, 0],
+  [0, 0, 1],
+  [1, 0, 1],
+  [0, 1, 0],
+  [1, 1, 0],
+  [0, 1, 1],
+  [1, 1, 1],
+].map(([x, y, z]) => new THREE.Vector3(x, y, z));
 
 // Adjust epsilon for different checks
 const DEGENERATE_EPSILON = 1e-10; // For degenerate triangle checks
@@ -140,7 +125,8 @@ const DEFAULT_BIOME: Biome = BIOMES[0];
 interface TerrainChunk {
   mesh: THREE.Mesh;
   position: THREE.Vector3;
-  scalarField: number[][][];
+  scalarField: Float32Array;
+  totalSize: number; // Add this to store dimensions
 }
 
 // Add these new constants at the top
@@ -192,21 +178,23 @@ export class InfiniteLandscape {
   private currentChunk = new THREE.Vector2();
 
   // Pre-allocate arrays for geometry generation
-  private readonly positions: number[] = [];
-  private readonly indices: number[] = [];
-  private readonly normals: number[] = [];
-  private readonly colors: number[] = [];
+  // private readonly positions: number[] = [];
+  // private readonly indices: number[] = [];
+  // private readonly normals: number[] = [];
+  // private readonly colors: number[] = [];
+
+  private positionsBuffer: Float32Array;
+  private positionsIndex = 0;
+  private normalsBuffer: Float32Array;
+  private normalsIndex = 0;
+  private colorsBuffer: Float32Array;
+  private colorsIndex = 0;
+  private indicesBuffer: Uint32Array;
+  private indicesIndex = 0;
+  private initialBufferSize = 131072; // 2^17
 
   private frustum = new THREE.Frustum();
   private frustumMatrix = new THREE.Matrix4();
-
-  // Add these new properties
-  private readonly vertexPool: Float32Array;
-  private vertexPoolIndex = 0;
-  private readonly tempVector = new THREE.Vector3();
-  private readonly tempVector2 = new THREE.Vector3();
-  private readonly tempColor = new THREE.Color();
-  private readonly workingMatrix = new THREE.Matrix4();
 
   // Add these new properties
   private readonly workers: Worker[] = [];
@@ -222,19 +210,7 @@ export class InfiniteLandscape {
   // Add these new properties
   private readonly workerQueue: WorkerQueueItem[] = [];
   private readonly busyWorkers = new Set<Worker>();
-
-  // Add new buffer properties
-  private tempVectors: THREE.Vector3[] = Array.from({ length: 8 }, () => new THREE.Vector3());
-  private tempCorners: THREE.Vector3[] = CUBE_CORNER_OFFSETS.map((v) => v.clone());
-  private positionsBuffer!: Float32Array;
-  private positionsIndex = 0;
-  private normalsBuffer!: Float32Array;
-  private normalsIndex = 0;
-  private colorsBuffer!: Float32Array;
-  private colorsIndex = 0;
-  private indicesBuffer!: Uint32Array;
-  private indicesIndex = 0;
-  private initialBufferSize = 131072; // 2^17
+  private readonly tempVectors: THREE.Vector3[] = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
 
   // Modify the constructor to include error handling for worker creation
   constructor() {
@@ -245,6 +221,12 @@ export class InfiniteLandscape {
     console.log("Case 1:", triTable[1]); // Should have valid indices and end with -1
     console.log("Case 3:", triTable[3]);
     console.log("Case 255:", triTable[255]); // Should be empty case (all vertices inside)
+
+    this.positionsBuffer = new Float32Array(this.initialBufferSize);
+    this.normalsBuffer = new Float32Array(this.initialBufferSize);
+    this.colorsBuffer = new Float32Array(this.initialBufferSize);
+    this.indicesBuffer = new Uint32Array(this.initialBufferSize);
+
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x87ceeb);
 
@@ -302,9 +284,6 @@ export class InfiniteLandscape {
     this.currentCenterChunk = this.getChunkCoordinates(this.camera.position);
     this.updateChunks(this.currentCenterChunk.x, this.currentCenterChunk.y);
 
-    // Initialize vertex pool
-    this.vertexPool = new Float32Array(VERTEX_POOL_SIZE);
-
     // Pre-allocate geometry and mesh pools
     for (let i = 0; i < CHUNK_POOL_SIZE; i++) {
       this.geometryPool.push(new THREE.BufferGeometry());
@@ -348,10 +327,10 @@ export class InfiniteLandscape {
       const pending = this.pendingChunks.get(key);
 
       if (pending) {
+        // The field is already a transferable object
         pending.resolve(field);
         this.pendingChunks.delete(key);
 
-        // Return worker to pool and process next item in queue
         const worker = e.target as Worker;
         this.busyWorkers.delete(worker);
         this.workerPool.push(worker);
@@ -360,9 +339,29 @@ export class InfiniteLandscape {
     }
   }
 
+  private ensureBufferCapacity(verticesNeeded: number) {
+    const requiredSize = this.positionsIndex + verticesNeeded * 3;
+    if (requiredSize > this.positionsBuffer.length) {
+      const newSize = Math.max(requiredSize, this.positionsBuffer.length * 2);
+      this.resizeBuffer(newSize);
+    }
+  }
+
+  private resizeBuffer(newSize: number) {
+    const resize = (old: Float32Array) => {
+      const newArr = new Float32Array(newSize);
+      newArr.set(old);
+      return newArr;
+    };
+
+    this.positionsBuffer = resize(this.positionsBuffer);
+    this.normalsBuffer = resize(this.normalsBuffer);
+    this.colorsBuffer = resize(this.colorsBuffer);
+    this.indicesBuffer = new Uint32Array(Math.max(newSize, this.indicesBuffer.length * 2));
+  }
+
   private processNextQueueItem(): void {
-    if (this.workerQueue.length === 0) return;
-    if (this.workerPool.length === 0) return;
+    if (this.workerQueue.length === 0 || this.workerPool.length === 0) return;
 
     const item = this.workerQueue.shift()!;
     const worker = this.workerPool.pop()!;
@@ -441,15 +440,13 @@ export class InfiniteLandscape {
         }
       });
 
-      // Remove old chunks
+      // Remove old chunks using removeChunk method
       for (const key of chunksToRemove) {
         const chunk = this.chunks.get(key);
-        if (chunk && chunk.mesh) {
-          this.scene.remove(chunk.mesh);
-          chunk.mesh.geometry.dispose();
-          this.geometryPool.push(chunk.mesh.geometry);
-          this.meshPool.push(chunk.mesh);
-          this.chunks.delete(key);
+        if (chunk) {
+          const chunkX = Math.floor(chunk.position.x / ((this.gridSize - this.chunkOverlap) * this.cubeSize));
+          const chunkZ = Math.floor(chunk.position.z / ((this.gridSize - this.chunkOverlap) * this.cubeSize));
+          this.removeChunk(chunkX, chunkZ);
         }
       }
     } catch (error) {
@@ -466,13 +463,12 @@ export class InfiniteLandscape {
     const position = new THREE.Vector3(chunkX * effectiveSize, 0, chunkZ * effectiveSize);
 
     try {
-      const scalarField = await this.createScalarField(chunkX, chunkZ);
-      this.generateChunkGeometry(geometry, scalarField, position);
+      const { field, totalSize } = await this.createScalarField(chunkX, chunkZ);
+      this.generateChunkGeometry(geometry, field, totalSize, position);
 
       // Add validation for degenerate geometry
       if (geometry.attributes.position.count === 0) {
         console.warn(`Empty geometry generated at chunk ${chunkX},${chunkZ}`);
-        // Generate a small placeholder geometry to avoid rendering issues
         return this.createPlaceholderChunk(position);
       }
 
@@ -481,7 +477,7 @@ export class InfiniteLandscape {
       mesh.receiveShadow = true;
       mesh.frustumCulled = true;
 
-      const chunk: TerrainChunk = { mesh, position, scalarField };
+      const chunk: TerrainChunk = { mesh, position, scalarField: field, totalSize };
       this.chunks.set(getChunkKey(chunkX, chunkZ), chunk);
       this.scene.add(mesh);
 
@@ -544,42 +540,21 @@ export class InfiniteLandscape {
     mesh.position.copy(position);
     mesh.visible = false; // Hide placeholder geometry
 
-    // Create empty scalar field
-    const scalarField: number[][][] = Array(this.gridSize)
-      .fill(0)
-      .map(() =>
-        Array(this.gridSize)
-          .fill(0)
-          .map(() => Array(this.gridSize).fill(1))
-      );
+    const totalSize = this.gridSize + this.padding * 2;
+    const length = totalSize * totalSize * totalSize;
+    const field = new Float32Array(length);
+    field.fill(1);
 
-    return { mesh, position, scalarField };
+    return { mesh, position, scalarField: field, totalSize };
   }
 
-  private async createScalarField(chunkX: number, chunkZ: number): Promise<number[][][]> {
+  private async createScalarField(chunkX: number, chunkZ: number): Promise<{ field: Float32Array; totalSize: number }> {
     try {
       const fieldData = await this.requestTerrainGeneration(chunkX, chunkZ);
-
-      // Convert the flat array back to 3D array
       const totalSize = this.gridSize + this.padding * 2;
-      const field: number[][][] = Array(totalSize)
-        .fill(0)
-        .map(() =>
-          Array(totalSize)
-            .fill(0)
-            .map(() => Array(totalSize).fill(0))
-        );
 
-      for (let x = 0; x < totalSize; x++) {
-        for (let y = 0; y < totalSize; y++) {
-          for (let z = 0; z < totalSize; z++) {
-            const index = x * totalSize * totalSize + y * totalSize + z;
-            field[x][y][z] = fieldData[index];
-          }
-        }
-      }
-
-      return field;
+      // fieldData is already a Float32Array, just return it with size info
+      return { field: fieldData, totalSize };
     } catch (error) {
       console.error("Failed to generate terrain:", error);
       return this.createFallbackScalarField();
@@ -587,15 +562,12 @@ export class InfiniteLandscape {
   }
 
   // Add a fallback method in case worker generation fails
-  private createFallbackScalarField(): number[][][] {
+  private createFallbackScalarField(): { field: Float32Array; totalSize: number } {
     const totalSize = this.gridSize + this.padding * 2;
-    return Array(totalSize)
-      .fill(0)
-      .map(() =>
-        Array(totalSize)
-          .fill(0)
-          .map(() => Array(totalSize).fill(this.isoLevel + 0.1))
-      );
+    const length = totalSize * totalSize * totalSize;
+    const field = new Float32Array(length);
+    field.fill(this.isoLevel + 0.1);
+    return { field, totalSize };
   }
 
   // Compute per-vertex colors
@@ -622,50 +594,35 @@ export class InfiniteLandscape {
     [2, 6], // edge 11: connects vertex 2 to vertex 6
   ];
 
-  private generateChunkGeometry(geometry: THREE.BufferGeometry, scalarField: number[][][], chunkPosition: THREE.Vector3): void {
+  private generateChunkGeometry(geometry: THREE.BufferGeometry, scalarField: Float32Array, totalSize: number, chunkPosition: THREE.Vector3): void {
+    // Reset buffer indices
     this.positionsIndex = 0;
     this.normalsIndex = 0;
     this.colorsIndex = 0;
     this.indicesIndex = 0;
 
-    const totalSize = this.gridSize + this.padding * 2;
-    const startIdx = this.padding;
-    const endIdx = this.gridSize + this.padding - 1;
+    // Pre-allocate space for worst case
+    this.ensureBufferCapacity(this.gridSize * this.gridSize * 6);
 
-    // Precompute temperature/humidity for XZ plane
-    const tempHumidityMap: { temp: number; humidity: number }[][] = [];
-    const worldBaseX = chunkPosition.x + (startIdx - this.padding) * this.cubeSize;
-    const worldBaseZ = chunkPosition.z + (startIdx - this.padding) * this.cubeSize;
+    // Fix iteration bounds
+    for (let x = 0; x < this.gridSize - 1; x++) {
+      for (let y = 0; y < this.gridSize - 1; y++) {
+        for (let z = 0; z < this.gridSize - 1; z++) {
+          // Adjust indices for padding
+          const px = x + this.padding;
+          const py = y + this.padding;
+          const pz = z + this.padding;
 
-    for (let x = startIdx; x < endIdx; x++) {
-      tempHumidityMap[x] = [];
-      for (let z = startIdx; z < endIdx; z++) {
-        const worldX = worldBaseX + (x - startIdx) * this.cubeSize;
-        const worldZ = worldBaseZ + (z - startIdx) * this.cubeSize;
-        tempHumidityMap[x][z] = {
-          temp: this.getTemperature(worldX, worldZ),
-          humidity: this.getHumidity(worldX, worldZ),
-        };
-      }
-    }
+          const corners = this.getCubeCorners(x, y, z);
+          const values = this.getCubeValues(scalarField, totalSize, px, py, pz);
+          const cubeIndex = this.getCubeIndex(values);
 
-    for (let x = startIdx; x < endIdx; x++) {
-      for (let y = startIdx; y < endIdx; y++) {
-        for (let z = startIdx; z < endIdx; z++) {
-          const corners = this.getCubeCorners(x - this.padding, y - this.padding, z - this.padding);
-
-          // Ensure all required values exist
-          if (!this.hasValidFieldValues(scalarField, x, y, z)) continue;
-
-          const values = this.getCubeValues(scalarField, x, y, z);
-          let cubeIndex = this.computeCubeIndex(values);
-
-          if (Number(edgeTable[cubeIndex]) === 0) continue;
+          if (edgeTable[cubeIndex] === 0) continue;
 
           const triangles = triTable[cubeIndex];
           if (!triangles || triangles.length === 0) continue;
 
-          this.processTriangles(triangles, corners, values, this.positions, this.indices, this.colors, this.normals, chunkPosition);
+          this.processTriangles(triangles, corners, values, chunkPosition);
         }
       }
     }
@@ -673,38 +630,7 @@ export class InfiniteLandscape {
     this.createGeometry(geometry);
   }
 
-  private hasValidFieldValues(field: number[][][], x: number, y: number, z: number): boolean {
-    // Check a larger neighborhood around the point
-    for (let dx = -1; dx <= 2; dx++) {
-      for (let dy = -1; dy <= 2; dy++) {
-        for (let dz = -1; dz <= 2; dz++) {
-          if (!field[x + dx]?.[y + dy]?.[z + dz]) {
-            return false;
-          }
-          const value = field[x + dx][y + dy][z + dz];
-          if (typeof value !== "number" || !Number.isFinite(value)) {
-            return false;
-          }
-        }
-      }
-    }
-    return true;
-  }
-
-  private getCubeValues(field: number[][][], x: number, y: number, z: number): number[] {
-    return [
-      field[x][y][z],
-      field[x + 1][y][z],
-      field[x][y][z + 1],
-      field[x + 1][y][z + 1],
-      field[x][y + 1][z],
-      field[x + 1][y + 1][z],
-      field[x][y + 1][z + 1],
-      field[x + 1][y + 1][z + 1],
-    ];
-  }
-
-  private computeCubeIndex(values: number[]): number {
+  private getCubeIndex(values: number[]): number {
     let cubeIndex = 0;
     for (let i = 0; i < 8; i++) {
       if (values[i] < this.isoLevel) {
@@ -712,6 +638,56 @@ export class InfiniteLandscape {
       }
     }
     return cubeIndex;
+  }
+
+  private getCubeValues(field: Float32Array, totalSize: number, x: number, y: number, z: number): number[] {
+    return [
+      field[(x * totalSize + y) * totalSize + z],
+      field[((x + 1) * totalSize + y) * totalSize + z],
+      field[(x * totalSize + y) * totalSize + (z + 1)],
+      field[((x + 1) * totalSize + y) * totalSize + (z + 1)],
+      field[(x * totalSize + (y + 1)) * totalSize + z],
+      field[((x + 1) * totalSize + (y + 1)) * totalSize + z],
+      field[(x * totalSize + (y + 1)) * totalSize + (z + 1)],
+      field[((x + 1) * totalSize + (y + 1)) * totalSize + (z + 1)],
+    ];
+  }
+
+  private getCubeCorners(x: number, y: number, z: number): THREE.Vector3[] {
+    return CUBE_CORNER_OFFSETS.map(
+      (offset) => new THREE.Vector3((x + offset.x) * this.cubeSize, (y + offset.y) * this.cubeSize, (z + offset.z) * this.cubeSize)
+    );
+  }
+
+  private addVertex(chunkPosition: THREE.Vector3, v1: THREE.Vector3, v2: THREE.Vector3, v3: THREE.Vector3): void {
+    this.ensureBufferCapacity(3);
+
+    const edge1 = this.tempVectors[0].subVectors(v2, v1);
+    const edge2 = this.tempVectors[1].subVectors(v3, v1);
+    const normal = this.tempVectors[2].crossVectors(edge1, edge2).normalize();
+
+    const color = this.getColor(chunkPosition, v1);
+    const startIndex = this.positionsIndex / 3;
+
+    // Add vertices
+    [v1, v2, v3].forEach((v) => {
+      this.positionsBuffer[this.positionsIndex++] = v.x;
+      this.positionsBuffer[this.positionsIndex++] = v.y;
+      this.positionsBuffer[this.positionsIndex++] = v.z;
+
+      this.normalsBuffer[this.normalsIndex++] = normal.x;
+      this.normalsBuffer[this.normalsIndex++] = normal.y;
+      this.normalsBuffer[this.normalsIndex++] = normal.z;
+
+      this.colorsBuffer[this.colorsIndex++] = color.r;
+      this.colorsBuffer[this.colorsIndex++] = color.g;
+      this.colorsBuffer[this.colorsIndex++] = color.b;
+    });
+
+    // Add indices in counter-clockwise order
+    this.indicesBuffer[this.indicesIndex++] = startIndex;
+    this.indicesBuffer[this.indicesIndex++] = startIndex + 1;
+    this.indicesBuffer[this.indicesIndex++] = startIndex + 2;
   }
 
   private createGeometry(geometry: THREE.BufferGeometry): void {
@@ -730,10 +706,7 @@ export class InfiniteLandscape {
     triangles: number[],
     corners: THREE.Vector3[],
     values: number[],
-    positions: number[],
-    indices: number[],
-    colors: number[],
-    normals: number[],
+
     chunkPosition: THREE.Vector3
   ): void {
     for (let i = 0; i < triangles.length - 1; i += 3) {
@@ -756,121 +729,27 @@ export class InfiniteLandscape {
 
       // Only add triangle if all vertices are valid and triangle is not degenerate
       if (allValid && this.isValidTriangle(vertices[0], vertices[1], vertices[2])) {
-        this.addVertex(vertices[0], vertices[1], vertices[2], chunkPosition);
+        this.addVertex(chunkPosition, vertices[0], vertices[1], vertices[2]);
       }
     }
   }
 
-  private generateNoiseValue(x: number, y: number, z: number): number {
-    // Early exits for fixed values
-    if (y < GROUND_THRESHOLD) {
-      return GROUND_VALUE;
+  private hasValidFieldValues(field: Float32Array, totalSize: number, x: number, y: number, z: number): boolean {
+    // Check a larger neighborhood around the point
+    for (let dx = -1; dx <= 2; dx++) {
+      for (let dy = -1; dy <= 2; dy++) {
+        for (let dz = -1; dz <= 2; dz++) {
+          const index = ((x + dx) * totalSize + (y + dy)) * totalSize + (z + dz);
+          const value = field[index];
+          if (value === undefined || !Number.isFinite(value)) {
+            return false;
+          }
+        }
+      }
     }
-
-    const normalizedY = y / (this.gridSize - 1);
-    if (normalizedY > TOP_THRESHOLD) {
-      return AIR_VALUE;
-    }
-
-    // Get biome data once
-    const temperature = this.getTemperature(x, z);
-    const biome = this.getBiome(temperature, this.getHumidity(x, z));
-    const scale = biome.terrainScale;
-
-    // Calculate height falloff
-    const heightFalloff = 1.0 - normalizedY ** FALLOFF_POWER;
-    if (heightFalloff <= 0) {
-      return AIR_VALUE;
-    }
-
-    // Generate base noise
-    const noiseValue = this.generateRidgedNoise(x, y, z, scale, 4, 0.5);
-
-    // Add large-scale variation
-    const largeScale = scale * VARIATION_SCALE;
-    const baseVariation = this.simplex.noise3d(x * largeScale, 0, z * largeScale);
-
-    // Combine noise values
-    const combinedNoise = (noiseValue + baseVariation * VARIATION_STRENGTH) * heightFalloff;
-
-    // Clamp value
-    const value = Math.max(MIN_VALUE, Math.min(MAX_VALUE, combinedNoise));
-    const surfaceDist = Math.abs(value - this.isoLevel);
-
-    // Adjust surface values
-    if (surfaceDist < this.surfaceThickness) {
-      return value > this.isoLevel ? this.isoLevel + this.surfaceThickness : this.isoLevel - this.surfaceThickness;
-    }
-
-    return value;
+    return true;
   }
 
-  private getCubeCorners(x: number, y: number, z: number): THREE.Vector3[] {
-    return this.tempCorners.map((vec, i) => {
-      const offset = CUBE_CORNER_OFFSETS[i];
-      vec.set((x + offset.x) * this.cubeSize, (y + offset.y) * this.cubeSize, (z + offset.z) * this.cubeSize);
-      return vec;
-    });
-  }
-
-  // Add these constants at class/file level
-
-  // Optional: Add noise cache if memory permits
-  private noiseCache = new Map<string, number>();
-
-  private getCacheKey(x: number, y: number, z: number, scale: number): string {
-    return `${~~(x * scale * NOISE_PRECISION)},${~~(y * scale * NOISE_PRECISION)},${~~(z * scale * NOISE_PRECISION)}`;
-  }
-
-  private generateRidgedNoise(x: number, y: number, z: number, scale: number, octaves: number, persistence: number): number {
-    // Check cache first
-    const key = this.getCacheKey(x, y, z, scale);
-    const cached = this.noiseCache.get(key);
-    if (cached !== undefined) return cached;
-
-    let noiseValue = 0;
-    let amplitude = INITIAL_AMPLITUDE;
-    let frequency = INITIAL_FREQUENCY;
-    const scaledX = x * scale;
-    const scaledY = y * scale;
-    const scaledZ = z * scale;
-
-    // Pre-calculate max value instead of accumulating
-    const maxValue = (amplitude * (1 - Math.pow(persistence, octaves))) / (1 - persistence);
-
-    for (let i = 0; i < octaves; i++) {
-      // Combine scaling calculations
-      const sx = scaledX * frequency;
-      const sy = scaledY * frequency;
-      const sz = scaledZ * frequency;
-
-      // Get noise value and calculate ridge in one step
-      const ridge = 1 - Math.abs(this.simplex.noise3d(sx, sy, sz));
-
-      // Square ridge and accumulate with amplitude
-      noiseValue += ridge * ridge * amplitude;
-
-      // Update for next octave
-      amplitude *= persistence;
-      frequency *= FREQUENCY_MULTIPLIER;
-    }
-
-    const result = noiseValue / maxValue;
-
-    // Cache the result
-    if (this.noiseCache.size < 10000) {
-      this.noiseCache.set(key, result);
-    }
-
-    return result;
-  }
-
-  // Add cache management method
-  private clearNoiseCache(): void {
-    if (this.noiseCache.size > 9000) {
-      this.noiseCache.clear();
-    }
-  }
   private getTemperature(x: number, z: number): number {
     const scale = 0.02; // Reduced scale for smoother transitions
     return (this.temperatureNoise.noise3d(x * scale, 0, z * scale) + 1) * 0.5;
@@ -880,21 +759,6 @@ export class InfiniteLandscape {
     const scale = 0.015; // Even smoother humidity transitions
     return (this.humidityNoise.noise3d(x * scale, 0, z * scale) + 1) * 0.5;
   }
-
-  private getBiome(temperature: number, humidity: number): Biome {
-    for (const biome of BIOMES) {
-      if (
-        temperature >= biome.temperatureRange[0] &&
-        temperature <= biome.temperatureRange[1] &&
-        humidity >= biome.humidityRange[0] &&
-        humidity <= biome.humidityRange[1]
-      ) {
-        return biome;
-      }
-    }
-    return DEFAULT_BIOME;
-  }
-
   private getBiomeColor(temperature: number, humidity: number, height: number): THREE.Color {
     // Calculate biome influence factors for smoother transitions
     let totalWeight = 0;
@@ -1002,58 +866,6 @@ export class InfiniteLandscape {
     return true;
   }
 
-  private addVertex(v1: THREE.Vector3, v2: THREE.Vector3, v3: THREE.Vector3, chunkPosition: THREE.Vector3): void {
-    this.ensureBufferCapacity(3);
-
-    const edge1 = this.tempVectors[0].subVectors(v2, v1);
-    const edge2 = this.tempVectors[1].subVectors(v3, v1);
-    const normal = this.tempVectors[2].crossVectors(edge1, edge2).normalize();
-
-    const color = this.getColor(chunkPosition, v1);
-    const startIndex = this.positionsIndex / 3;
-
-    [v1, v2, v3].forEach((v) => {
-      this.positionsBuffer[this.positionsIndex++] = v.x;
-      this.positionsBuffer[this.positionsIndex++] = v.y;
-      this.positionsBuffer[this.positionsIndex++] = v.z;
-
-      this.normalsBuffer[this.normalsIndex++] = normal.x;
-      this.normalsBuffer[this.normalsIndex++] = normal.y;
-      this.normalsBuffer[this.normalsIndex++] = normal.z;
-
-      this.colorsBuffer[this.colorsIndex++] = color.r;
-      this.colorsBuffer[this.colorsIndex++] = color.g;
-      this.colorsBuffer[this.colorsIndex++] = color.b;
-    });
-
-    this.indicesBuffer[this.indicesIndex++] = startIndex;
-    this.indicesBuffer[this.indicesIndex++] = startIndex + 1;
-    this.indicesBuffer[this.indicesIndex++] = startIndex + 2;
-  }
-
-  private ensureBufferCapacity(verticesNeeded: number) {
-    const requiredSize = this.positionsIndex + verticesNeeded * 3;
-    if (requiredSize > this.positionsBuffer.length) {
-      const newSize = Math.max(requiredSize, this.positionsBuffer.length * 2);
-      this.resizeBuffer(newSize);
-    }
-  }
-
-  private resizeBuffer(newSize: number) {
-    const resize = (old: Float32Array) => {
-      const newArr = new Float32Array(newSize);
-      newArr.set(old);
-      return newArr;
-    };
-
-    this.positionsBuffer = resize(this.positionsBuffer);
-    this.normalsBuffer = resize(this.normalsBuffer);
-    this.colorsBuffer = resize(this.colorsBuffer);
-    this.indicesBuffer = new Uint32Array(Math.max(newSize, this.indicesBuffer.length * 2));
-  }
-
-  // Modified vertex addition logic for the geometry generation
-
   private setupEventListeners(): void {
     // window.addEventListener("mousedown", (event) => this.onMouseDown(event));
     // window.addEventListener("mouseup", (event) => this.onMouseUp(event));
@@ -1127,13 +939,14 @@ export class InfiniteLandscape {
           if (distance > radius) continue;
 
           const influence = 1 - distance / radius;
-          chunk.scalarField[px][py][pz] += strength * influence;
+          const index = px * this.gridSize * this.gridSize + py * this.gridSize + pz;
+          chunk.scalarField[index] += strength * influence;
         }
       }
     }
 
     const newGeometry = new THREE.BufferGeometry();
-    this.generateChunkGeometry(newGeometry, chunk.scalarField, chunk.position);
+    this.generateChunkGeometry(newGeometry, chunk.scalarField, chunk.totalSize, chunk.position);
     chunk.mesh.geometry.dispose();
     chunk.mesh.geometry = newGeometry;
   }

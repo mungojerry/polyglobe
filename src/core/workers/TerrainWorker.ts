@@ -150,12 +150,13 @@ ctx.addEventListener(
       }
 
       const totalSize = gridSize + padding * 2;
-      const field = new Float32Array(totalSize * totalSize * totalSize);
+      // Create transferable ArrayBuffer
+      const field = new Float32Array(new ArrayBuffer(totalSize * totalSize * totalSize * 4));
       const effectiveSize = gridSize - padding;
       const offsetX = chunkX * effectiveSize;
       const offsetZ = chunkZ * effectiveSize;
 
-      // Optimized single-loop terrain generation
+      // Generate terrain data
       const totalElements = totalSize * totalSize * totalSize;
       const yzSize = totalSize * totalSize;
 
@@ -163,23 +164,19 @@ ctx.addEventListener(
         const x = (i / yzSize) | 0;
         const y = ((i % yzSize) / totalSize) | 0;
         const z = i % totalSize;
-
         field[i] = generateTerrainNoise(offsetX + x - padding, y - padding, offsetZ + z - padding);
       }
 
-      // Periodic cache reset
-      if (++CACHED.cacheIndex > CONFIG.CACHE.SIZE * CONFIG.CACHE.RESET_THRESHOLD) {
-        CACHED.cacheIndex = 0;
-        CACHED.noiseValues.fill(0);
-        CACHED.cacheKeys.fill(0);
-      }
-
-      ctx.postMessage({
-        type: "terrainGenerated",
-        chunkX,
-        chunkZ,
-        field,
-      });
+      // Use transferable ArrayBuffer
+      ctx.postMessage(
+        {
+          type: "terrainGenerated",
+          chunkX,
+          chunkZ,
+          field,
+        },
+        [field.buffer]
+      );
     }
   }
 );
