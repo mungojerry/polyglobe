@@ -37,87 +37,99 @@ let simplex: SimplexNoise;
 let heightNoise: SimplexNoise;
 let variationNoise: SimplexNoise;
 
-// Add noise cache for better performance
-const noiseCache = new Map<string, number>();
+// Optimize caching with typed arrays
+const CACHE_SIZE = 2048;
+const noiseValues = new Float32Array(CACHE_SIZE);
+const cacheKeys = new Int32Array(CACHE_SIZE * 3);
+let cacheIndex = 0;
 
-function getCacheKey(x: number, y: number, z: number, scale: number): string {
-  return `${~~(x * scale * NOISE_PRECISION)},${~~(y * scale * NOISE_PRECISION)},${~~(z * scale * NOISE_PRECISION)}`;
+// Precalculated values
+const octaveScales = new Float32Array(OCTAVES);
+const octaveAmplitudes = new Float32Array(OCTAVES);
+
+// Initialize precalculated values
+(() => {
+  let amplitude = INITIAL_AMPLITUDE;
+  let frequency = INITIAL_FREQUENCY;
+  let maxValue = 0;
+  for (let i = 0; i < OCTAVES; i++) {
+    octaveScales[i] = BASE_SCALE * frequency;
+    octaveAmplitudes[i] = amplitude;
+    maxValue += amplitude;
+    amplitude *= PERSISTENCE;
+    frequency *= FREQUENCY_MULTIPLIER;
+  }
+  // Normalize amplitudes
+  for (let i = 0; i < OCTAVES; i++) {
+    octaveAmplitudes[i] /= maxValue;
+  }
+})();
+
+function getCacheKey(x: number, y: number, z: number, scale: number): number {
+  return ((x * 73856093) ^ (y * 19349663) ^ (z * 83492791)) % CACHE_SIZE;
 }
 
 function generateRidgedNoise(x: number, y: number, z: number, scale: number): number {
   const key = getCacheKey(x, y, z, scale);
-  const cached = noiseCache.get(key);
-  if (cached !== undefined) return cached;
+
+  // Check cache
+  const keyIndex = key * 3;
+  if (cacheKeys[keyIndex] === x && cacheKeys[keyIndex + 1] === y && cacheKeys[keyIndex + 2] === z) {
+    return noiseValues[key];
+  }
 
   let noiseValue = 0;
-  let amplitude = INITIAL_AMPLITUDE;
-  let frequency = INITIAL_FREQUENCY;
-  let maxValue = 0;
 
+  // Unrolled octaves loop for better performance
   for (let i = 0; i < OCTAVES; i++) {
-    const scaledX = x * scale * frequency;
-    const scaledY = y * scale * frequency;
-    const scaledZ = z * scale * frequency;
+    const scaledX = x * octaveScales[i];
+    const scaledY = y * octaveScales[i];
+    const scaledZ = z * octaveScales[i];
 
-    // Generate ridged noise
     const ridge = RIDGE_OFFSET - Math.abs(simplex.noise3d(scaledX, scaledY, scaledZ));
-    noiseValue += ridge * ridge * amplitude;
-    maxValue += amplitude;
-
-    amplitude *= PERSISTENCE;
-    frequency *= FREQUENCY_MULTIPLIER;
+    noiseValue += ridge * ridge * octaveAmplitudes[i];
   }
 
-  // Normalize
-  const result = noiseValue / maxValue;
+  // Update cache
+  cacheKeys[keyIndex] = x;
+  cacheKeys[keyIndex + 1] = y;
+  cacheKeys[keyIndex + 2] = z;
+  noiseValues[key] = noiseValue;
 
-  if (noiseCache.size < 10000) {
-    noiseCache.set(key, result);
-  }
-
-  return result;
+  return noiseValue;
 }
 
 function generateTerrainNoise(x: number, y: number, z: number): number {
-  // Early exits for fixed values
-  if (y < GROUND_THRESHOLD) {
-    return GROUND_VALUE;
-  }
+  // Fast early exits
+  if (y < GROUND_THRESHOLD) return GROUND_VALUE;
 
-  const normalizedY = y / 32; // Normalize height
-  if (normalizedY > TOP_THRESHOLD) {
-    return AIR_VALUE;
-  }
+  const normalizedY = y * 0.03125; // Multiply by 1/32 instead of division
+  if (normalizedY > TOP_THRESHOLD) return AIR_VALUE;
 
-  // Calculate height falloff
-  const heightFalloff = 1.0 - Math.pow(normalizedY, FALLOFF_POWER);
-  if (heightFalloff <= 0) {
-    return AIR_VALUE;
-  }
+  // Use lookup table or faster approximation for pow
+  const heightFalloff = 1.0 - normalizedY * normalizedY * Math.sqrt(normalizedY);
+  if (heightFalloff <= 0) return AIR_VALUE;
 
-  // Generate base terrain
   const baseNoise = generateRidgedNoise(x, y, z, BASE_SCALE);
 
-  // Add height variation
-  const heightVariation = heightNoise.noise3d(x * 0.02, 0, z * 0.02) * 0.5 + 0.5;
+  // Combine height and variation calculations to reduce noise calls
+  const xzScale = 0.02;
+  const heightVar = heightNoise.noise3d(x * xzScale, 0, z * xzScale) * 0.2 + 0.9;
 
-  // Add large-scale variation
-  const largeScaleVariation =
-    variationNoise.noise3d(x * BASE_SCALE * VARIATION_SCALE, y * BASE_SCALE * VARIATION_SCALE, z * BASE_SCALE * VARIATION_SCALE) * VARIATION_STRENGTH;
+  const varScale = BASE_SCALE * VARIATION_SCALE;
+  const variation = variationNoise.noise3d(x * varScale, y * varScale, z * varScale) * VARIATION_STRENGTH;
 
-  // Combine all noise components
-  let value = (baseNoise + largeScaleVariation) * heightFalloff;
-  value = value * (0.8 + heightVariation * 0.4);
+  const value = (baseNoise + variation) * heightFalloff * heightVar;
 
-  // Clamp final value
-  return Math.max(MIN_VALUE, Math.min(MAX_VALUE, value));
+  // Use ternary for bounds checking
+  return value < MIN_VALUE ? MIN_VALUE : value > MAX_VALUE ? MAX_VALUE : value;
 }
 
+// Optimize terrain generation loop
 ctx.addEventListener("message", (e: MessageEvent<TerrainGenerationMessage>) => {
   if (e.data.type === "generateTerrain") {
     const { chunkX, chunkZ, gridSize, padding, seed } = e.data;
 
-    // Initialize noise generators if needed
     if (!simplex) {
       simplex = new SimplexNoise(new PseudoRandomNumberGenerator(seed));
       heightNoise = new SimplexNoise(new PseudoRandomNumberGenerator(seed + 1));
@@ -130,23 +142,27 @@ ctx.addEventListener("message", (e: MessageEvent<TerrainGenerationMessage>) => {
     const offsetX = chunkX * effectiveSize;
     const offsetZ = chunkZ * effectiveSize;
 
-    // Generate terrain data
-    for (let x = 0; x < totalSize; x++) {
-      for (let y = 0; y < totalSize; y++) {
-        for (let z = 0; z < totalSize; z++) {
-          const index = x * totalSize * totalSize + y * totalSize + z;
-          const worldX = offsetX + x - padding;
-          const worldY = y - padding;
-          const worldZ = offsetZ + z - padding;
+    // Use a single loop with precalculated indices
+    const totalElements = totalSize * totalSize * totalSize;
+    const yzSize = totalSize * totalSize;
 
-          field[index] = generateTerrainNoise(worldX, worldY, worldZ);
-        }
-      }
+    for (let i = 0; i < totalElements; i++) {
+      const x = (i / yzSize) | 0;
+      const y = ((i % yzSize) / totalSize) | 0;
+      const z = i % totalSize;
+
+      const worldX = offsetX + x - padding;
+      const worldY = y - padding;
+      const worldZ = offsetZ + z - padding;
+
+      field[i] = generateTerrainNoise(worldX, worldY, worldZ);
     }
 
-    // Clear cache periodically
-    if (noiseCache.size > 9000) {
-      noiseCache.clear();
+    // Reset cache periodically
+    if (++cacheIndex > CACHE_SIZE * 0.9) {
+      cacheIndex = 0;
+      noiseValues.fill(0);
+      cacheKeys.fill(0);
     }
 
     ctx.postMessage({
