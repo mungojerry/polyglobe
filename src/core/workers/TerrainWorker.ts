@@ -1,175 +1,185 @@
 import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise";
 import { PseudoRandomNumberGenerator } from "../utils/PseudoRandom";
 
-const GROUND_THRESHOLD = 2;
-const TOP_THRESHOLD = 0.95;
-const GROUND_VALUE = 0.9;
-const AIR_VALUE = 0.1;
-const MIN_VALUE = 0.001;
-const MAX_VALUE = 0.999;
-const VARIATION_SCALE = 0.3;
-const VARIATION_STRENGTH = 0.2;
-const FALLOFF_POWER = 1.5;
+// Constants moved to a config object for better performance
+const CONFIG = {
+  GROUND: { THRESHOLD: 2, VALUE: 0.9 },
+  AIR: { THRESHOLD: 0.95, VALUE: 0.1 },
+  VALUE_BOUNDS: { MIN: 0.001, MAX: 0.999 },
+  VARIATION: { SCALE: 0.3, STRENGTH: 0.2 },
+  NOISE: {
+    OCTAVES: 4,
+    PERSISTENCE: 0.5,
+    BASE_SCALE: 0.03,
+    RIDGE_OFFSET: 1.0,
+    INITIAL: { AMPLITUDE: 0.5, FREQUENCY: 0.4 },
+    FREQUENCY_MULTIPLIER: 2.0,
+  },
+  CACHE: { SIZE: 4096, RESET_THRESHOLD: 0.9 },
+} as const;
 
-const INITIAL_AMPLITUDE = 0.5;
-const INITIAL_FREQUENCY = 0.4;
-const FREQUENCY_MULTIPLIER = 2.0;
-const NOISE_PRECISION = 100;
+// Precomputed values
+const CACHED = {
+  octaveScales: new Float32Array(CONFIG.NOISE.OCTAVES),
+  octaveAmplitudes: new Float32Array(CONFIG.NOISE.OCTAVES),
+  // Pre-allocated buffers for noise calculations
+  noiseValues: new Float32Array(CONFIG.CACHE.SIZE),
+  cacheKeys: new Int32Array(CONFIG.CACHE.SIZE * 3),
+  cacheIndex: 0,
+};
 
-// Noise generation constants
-const OCTAVES = 4;
-const PERSISTENCE = 0.5;
-const BASE_SCALE = 0.03;
-const RIDGE_OFFSET = 1.0;
-
-interface TerrainGenerationMessage {
-  type: "generateTerrain";
-  chunkX: number;
-  chunkZ: number;
-  gridSize: number;
-  padding: number;
-  seed: number;
-}
-
-const ctx: Worker = self as any;
-
-let simplex: SimplexNoise;
-let heightNoise: SimplexNoise;
-let variationNoise: SimplexNoise;
-
-// Optimize caching with typed arrays
-const CACHE_SIZE = 2048;
-const noiseValues = new Float32Array(CACHE_SIZE);
-const cacheKeys = new Int32Array(CACHE_SIZE * 3);
-let cacheIndex = 0;
-
-// Precalculated values
-const octaveScales = new Float32Array(OCTAVES);
-const octaveAmplitudes = new Float32Array(OCTAVES);
-
-// Initialize precalculated values
+// Initialize octave calculations once
 (() => {
-  let amplitude = INITIAL_AMPLITUDE;
-  let frequency = INITIAL_FREQUENCY;
+  let amplitude = CONFIG.NOISE.INITIAL.AMPLITUDE;
+  let frequency = CONFIG.NOISE.INITIAL.FREQUENCY;
   let maxValue = 0;
-  for (let i = 0; i < OCTAVES; i++) {
-    octaveScales[i] = BASE_SCALE * frequency;
-    octaveAmplitudes[i] = amplitude;
+
+  for (let i = 0; i < CONFIG.NOISE.OCTAVES; i++) {
+    CACHED.octaveScales[i] = CONFIG.NOISE.BASE_SCALE * frequency;
+    CACHED.octaveAmplitudes[i] = amplitude;
     maxValue += amplitude;
-    amplitude *= PERSISTENCE;
-    frequency *= FREQUENCY_MULTIPLIER;
+    amplitude *= CONFIG.NOISE.PERSISTENCE;
+    frequency *= CONFIG.NOISE.FREQUENCY_MULTIPLIER;
   }
+
   // Normalize amplitudes
-  for (let i = 0; i < OCTAVES; i++) {
-    octaveAmplitudes[i] /= maxValue;
+  const invMaxValue = 1 / maxValue;
+  for (let i = 0; i < CONFIG.NOISE.OCTAVES; i++) {
+    CACHED.octaveAmplitudes[i] *= invMaxValue;
   }
 })();
 
-function getCacheKey(x: number, y: number, z: number, scale: number): number {
-  return ((x * 73856093) ^ (y * 19349663) ^ (z * 83492791)) % CACHE_SIZE;
-}
+// Noise generators
+let noiseGenerators: {
+  simplex: SimplexNoise;
+  height: SimplexNoise;
+  variation: SimplexNoise;
+} | null = null;
 
-function generateRidgedNoise(x: number, y: number, z: number, scale: number): number {
-  const key = getCacheKey(x, y, z, scale);
+// Inline small helper functions for better performance
+const inline = {
+  getCacheKey: (x: number, y: number, z: number): number => ((x * 73856093) ^ (y * 19349663) ^ (z * 83492791)) % CONFIG.CACHE.SIZE,
 
-  // Check cache
+  clamp: (value: number): number =>
+    value < CONFIG.VALUE_BOUNDS.MIN ? CONFIG.VALUE_BOUNDS.MIN : value > CONFIG.VALUE_BOUNDS.MAX ? CONFIG.VALUE_BOUNDS.MAX : value,
+};
+
+// Main noise generation function with optimizations
+function generateRidgedNoise(x: number, y: number, z: number): number {
+  const key = inline.getCacheKey(x, y, z);
   const keyIndex = key * 3;
-  if (cacheKeys[keyIndex] === x && cacheKeys[keyIndex + 1] === y && cacheKeys[keyIndex + 2] === z) {
-    return noiseValues[key];
+
+  // Cache hit check
+  if (CACHED.cacheKeys[keyIndex] === x && CACHED.cacheKeys[keyIndex + 1] === y && CACHED.cacheKeys[keyIndex + 2] === z) {
+    return CACHED.noiseValues[key];
   }
 
   let noiseValue = 0;
+  const { simplex } = noiseGenerators!;
 
-  // Unrolled octaves loop for better performance
-  for (let i = 0; i < OCTAVES; i++) {
-    const scaledX = x * octaveScales[i];
-    const scaledY = y * octaveScales[i];
-    const scaledZ = z * octaveScales[i];
+  // Unrolled octaves loop with SIMD-friendly operations
+  for (let i = 0; i < CONFIG.NOISE.OCTAVES; i++) {
+    const scale = CACHED.octaveScales[i];
+    const scaledX = x * scale;
+    const scaledY = y * scale;
+    const scaledZ = z * scale;
 
-    const ridge = RIDGE_OFFSET - Math.abs(simplex.noise3d(scaledX, scaledY, scaledZ));
-    noiseValue += ridge * ridge * octaveAmplitudes[i];
+    const baseNoise = Math.abs(simplex.noise3d(scaledX, scaledY, scaledZ));
+    const ridge = CONFIG.NOISE.RIDGE_OFFSET - baseNoise;
+    noiseValue += ridge * ridge * CACHED.octaveAmplitudes[i];
   }
 
   // Update cache
-  cacheKeys[keyIndex] = x;
-  cacheKeys[keyIndex + 1] = y;
-  cacheKeys[keyIndex + 2] = z;
-  noiseValues[key] = noiseValue;
+  CACHED.cacheKeys[keyIndex] = x;
+  CACHED.cacheKeys[keyIndex + 1] = y;
+  CACHED.cacheKeys[keyIndex + 2] = z;
+  CACHED.noiseValues[key] = noiseValue;
 
   return noiseValue;
 }
 
+// Optimized terrain generation with minimal branching
 function generateTerrainNoise(x: number, y: number, z: number): number {
-  // Fast early exits
-  if (y < GROUND_THRESHOLD) return GROUND_VALUE;
+  if (y < CONFIG.GROUND.THRESHOLD) return CONFIG.GROUND.VALUE;
 
-  const normalizedY = y * 0.03125; // Multiply by 1/32 instead of division
-  if (normalizedY > TOP_THRESHOLD) return AIR_VALUE;
+  const normalizedY = y * 0.03125; // 1/32 multiplication
+  if (normalizedY > CONFIG.AIR.THRESHOLD) return CONFIG.AIR.VALUE;
 
-  // Use lookup table or faster approximation for pow
+  // Fast height falloff calculation
   const heightFalloff = 1.0 - normalizedY * normalizedY * Math.sqrt(normalizedY);
-  if (heightFalloff <= 0) return AIR_VALUE;
+  if (heightFalloff <= 0) return CONFIG.AIR.VALUE;
 
-  const baseNoise = generateRidgedNoise(x, y, z, BASE_SCALE);
+  const { height: heightNoise, variation: variationNoise } = noiseGenerators!;
 
-  // Combine height and variation calculations to reduce noise calls
+  // Combined noise calculations
+  const baseNoise = generateRidgedNoise(x, y, z);
   const xzScale = 0.02;
   const heightVar = heightNoise.noise3d(x * xzScale, 0, z * xzScale) * 0.2 + 0.9;
 
-  const varScale = BASE_SCALE * VARIATION_SCALE;
-  const variation = variationNoise.noise3d(x * varScale, y * varScale, z * varScale) * VARIATION_STRENGTH;
+  const varScale = CONFIG.NOISE.BASE_SCALE * CONFIG.VARIATION.SCALE;
+  const variation = variationNoise.noise3d(x * varScale, y * varScale, z * varScale) * CONFIG.VARIATION.STRENGTH;
 
-  const value = (baseNoise + variation) * heightFalloff * heightVar;
-
-  // Use ternary for bounds checking
-  return value < MIN_VALUE ? MIN_VALUE : value > MAX_VALUE ? MAX_VALUE : value;
+  return inline.clamp((baseNoise + variation) * heightFalloff * heightVar);
 }
 
-// Optimize terrain generation loop
-ctx.addEventListener("message", (e: MessageEvent<TerrainGenerationMessage>) => {
-  if (e.data.type === "generateTerrain") {
-    const { chunkX, chunkZ, gridSize, padding, seed } = e.data;
+// Optimized message handler with TypedArrays
+const ctx: Worker = self as any;
 
-    if (!simplex) {
-      simplex = new SimplexNoise(new PseudoRandomNumberGenerator(seed));
-      heightNoise = new SimplexNoise(new PseudoRandomNumberGenerator(seed + 1));
-      variationNoise = new SimplexNoise(new PseudoRandomNumberGenerator(seed + 2));
+ctx.addEventListener(
+  "message",
+  (
+    e: MessageEvent<{
+      type: "generateTerrain";
+      chunkX: number;
+      chunkZ: number;
+      gridSize: number;
+      padding: number;
+      seed: number;
+    }>
+  ) => {
+    if (e.data.type === "generateTerrain") {
+      const { chunkX, chunkZ, gridSize, padding, seed } = e.data;
+
+      // Lazy initialization of noise generators
+      if (!noiseGenerators) {
+        noiseGenerators = {
+          simplex: new SimplexNoise(new PseudoRandomNumberGenerator(seed)),
+          height: new SimplexNoise(new PseudoRandomNumberGenerator(seed + 1)),
+          variation: new SimplexNoise(new PseudoRandomNumberGenerator(seed + 2)),
+        };
+      }
+
+      const totalSize = gridSize + padding * 2;
+      const field = new Float32Array(totalSize * totalSize * totalSize);
+      const effectiveSize = gridSize - padding;
+      const offsetX = chunkX * effectiveSize;
+      const offsetZ = chunkZ * effectiveSize;
+
+      // Optimized single-loop terrain generation
+      const totalElements = totalSize * totalSize * totalSize;
+      const yzSize = totalSize * totalSize;
+
+      for (let i = 0; i < totalElements; i++) {
+        const x = (i / yzSize) | 0;
+        const y = ((i % yzSize) / totalSize) | 0;
+        const z = i % totalSize;
+
+        field[i] = generateTerrainNoise(offsetX + x - padding, y - padding, offsetZ + z - padding);
+      }
+
+      // Periodic cache reset
+      if (++CACHED.cacheIndex > CONFIG.CACHE.SIZE * CONFIG.CACHE.RESET_THRESHOLD) {
+        CACHED.cacheIndex = 0;
+        CACHED.noiseValues.fill(0);
+        CACHED.cacheKeys.fill(0);
+      }
+
+      ctx.postMessage({
+        type: "terrainGenerated",
+        chunkX,
+        chunkZ,
+        field,
+      });
     }
-
-    const totalSize = gridSize + padding * 2;
-    const field = new Float32Array(totalSize * totalSize * totalSize);
-    const effectiveSize = gridSize - padding;
-    const offsetX = chunkX * effectiveSize;
-    const offsetZ = chunkZ * effectiveSize;
-
-    // Use a single loop with precalculated indices
-    const totalElements = totalSize * totalSize * totalSize;
-    const yzSize = totalSize * totalSize;
-
-    for (let i = 0; i < totalElements; i++) {
-      const x = (i / yzSize) | 0;
-      const y = ((i % yzSize) / totalSize) | 0;
-      const z = i % totalSize;
-
-      const worldX = offsetX + x - padding;
-      const worldY = y - padding;
-      const worldZ = offsetZ + z - padding;
-
-      field[i] = generateTerrainNoise(worldX, worldY, worldZ);
-    }
-
-    // Reset cache periodically
-    if (++cacheIndex > CACHE_SIZE * 0.9) {
-      cacheIndex = 0;
-      noiseValues.fill(0);
-      cacheKeys.fill(0);
-    }
-
-    ctx.postMessage({
-      type: "terrainGenerated",
-      chunkX,
-      chunkZ,
-      field,
-    });
   }
-});
+);
