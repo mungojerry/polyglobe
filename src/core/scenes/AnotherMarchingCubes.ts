@@ -399,10 +399,9 @@ export class InfiniteLandscape {
   }
 
   private getChunkCoordinates(position: THREE.Vector3): THREE.Vector2 {
-    // Ensure proper chunk alignment with padding
-    const effectiveSize = (this.gridSize - this.chunkOverlap - this.boundaryPadding) * this.cubeSize;
-    const chunkX = Math.floor((position.x + this.boundaryPadding) / effectiveSize);
-    const chunkZ = Math.floor((position.z + this.boundaryPadding) / effectiveSize);
+    const effectiveSize = (this.gridSize - this.chunkOverlap) * this.cubeSize;
+    const chunkX = Math.floor(position.x / effectiveSize);
+    const chunkZ = Math.floor(position.z / effectiveSize);
     return new THREE.Vector2(chunkX, chunkZ);
   }
 
@@ -574,8 +573,8 @@ export class InfiniteLandscape {
   getColor(chunkPosition: THREE.Vector3, vertex: THREE.Vector3): THREE.Color {
     const worldX = chunkPosition.x + vertex.x;
     const worldZ = chunkPosition.z + vertex.z;
-    const temperature = this.getTemperature(worldX, worldZ);
     const humidity = this.getHumidity(worldX, worldZ);
+    const temperature = this.getTemperature(worldX, worldZ); // get temperature based on x,z coordinates
     return this.getBiomeColor(temperature, humidity, vertex.y);
   }
 
