@@ -17,7 +17,7 @@ const FREQUENCY_MULTIPLIER = 2.0;
 const NOISE_PRECISION = 100;
 
 // Noise generation constants
-const OCTAVES = 6;
+const OCTAVES = 4;
 const PERSISTENCE = 0.5;
 const BASE_SCALE = 0.03;
 const RIDGE_OFFSET = 1.0;
