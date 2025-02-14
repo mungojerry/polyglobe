@@ -155,14 +155,11 @@ export class InfiniteLandscape {
   controls: OrbitControls;
   light: THREE.DirectionalLight;
   private material: THREE.MeshStandardMaterial;
-  private simplex: SimplexNoise;
   private gridSize = 32; // Increased for better resolution
   private cubeSize = 1;
   private isoLevel = 0.5; // Slightly adjusted for better surface generation
   private chunkOverlap = 8; // Increased overlap
   private padding = 4; // New: explicit padding for field values
-  private boundaryPadding = 2; // New: explicit boundary padding
-  private surfaceThickness = 0.1; // New: control surface thickness
   private raycaster = new THREE.Raycaster();
   private temperatureNoise: SimplexNoise;
   private humidityNoise: SimplexNoise;
@@ -176,12 +173,6 @@ export class InfiniteLandscape {
   private readonly meshPool: THREE.Mesh[] = [];
   private frameCount = 0;
   private currentChunk = new THREE.Vector2();
-
-  // Pre-allocate arrays for geometry generation
-  // private readonly positions: number[] = [];
-  // private readonly indices: number[] = [];
-  // private readonly normals: number[] = [];
-  // private readonly colors: number[] = [];
 
   private positionsBuffer: Float32Array;
   private positionsIndex = 0;
@@ -214,14 +205,6 @@ export class InfiniteLandscape {
 
   // Modify the constructor to include error handling for worker creation
   constructor() {
-    console.log(edgeTable);
-    console.log(triTable);
-
-    // Check some known cases
-    console.log("Case 1:", triTable[1]); // Should have valid indices and end with -1
-    console.log("Case 3:", triTable[3]);
-    console.log("Case 255:", triTable[255]); // Should be empty case (all vertices inside)
-
     this.positionsBuffer = new Float32Array(this.initialBufferSize);
     this.normalsBuffer = new Float32Array(this.initialBufferSize);
     this.colorsBuffer = new Float32Array(this.initialBufferSize);
@@ -278,12 +261,15 @@ export class InfiniteLandscape {
     ground.position.y = -10;
     this.scene.add(ground);
     this.setupEventListeners();
-    this.simplex = new SimplexNoise(new PseudoRandomNumberGenerator(2343));
     this.temperatureNoise = new SimplexNoise(new PseudoRandomNumberGenerator(234443));
     this.humidityNoise = new SimplexNoise(new PseudoRandomNumberGenerator(234245));
     this.currentCenterChunk = this.getChunkCoordinates(this.camera.position);
     this.updateChunks(this.currentCenterChunk.x, this.currentCenterChunk.y);
+    this.initWorkerPool();
+    this.animate();
+  }
 
+  private initWorkerPool() {
     // Pre-allocate geometry and mesh pools
     for (let i = 0; i < CHUNK_POOL_SIZE; i++) {
       this.geometryPool.push(new THREE.BufferGeometry());
@@ -315,8 +301,6 @@ export class InfiniteLandscape {
     if (this.workers.length === 0) {
       throw new Error("Failed to create any workers");
     }
-
-    this.animate();
   }
 
   // Modify the worker management methods
