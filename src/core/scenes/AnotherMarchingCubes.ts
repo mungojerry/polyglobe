@@ -1,7 +1,5 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
-import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise";
-import { PseudoRandomNumberGenerator } from "../utils/PseudoRandom";
 import { edgeTable, triTable } from "./MCDefs";
 
 // Cache chunk key strings
@@ -126,11 +124,11 @@ interface TerrainChunk {
   mesh: THREE.Mesh;
   position: THREE.Vector3;
   scalarField: Float32Array;
+  temperatures: Float32Array; // Add these new properties
+  humidities: Float32Array; // to store climate data
   totalSize: number; // Add this to store dimensions
 }
 
-// Add these new constants at the top
-const VERTEX_POOL_SIZE = 1000000;
 const CHUNK_POOL_SIZE = 100;
 
 interface WorkerMessage {
@@ -138,13 +136,15 @@ interface WorkerMessage {
   chunkX: number;
   chunkZ: number;
   field: Float32Array;
+  temperatures: Float32Array;
+  humidities: Float32Array;
 }
 
 // Add these new interfaces at the top with other interfaces
 interface WorkerQueueItem {
   chunkX: number;
   chunkZ: number;
-  resolve: (field: Float32Array) => void;
+  resolve: (field: Float32Array, temperatures: Float32Array, humidities: Float32Array) => void;
   reject: (error: any) => void;
 }
 
@@ -161,8 +161,6 @@ export class InfiniteLandscape {
   private chunkOverlap = 8; // Increased overlap
   private padding = 4; // New: explicit padding for field values
   private raycaster = new THREE.Raycaster();
-  private temperatureNoise: SimplexNoise;
-  private humidityNoise: SimplexNoise;
 
   private chunks: Map<string, TerrainChunk> = new Map();
   private viewDistance = 3; // Number of chunks visible in each direction
@@ -193,7 +191,7 @@ export class InfiniteLandscape {
   private readonly pendingChunks = new Map<
     string,
     {
-      resolve: (field: Float32Array) => void;
+      resolve: (fields: Float32Array, temperatures: Float32Array, humidities: Float32Array) => void;
       reject: (error: any) => void;
     }
   >();
@@ -261,8 +259,6 @@ export class InfiniteLandscape {
     ground.position.y = -10;
     this.scene.add(ground);
     this.setupEventListeners();
-    this.temperatureNoise = new SimplexNoise(new PseudoRandomNumberGenerator(234443));
-    this.humidityNoise = new SimplexNoise(new PseudoRandomNumberGenerator(234245));
     this.currentCenterChunk = this.getChunkCoordinates(this.camera.position);
     this.updateChunks(this.currentCenterChunk.x, this.currentCenterChunk.y);
     this.initWorkerPool();
@@ -306,13 +302,13 @@ export class InfiniteLandscape {
   // Modify the worker management methods
   private handleWorkerMessage(e: MessageEvent<WorkerMessage>) {
     if (e.data.type === "terrainGenerated") {
-      const { chunkX, chunkZ, field } = e.data;
+      const { chunkX, chunkZ, field, humidities, temperatures } = e.data;
       const key = getChunkKey(chunkX, chunkZ);
       const pending = this.pendingChunks.get(key);
 
       if (pending) {
         // The field is already a transferable object
-        pending.resolve(field);
+        pending.resolve(field, temperatures, humidities);
         this.pendingChunks.delete(key);
 
         const worker = e.target as Worker;
@@ -367,13 +363,18 @@ export class InfiniteLandscape {
     });
   }
 
-  private async requestTerrainGeneration(chunkX: number, chunkZ: number): Promise<Float32Array> {
+  private async requestTerrainGeneration(
+    chunkX: number,
+    chunkZ: number
+  ): Promise<{ field: Float32Array; temperatures: Float32Array; humidities: Float32Array }> {
     return new Promise((resolve, reject) => {
       // Add request to queue
       this.workerQueue.push({
         chunkX,
         chunkZ,
-        resolve,
+        resolve: (field: Float32Array, temperatures: Float32Array, humidities: Float32Array) => {
+          resolve({ field, temperatures, humidities });
+        },
         reject,
       });
 
@@ -446,8 +447,8 @@ export class InfiniteLandscape {
     const position = new THREE.Vector3(chunkX * effectiveSize, 0, chunkZ * effectiveSize);
 
     try {
-      const { field, totalSize } = await this.createScalarField(chunkX, chunkZ);
-      this.generateChunkGeometry(geometry, field, totalSize, position);
+      const { field, temperatures, humidities, totalSize } = await this.createScalarField(chunkX, chunkZ);
+      this.generateChunkGeometry(geometry, field, temperatures, humidities, totalSize, position);
 
       // Add validation for degenerate geometry
       if (geometry.attributes.position.count === 0) {
@@ -460,7 +461,14 @@ export class InfiniteLandscape {
       mesh.receiveShadow = true;
       mesh.frustumCulled = true;
 
-      const chunk: TerrainChunk = { mesh, position, scalarField: field, totalSize };
+      const chunk: TerrainChunk = {
+        mesh,
+        position,
+        scalarField: field,
+        temperatures,
+        humidities,
+        totalSize,
+      };
       this.chunks.set(getChunkKey(chunkX, chunkZ), chunk);
       this.scene.add(mesh);
 
@@ -527,17 +535,33 @@ export class InfiniteLandscape {
     const length = totalSize * totalSize * totalSize;
     const field = new Float32Array(length);
     field.fill(1);
+    const temperatures = new Float32Array(length);
+    temperatures.fill(1);
+    const humidities = new Float32Array(length);
+    humidities.fill(1);
 
-    return { mesh, position, scalarField: field, totalSize };
+    return { mesh, position, scalarField: field, totalSize, temperatures, humidities };
   }
 
-  private async createScalarField(chunkX: number, chunkZ: number): Promise<{ field: Float32Array; totalSize: number }> {
+  private async createScalarField(
+    chunkX: number,
+    chunkZ: number
+  ): Promise<{
+    field: Float32Array;
+    temperatures: Float32Array;
+    humidities: Float32Array;
+    totalSize: number;
+  }> {
     try {
-      const fieldData = await this.requestTerrainGeneration(chunkX, chunkZ);
+      const data = await this.requestTerrainGeneration(chunkX, chunkZ);
       const totalSize = this.gridSize + this.padding * 2;
 
-      // fieldData is already a Float32Array, just return it with size info
-      return { field: fieldData, totalSize };
+      return {
+        field: data.field,
+        temperatures: data.temperatures,
+        humidities: data.humidities,
+        totalSize,
+      };
     } catch (error) {
       console.error("Failed to generate terrain:", error);
       return this.createFallbackScalarField();
@@ -545,20 +569,32 @@ export class InfiniteLandscape {
   }
 
   // Add a fallback method in case worker generation fails
-  private createFallbackScalarField(): { field: Float32Array; totalSize: number } {
+  private createFallbackScalarField(): {
+    field: Float32Array;
+    temperatures: Float32Array;
+    humidities: Float32Array;
+    totalSize: number;
+  } {
+    console.log("Using fallback scalar field generation");
     const totalSize = this.gridSize + this.padding * 2;
     const length = totalSize * totalSize * totalSize;
     const field = new Float32Array(length);
+    const temperatures = new Float32Array(totalSize * totalSize);
+    const humidities = new Float32Array(totalSize * totalSize);
     field.fill(this.isoLevel + 0.1);
-    return { field, totalSize };
+    temperatures.fill(0.5);
+    humidities.fill(0.5);
+    return { field, temperatures, humidities, totalSize };
   }
 
   // Compute per-vertex colors
-  getColor(chunkPosition: THREE.Vector3, vertex: THREE.Vector3): THREE.Color {
-    const worldX = chunkPosition.x + vertex.x;
-    const worldZ = chunkPosition.z + vertex.z;
-    const humidity = this.getHumidity(worldX, worldZ);
-    const temperature = this.getTemperature(worldX, worldZ); // get temperature based on x,z coordinates
+  getColor(chunkPosition: THREE.Vector3, vertex: THREE.Vector3, chunk: TerrainChunk): THREE.Color {
+    const localX = Math.floor(vertex.x / this.cubeSize) + this.padding;
+    const localZ = Math.floor(vertex.z / this.cubeSize) + this.padding;
+    const index = localX * chunk.totalSize + localZ;
+
+    const temperature = chunk.temperatures[index];
+    const humidity = chunk.humidities[index];
     return this.getBiomeColor(temperature, humidity, vertex.y);
   }
 
@@ -577,7 +613,14 @@ export class InfiniteLandscape {
     [2, 6], // edge 11: connects vertex 2 to vertex 6
   ];
 
-  private generateChunkGeometry(geometry: THREE.BufferGeometry, scalarField: Float32Array, totalSize: number, chunkPosition: THREE.Vector3): void {
+  private generateChunkGeometry(
+    geometry: THREE.BufferGeometry,
+    scalarField: Float32Array,
+    temperatures: Float32Array,
+    humidities: Float32Array,
+    totalSize: number,
+    chunkPosition: THREE.Vector3
+  ): void {
     // Reset buffer indices
     this.positionsIndex = 0;
     this.normalsIndex = 0;
@@ -605,7 +648,16 @@ export class InfiniteLandscape {
           const triangles = triTable[cubeIndex];
           if (!triangles || triangles.length === 0) continue;
 
-          this.processTriangles(triangles, corners, values, chunkPosition);
+          const chunk: TerrainChunk = {
+            mesh: new THREE.Mesh(), // temporary mesh
+            position: chunkPosition,
+            scalarField,
+            temperatures,
+            humidities,
+            totalSize,
+          };
+
+          this.processTriangles(triangles, corners, values, chunkPosition, chunk);
         }
       }
     }
@@ -642,14 +694,14 @@ export class InfiniteLandscape {
     );
   }
 
-  private addVertex(chunkPosition: THREE.Vector3, v1: THREE.Vector3, v2: THREE.Vector3, v3: THREE.Vector3): void {
+  private addVertex(chunkPosition: THREE.Vector3, v1: THREE.Vector3, v2: THREE.Vector3, v3: THREE.Vector3, chunk: TerrainChunk): void {
     this.ensureBufferCapacity(3);
 
     const edge1 = this.tempVectors[0].subVectors(v2, v1);
     const edge2 = this.tempVectors[1].subVectors(v3, v1);
     const normal = this.tempVectors[2].crossVectors(edge1, edge2).normalize();
 
-    const color = this.getColor(chunkPosition, v1);
+    const color = this.getColor(chunkPosition, v1, chunk);
     const startIndex = this.positionsIndex / 3;
 
     // Add vertices
@@ -690,7 +742,8 @@ export class InfiniteLandscape {
     corners: THREE.Vector3[],
     values: number[],
 
-    chunkPosition: THREE.Vector3
+    chunkPosition: THREE.Vector3,
+    chunk: TerrainChunk
   ): void {
     for (let i = 0; i < triangles.length - 1; i += 3) {
       const vertices = [];
@@ -712,36 +765,11 @@ export class InfiniteLandscape {
 
       // Only add triangle if all vertices are valid and triangle is not degenerate
       if (allValid && this.isValidTriangle(vertices[0], vertices[1], vertices[2])) {
-        this.addVertex(chunkPosition, vertices[0], vertices[1], vertices[2]);
+        this.addVertex(chunkPosition, vertices[0], vertices[1], vertices[2], chunk);
       }
     }
   }
 
-  private hasValidFieldValues(field: Float32Array, totalSize: number, x: number, y: number, z: number): boolean {
-    // Check a larger neighborhood around the point
-    for (let dx = -1; dx <= 2; dx++) {
-      for (let dy = -1; dy <= 2; dy++) {
-        for (let dz = -1; dz <= 2; dz++) {
-          const index = ((x + dx) * totalSize + (y + dy)) * totalSize + (z + dz);
-          const value = field[index];
-          if (value === undefined || !Number.isFinite(value)) {
-            return false;
-          }
-        }
-      }
-    }
-    return true;
-  }
-
-  private getTemperature(x: number, z: number): number {
-    const scale = 0.02; // Reduced scale for smoother transitions
-    return (this.temperatureNoise.noise3d(x * scale, 0, z * scale) + 1) * 0.5;
-  }
-
-  private getHumidity(x: number, z: number): number {
-    const scale = 0.015; // Even smoother humidity transitions
-    return (this.humidityNoise.noise3d(x * scale, 0, z * scale) + 1) * 0.5;
-  }
   private getBiomeColor(temperature: number, humidity: number, height: number): THREE.Color {
     // Calculate biome influence factors for smoother transitions
     let totalWeight = 0;
@@ -929,7 +957,7 @@ export class InfiniteLandscape {
     }
 
     const newGeometry = new THREE.BufferGeometry();
-    this.generateChunkGeometry(newGeometry, chunk.scalarField, chunk.totalSize, chunk.position);
+    this.generateChunkGeometry(newGeometry, chunk.scalarField, chunk.temperatures, chunk.humidities, chunk.totalSize, chunk.position);
     chunk.mesh.geometry.dispose();
     chunk.mesh.geometry = newGeometry;
   }
