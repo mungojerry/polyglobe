@@ -241,33 +241,34 @@ ctx.addEventListener(
       const generator = new TerrainGenerator(seed);
 
       const totalSize = gridSize + padding * 2;
-      const effectiveSize = gridSize - padding;
-      const offsetX = chunkX * effectiveSize;
-      const offsetZ = chunkZ * effectiveSize;
+      const chunkSize = gridSize - 1; // Important: use gridSize-1 for proper overlap
+      const offsetX = chunkX * chunkSize; // Use chunkSize instead of effectiveSize
+      const offsetZ = chunkZ * chunkSize;
 
       // Generate terrain data
       const field = new Float32Array(totalSize * totalSize * totalSize);
       const temperatures = new Float32Array(totalSize * totalSize);
       const humidities = new Float32Array(totalSize * totalSize);
 
-      // Generate terrain
+      // Generate terrain - using exact world coordinates
       for (let x = 0; x < totalSize; x++) {
         for (let y = 0; y < totalSize; y++) {
           for (let z = 0; z < totalSize; z++) {
-            const worldX = offsetX + x - padding;
+            // Calculate exact world coordinates
+            const worldX = offsetX + (x - padding);
             const worldY = y - padding;
-            const worldZ = offsetZ + z - padding;
+            const worldZ = offsetZ + (z - padding);
             const index = (x * totalSize + y) * totalSize + z;
             field[index] = generator.generateTerrainNoise(worldX, worldY, worldZ);
           }
         }
       }
 
-      // Generate climate
+      // Generate climate - using exact world coordinates
       for (let x = 0; x < totalSize; x++) {
         for (let z = 0; z < totalSize; z++) {
-          const worldX = offsetX + x - padding;
-          const worldZ = offsetZ + z - padding;
+          const worldX = offsetX + (x - padding);
+          const worldZ = offsetZ + (z - padding);
           const { temperature, humidity } = generator.generateClimate(worldX, worldZ);
           const index = x * totalSize + z;
           temperatures[index] = temperature;

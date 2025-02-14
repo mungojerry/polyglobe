@@ -1,152 +1,20 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
+import { TerrainChunk, WorkerMessage, WorkerQueueItem } from "../types/terrain";
 import { edgeTable, triTable } from "./MCDefs";
+import { BIOMES, CHUNK_POOL_SIZE, CUBE_CORNER_OFFSETS, DEGENERATE_EPSILON, EDGE_TO_VERTEX, INTERPOLATION_EPSILON } from "./constants";
 
 // Cache chunk key strings
 const getChunkKey = (() => {
   const keyCache = new Map<string, string>();
   return (x: number, z: number): string => {
-    const key = `${x},${z}`;
+    const key = `${x.toFixed(4)}, ${z.toFixed(4)}`;
     if (!keyCache.has(key)) {
       keyCache.set(key, key);
     }
     return keyCache.get(key)!;
   };
 })();
-
-// Pre-compute cube corners offsets
-const CUBE_CORNER_OFFSETS = [
-  [0, 0, 0],
-  [1, 0, 0],
-  [0, 0, 1],
-  [1, 0, 1],
-  [0, 1, 0],
-  [1, 1, 0],
-  [0, 1, 1],
-  [1, 1, 1],
-].map(([x, y, z]) => new THREE.Vector3(x, y, z));
-
-// Adjust epsilon for different checks
-const DEGENERATE_EPSILON = 1e-10; // For degenerate triangle checks
-const INTERPOLATION_EPSILON = 1e-7; // For interpolation calculations
-const POSITION_EPSILON = 1e-6; // For position comparisons
-function visualizeScalarFieldSlice(field: number[][][], yIndex: number): void {
-  // Create a canvas that's as big as the X-Z plane of the scalar field
-  const width = field.length;
-  const height = field[0][0]?.length || 0;
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  canvas.style.position = "absolute";
-  canvas.style.top = "0";
-  canvas.style.left = "0";
-  canvas.style.zIndex = "100";
-  canvas.style.width = "256px";
-  canvas.style.height = "256px";
-
-  canvas.style.border = "1px solid black ";
-  document.body.appendChild(canvas);
-
-  const ctx = canvas.getContext("2d");
-  if (!ctx) {
-    console.error("Could not get canvas context.");
-    return;
-  }
-
-  // Create an image data object to manipulate pixel values
-  const imageData = ctx.createImageData(width, height);
-
-  // Loop over the X-Z plane at the specified y-index
-  for (let x = 0; x < width; x++) {
-    for (let z = 0; z < height; z++) {
-      // Clamp yIndex within bounds
-      const y = Math.min(Math.max(yIndex, 0), field[x].length - 1);
-      let value = field[x][y][z];
-      // Normalize value to [0, 255] for grayscale (adjust normalization as needed)
-      const grayscale = Math.floor(255 * Math.min(1, Math.max(0, value)));
-
-      const index = (x + z * width) * 4;
-      imageData.data[index] = grayscale; // red
-      imageData.data[index + 1] = grayscale; // green
-      imageData.data[index + 2] = grayscale; // blue
-      imageData.data[index + 3] = 255; // alpha
-    }
-  }
-
-  ctx.putImageData(imageData, 0, 0);
-}
-type Biome = {
-  name: string;
-  color: THREE.Color;
-  temperatureRange: [number, number];
-  humidityRange: [number, number];
-  terrainScale: number;
-  terrainHeight: number;
-};
-const BIOMES: Biome[] = [
-  {
-    name: "plains",
-    color: new THREE.Color(0x91b165), // Softer, more natural green
-    temperatureRange: [0.3, 0.6],
-    humidityRange: [0.4, 0.7],
-    terrainScale: 0.03,
-    terrainHeight: 16,
-  },
-  {
-    name: "desert",
-    color: new THREE.Color(0xd6c087), // Warmer, sandy color
-    temperatureRange: [0.7, 1.0],
-    humidityRange: [0.0, 0.3],
-    terrainScale: 0.02,
-    terrainHeight: 12,
-  },
-  {
-    name: "mountain",
-    color: new THREE.Color(0x9b928a), // Warmer grey for rocks
-    temperatureRange: [0.0, 0.3],
-    humidityRange: [0.0, 0.4],
-    terrainScale: 0.04,
-    terrainHeight: 28,
-  },
-  {
-    name: "forest",
-    color: new THREE.Color(0x4a6b3d), // Rich forest green
-    temperatureRange: [0.4, 0.7],
-    humidityRange: [0.6, 1.0],
-    terrainScale: 0.04,
-    terrainHeight: 18,
-  },
-];
-
-const DEFAULT_BIOME: Biome = BIOMES[0];
-
-interface TerrainChunk {
-  mesh: THREE.Mesh;
-  position: THREE.Vector3;
-  scalarField: Float32Array;
-  temperatures: Float32Array; // Add these new properties
-  humidities: Float32Array; // to store climate data
-  totalSize: number; // Add this to store dimensions
-}
-
-const CHUNK_POOL_SIZE = 100;
-
-interface WorkerMessage {
-  type: string;
-  chunkX: number;
-  chunkZ: number;
-  field: Float32Array;
-  temperatures: Float32Array;
-  humidities: Float32Array;
-}
-
-// Add these new interfaces at the top with other interfaces
-interface WorkerQueueItem {
-  chunkX: number;
-  chunkZ: number;
-  resolve: (field: Float32Array, temperatures: Float32Array, humidities: Float32Array) => void;
-  reject: (error: any) => void;
-}
 
 export class InfiniteLandscape {
   scene: THREE.Scene;
@@ -553,6 +421,7 @@ export class InfiniteLandscape {
     totalSize: number;
   }> {
     try {
+      // Important: Pass gridSize-1 for proper chunk overlap
       const data = await this.requestTerrainGeneration(chunkX, chunkZ);
       const totalSize = this.gridSize + this.padding * 2;
 
@@ -588,7 +457,7 @@ export class InfiniteLandscape {
   }
 
   // Compute per-vertex colors
-  getColor(chunkPosition: THREE.Vector3, vertex: THREE.Vector3, chunk: TerrainChunk): THREE.Color {
+  getColor(vertex: THREE.Vector3, chunk: TerrainChunk): THREE.Color {
     const localX = Math.floor(vertex.x / this.cubeSize) + this.padding;
     const localZ = Math.floor(vertex.z / this.cubeSize) + this.padding;
     const index = localX * chunk.totalSize + localZ;
@@ -597,21 +466,6 @@ export class InfiniteLandscape {
     const humidity = chunk.humidities[index];
     return this.getBiomeColor(temperature, humidity, vertex.y);
   }
-
-  private edgeToVertex = [
-    [0, 1], // edge 0: connects vertex 0 to vertex 1
-    [1, 3], // edge 1: connects vertex 1 to vertex 3
-    [2, 3], // edge 2: connects vertex 2 to vertex 3
-    [0, 2], // edge 3: connects vertex 0 to vertex 2
-    [4, 5], // edge 4: connects vertex 4 to vertex 5
-    [5, 7], // edge 5: connects vertex 5 to vertex 7
-    [6, 7], // edge 6: connects vertex 6 to vertex 7
-    [4, 6], // edge 7: connects vertex 4 to vertex 6
-    [0, 4], // edge 8: connects vertex 0 to vertex 4
-    [1, 5], // edge 9: connects vertex 1 to vertex 5
-    [3, 7], // edge 10: connects vertex 3 to vertex 7
-    [2, 6], // edge 11: connects vertex 2 to vertex 6
-  ];
 
   private generateChunkGeometry(
     geometry: THREE.BufferGeometry,
@@ -630,11 +484,10 @@ export class InfiniteLandscape {
     // Pre-allocate space for worst case
     this.ensureBufferCapacity(this.gridSize * this.gridSize * 6);
 
-    // Fix iteration bounds
+    // Fix iteration bounds - don't process padding area
     for (let x = 0; x < this.gridSize - 1; x++) {
       for (let y = 0; y < this.gridSize - 1; y++) {
         for (let z = 0; z < this.gridSize - 1; z++) {
-          // Adjust indices for padding
           const px = x + this.padding;
           const py = y + this.padding;
           const pz = z + this.padding;
@@ -657,7 +510,7 @@ export class InfiniteLandscape {
             totalSize,
           };
 
-          this.processTriangles(triangles, corners, values, chunkPosition, chunk);
+          this.processTriangles(triangles, corners, values, chunk);
         }
       }
     }
@@ -694,14 +547,14 @@ export class InfiniteLandscape {
     );
   }
 
-  private addVertex(chunkPosition: THREE.Vector3, v1: THREE.Vector3, v2: THREE.Vector3, v3: THREE.Vector3, chunk: TerrainChunk): void {
+  private addVertex(v1: THREE.Vector3, v2: THREE.Vector3, v3: THREE.Vector3, chunk: TerrainChunk): void {
     this.ensureBufferCapacity(3);
 
     const edge1 = this.tempVectors[0].subVectors(v2, v1);
     const edge2 = this.tempVectors[1].subVectors(v3, v1);
     const normal = this.tempVectors[2].crossVectors(edge1, edge2).normalize();
 
-    const color = this.getColor(chunkPosition, v1, chunk);
+    const color = this.getColor(v1, chunk);
     const startIndex = this.positionsIndex / 3;
 
     // Add vertices
@@ -737,14 +590,7 @@ export class InfiniteLandscape {
     geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
   }
 
-  private processTriangles(
-    triangles: number[],
-    corners: THREE.Vector3[],
-    values: number[],
-
-    chunkPosition: THREE.Vector3,
-    chunk: TerrainChunk
-  ): void {
+  private processTriangles(triangles: number[], corners: THREE.Vector3[], values: number[], chunk: TerrainChunk): void {
     for (let i = 0; i < triangles.length - 1; i += 3) {
       const vertices = [];
       let allValid = true;
@@ -752,7 +598,7 @@ export class InfiniteLandscape {
       // Generate all vertices first and validate
       for (let j = 0; j < 3; j++) {
         const edgeIndex = triangles[i + j];
-        const [v1Index, v2Index] = this.edgeToVertex[edgeIndex];
+        const [v1Index, v2Index] = EDGE_TO_VERTEX[edgeIndex];
         const vertex = this.interpolateVertex(corners[v1Index], corners[v2Index], values[v1Index], values[v2Index]);
 
         // Check if vertex is valid
@@ -765,7 +611,7 @@ export class InfiniteLandscape {
 
       // Only add triangle if all vertices are valid and triangle is not degenerate
       if (allValid && this.isValidTriangle(vertices[0], vertices[1], vertices[2])) {
-        this.addVertex(chunkPosition, vertices[0], vertices[1], vertices[2], chunk);
+        this.addVertex(vertices[0], vertices[1], vertices[2], chunk);
       }
     }
   }
@@ -974,14 +820,13 @@ export class InfiniteLandscape {
 
     if (!this.currentChunk.equals(newCenter)) {
       this.currentChunk.copy(newCenter);
-      // Use Promise handling for chunk updates
       this.updateChunks(newCenter.x, newCenter.y).catch((error) => {
         console.error("Error in chunk update:", error);
       });
     }
 
     // Perform frustum culling
-    for (const [key, chunk] of this.chunks) {
+    for (const [_, chunk] of this.chunks) {
       if (chunk && chunk.mesh) {
         const box = new THREE.Box3();
         const size = this.gridSize * this.cubeSize;
