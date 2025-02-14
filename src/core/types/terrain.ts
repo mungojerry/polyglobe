@@ -31,3 +31,12 @@ export type Biome = {
   terrainScale: number;
   terrainHeight: number;
 };
+
+export type TerrainGenerateMessage = {
+  type: "generateTerrain";
+  chunkX: number;
+  chunkZ: number;
+  gridSize: number;
+  padding: number;
+  seed: number;
+};

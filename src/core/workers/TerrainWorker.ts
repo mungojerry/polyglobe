@@ -1,4 +1,5 @@
 import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise";
+import { TerrainGenerateMessage } from "../types/terrain";
 import { PseudoRandomNumberGenerator } from "../utils/PseudoRandom";
 
 // Types for better code organization
@@ -83,14 +84,12 @@ class NoiseCache {
   private octaveAmplitudes: Float32Array;
   private noiseValues: Float32Array;
   private cacheKeys: Int32Array;
-  private cacheIndex: number;
 
   constructor(config: TerrainConfig) {
     this.octaveScales = new Float32Array(config.noise.octaves);
     this.octaveAmplitudes = new Float32Array(config.noise.octaves);
     this.noiseValues = new Float32Array(config.cache.size);
     this.cacheKeys = new Int32Array(config.cache.size * 3);
-    this.cacheIndex = 0;
 
     this.initializeOctaves(config);
   }
@@ -146,14 +145,26 @@ class NoiseCache {
 
 // Main terrain generator class
 class TerrainGenerator {
+  private readonly seeds: {
+    simplex: number;
+    height: number;
+    variation: number;
+  };
   private noiseGenerators: NoiseGenerators;
   private cache: NoiseCache;
 
   constructor(seed: number) {
+    // Generate deterministic seeds for each noise generator
+    this.seeds = {
+      simplex: seed,
+      height: seed + 166,
+      variation: seed + 6662,
+    };
+
     this.noiseGenerators = {
-      simplex: new SimplexNoise(new PseudoRandomNumberGenerator(seed)),
-      height: new SimplexNoise(new PseudoRandomNumberGenerator(seed + 166)),
-      variation: new SimplexNoise(new PseudoRandomNumberGenerator(seed + 6662)),
+      simplex: new SimplexNoise(new PseudoRandomNumberGenerator(this.seeds.simplex)),
+      height: new SimplexNoise(new PseudoRandomNumberGenerator(this.seeds.height)),
+      variation: new SimplexNoise(new PseudoRandomNumberGenerator(this.seeds.variation)),
     };
     this.cache = new NoiseCache(TERRAIN_CONFIG);
   }
@@ -224,69 +235,57 @@ class TerrainGenerator {
 // Worker setup
 const ctx: Worker = self as any;
 
-ctx.addEventListener(
-  "message",
-  (
-    e: MessageEvent<{
-      type: "generateTerrain";
-      chunkX: number;
-      chunkZ: number;
-      gridSize: number;
-      padding: number;
-      seed: number;
-    }>
-  ) => {
-    if (e.data.type === "generateTerrain") {
-      const { chunkX, chunkZ, gridSize, padding, seed } = e.data;
-      const generator = new TerrainGenerator(seed);
+ctx.addEventListener("message", (e: MessageEvent<TerrainGenerateMessage>) => {
+  if (e.data.type === "generateTerrain") {
+    const { chunkX, chunkZ, gridSize, padding, seed } = e.data;
+    const generator = new TerrainGenerator(seed);
 
-      const totalSize = gridSize + padding * 2;
-      const chunkSize = gridSize - 1; // Important: use gridSize-1 for proper overlap
-      const offsetX = chunkX * chunkSize; // Use chunkSize instead of effectiveSize
-      const offsetZ = chunkZ * chunkSize;
+    const totalSize = gridSize + padding * 2;
 
-      // Generate terrain data
-      const field = new Float32Array(totalSize * totalSize * totalSize);
-      const temperatures = new Float32Array(totalSize * totalSize);
-      const humidities = new Float32Array(totalSize * totalSize);
+    // Use exact grid coordinates without any chunk size adjustments
+    const baseX = chunkX * gridSize;
+    const baseZ = chunkZ * gridSize;
 
-      // Generate terrain - using exact world coordinates
-      for (let x = 0; x < totalSize; x++) {
-        for (let y = 0; y < totalSize; y++) {
-          for (let z = 0; z < totalSize; z++) {
-            // Calculate exact world coordinates
-            const worldX = offsetX + (x - padding);
-            const worldY = y - padding;
-            const worldZ = offsetZ + (z - padding);
-            const index = (x * totalSize + y) * totalSize + z;
-            field[index] = generator.generateTerrainNoise(worldX, worldY, worldZ);
-          }
-        }
-      }
+    // Generate terrain data
+    const field = new Float32Array(totalSize * totalSize * totalSize);
+    const temperatures = new Float32Array(totalSize * totalSize);
+    const humidities = new Float32Array(totalSize * totalSize);
 
-      // Generate climate - using exact world coordinates
-      for (let x = 0; x < totalSize; x++) {
+    // Generate terrain using exact world coordinates
+    for (let x = 0; x < totalSize; x++) {
+      for (let y = 0; y < totalSize; y++) {
         for (let z = 0; z < totalSize; z++) {
-          const worldX = offsetX + (x - padding);
-          const worldZ = offsetZ + (z - padding);
-          const { temperature, humidity } = generator.generateClimate(worldX, worldZ);
-          const index = x * totalSize + z;
-          temperatures[index] = temperature;
-          humidities[index] = humidity;
+          const worldX = baseX + (x - padding);
+          const worldY = y - padding;
+          const worldZ = baseZ + (z - padding);
+          const index = (x * totalSize + y) * totalSize + z;
+          field[index] = generator.generateTerrainNoise(worldX, worldY, worldZ);
         }
       }
-
-      ctx.postMessage(
-        {
-          type: "terrainGenerated",
-          chunkX,
-          chunkZ,
-          field,
-          temperatures,
-          humidities,
-        },
-        [field.buffer, temperatures.buffer, humidities.buffer]
-      );
     }
+
+    // Generate climate using exact world coordinates
+    for (let x = 0; x < totalSize; x++) {
+      for (let z = 0; z < totalSize; z++) {
+        const worldX = baseX + (x - padding);
+        const worldZ = baseZ + (z - padding);
+        const { temperature, humidity } = generator.generateClimate(worldX, worldZ);
+        const index = x * totalSize + z;
+        temperatures[index] = temperature;
+        humidities[index] = humidity;
+      }
+    }
+
+    ctx.postMessage(
+      {
+        type: "terrainGenerated",
+        chunkX,
+        chunkZ,
+        field,
+        temperatures,
+        humidities,
+      },
+      [field.buffer, temperatures.buffer, humidities.buffer]
+    );
   }
-);
+});
