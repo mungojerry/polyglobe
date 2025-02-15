@@ -1,5 +1,6 @@
 export interface TerrainChunk {
   mesh: THREE.Mesh;
+  debugMesh: THREE.LineSegments;
   position: THREE.Vector3;
   scalarField: Float32Array;
   temperatures: Float32Array; // Add these new properties

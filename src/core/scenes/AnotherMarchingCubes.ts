@@ -8,13 +8,20 @@ import { BIOMES, CHUNK_POOL_SIZE, CUBE_CORNER_OFFSETS, DEGENERATE_EPSILON, EDGE_
 const getChunkKey = (() => {
   const keyCache = new Map<string, string>();
   return (x: number, z: number): string => {
-    const key = `${x.toFixed(24)}, ${z.toFixed(24)}`;
+    const key = `${x.toFixed(2)}, ${z.toFixed(2)}`;
     if (!keyCache.has(key)) {
       keyCache.set(key, key);
     }
     return keyCache.get(key)!;
   };
 })();
+
+// Add new types for chunk states
+type ChunkState = {
+  status: "active" | "pending" | "removing";
+  chunk?: TerrainChunk;
+  promise?: Promise<TerrainChunk>;
+};
 
 export class InfiniteLandscape {
   scene: THREE.Scene;
@@ -26,12 +33,12 @@ export class InfiniteLandscape {
   private gridSize = 32; // Increased for better resolution
   private cubeSize = 1;
   private isoLevel = 0.5; // Slightly adjusted for better surface generation
-  private chunkOverlap = 8; // Increased overlap
-  private padding = 4; // New: explicit padding for field values
+
+  private padding = 0; // New: explicit padding for field values
   private raycaster = new THREE.Raycaster();
 
-  private chunks: Map<string, TerrainChunk> = new Map();
-  private viewDistance = 3; // Number of chunks visible in each direction
+  private chunkStates: Map<string, ChunkState> = new Map();
+  private viewDistance = 4; // Number of chunks visible in each direction
   private currentCenterChunk: THREE.Vector2 = new THREE.Vector2();
 
   // Add new properties for optimization
@@ -81,7 +88,7 @@ export class InfiniteLandscape {
     this.colorsBuffer = new Float32Array(this.initialBufferSize);
     this.indicesBuffer = new Uint32Array(this.initialBufferSize);
 
-    this.effectiveGridSize = this.gridSize - this.padding * 2;
+    this.effectiveGridSize = this.gridSize - this.padding * 2 - 1;
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x87ceeb);
 
@@ -119,7 +126,7 @@ export class InfiniteLandscape {
       vertexColors: true,
       side: THREE.DoubleSide,
       flatShading: true,
-      wireframe: false,
+      wireframe: true,
       color: 0xffffff,
     });
 
@@ -133,9 +140,9 @@ export class InfiniteLandscape {
     ground.position.y = -10;
     this.scene.add(ground);
     this.setupEventListeners();
+    this.initWorkerPool();
     this.currentCenterChunk = this.getChunkCoordinates(this.camera.position);
     this.updateChunks(this.currentCenterChunk.x, this.currentCenterChunk.y);
-    this.initWorkerPool();
     this.animate();
   }
 
@@ -262,83 +269,194 @@ export class InfiniteLandscape {
     const effectiveSize = this.effectiveGridSize * this.cubeSize;
     const chunkX = Math.floor(position.x / effectiveSize);
     const chunkZ = Math.floor(position.z / effectiveSize);
+    // console.log(`Camera at ${position.x}, ${position.z} -> chunk coords: ${chunkX}, ${chunkZ}`); // Debug log
     return new THREE.Vector2(chunkX, chunkZ);
   }
 
-  // Add a new property to track pending chunks
-  private pendingChunkCreation = new Set<string>();
-
   private async updateChunks(cameraChunkX: number, cameraChunkZ: number): Promise<void> {
-    const chunksToRemove = new Set(this.chunks.keys());
-    const chunkPromises: Promise<TerrainChunk>[] = [];
+    const direction = new THREE.Vector3();
+    this.camera.getWorldDirection(direction);
+    const requiredChunkKeys = new Set<string>();
 
-    // Create a set of all required chunk keys
-    const requiredChunks = new Set<string>();
+    const fovRadians = (this.camera.fov * Math.PI) / 180;
+    const forward = new THREE.Vector3(direction.x, 0, direction.z).normalize();
 
-    for (let x = cameraChunkX - this.viewDistance; x <= cameraChunkX + this.viewDistance; x++) {
-      for (let z = cameraChunkZ - this.viewDistance; z <= cameraChunkZ + this.viewDistance; z++) {
-        const key = getChunkKey(x, z);
-        requiredChunks.add(key);
-        chunksToRemove.delete(key);
+    // Use effective grid size for consistency
+    const chunkSize = this.effectiveGridSize * this.cubeSize;
+    const checkDistance = this.viewDistance + 2;
 
-        // Only create chunks that aren't already created or pending
-        if (!this.chunks.has(key) && !this.pendingChunkCreation.has(key)) {
-          this.pendingChunkCreation.add(key);
-          chunkPromises.push(
-            this.createChunk(x, z)
-              .then((chunk) => {
-                // Remove from pending set once complete
-                this.pendingChunkCreation.delete(key);
-                return chunk;
-              })
-              .catch((error) => {
-                this.pendingChunkCreation.delete(key);
-                throw error;
-              })
-          );
+    for (let x = cameraChunkX - checkDistance; x <= cameraChunkX + checkDistance; x++) {
+      for (let z = cameraChunkZ - checkDistance; z <= cameraChunkZ + checkDistance; z++) {
+        // Calculate chunk center in world coordinates
+        const chunkCenterX = x * chunkSize + chunkSize / 2;
+        const chunkCenterZ = z * chunkSize + chunkSize / 2;
+        const toChunk = new THREE.Vector3(chunkCenterX - this.camera.position.x, 0, chunkCenterZ - this.camera.position.z);
+        const distanceToChunk = toChunk.length();
+
+        // Always include nearby chunks
+        const isNearby = distanceToChunk <= chunkSize * 3;
+        if (isNearby) {
+          requiredChunkKeys.add(getChunkKey(x, z));
+          continue;
         }
-      }
-    }
 
-    try {
-      // Wait for all new chunks to be created
-      const newChunks = await Promise.all(chunkPromises);
-
-      // Remove chunks that are no longer needed
-      for (const key of chunksToRemove) {
-        const chunk = this.chunks.get(key);
-        if (chunk) {
-          const chunkX = Math.floor(chunk.position.x / (this.gridSize * this.cubeSize));
-          const chunkZ = Math.floor(chunk.position.z / (this.gridSize * this.cubeSize));
-          this.removeChunk(chunkX, chunkZ);
-        }
-      }
-
-      // Add all new chunks
-      newChunks.forEach((chunk) => {
-        if (chunk && chunk.mesh) {
-          const key = getChunkKey(
-            Math.floor(chunk.position.x / (this.gridSize * this.cubeSize)),
-            Math.floor(chunk.position.z / (this.gridSize * this.cubeSize))
-          );
-          // Only add the chunk if it's still required
-          if (requiredChunks.has(key)) {
-            this.chunks.set(key, chunk);
-            this.createGridVisualizer(chunk.position);
-            this.scene.add(chunk.mesh);
-          } else {
-            // Clean up chunk that's no longer needed
-            chunk.mesh.geometry.dispose();
-            if (chunk.mesh.material instanceof THREE.Material) {
-              chunk.mesh.material.dispose();
+        if (distanceToChunk <= chunkSize * this.viewDistance) {
+          toChunk.normalize();
+          const angle = Math.acos(forward.dot(toChunk));
+          if (angle <= fovRadians * 0.75) {
+            const box = new THREE.Box3(
+              new THREE.Vector3(x * chunkSize, -1000, z * chunkSize),
+              new THREE.Vector3((x + 1) * chunkSize, 1000, (z + 1) * chunkSize)
+            );
+            if (this.frustum.intersectsBox(box)) {
+              requiredChunkKeys.add(getChunkKey(x, z));
             }
           }
         }
+      }
+    }
+
+    // (The rest of updateChunks remains unchanged)
+    console.log(`Camera direction: ${forward.x.toFixed(2)}, ${forward.z.toFixed(2)}`);
+    console.log(`Required chunks: ${requiredChunkKeys.size}`);
+
+    const removalPromises: Promise<void>[] = [];
+    for (const [key, state] of this.chunkStates.entries()) {
+      if (!requiredChunkKeys.has(key) && state.status !== "removing") {
+        removalPromises.push(this.removeChunkByKey(key));
+      }
+    }
+    await Promise.all(removalPromises);
+
+    const chunkPromises: Promise<void>[] = [];
+    for (const key of requiredChunkKeys) {
+      const chunkPromise = this.ensureChunkExists(key);
+      if (chunkPromise) {
+        chunkPromises.push(chunkPromise);
+      }
+    }
+    await Promise.all(chunkPromises);
+  }
+
+  private async ensureChunkExists(key: string): Promise<void> {
+    const state = this.chunkStates.get(key);
+
+    if (!state) {
+      // New chunk needed
+      const [x, z] = key.split(", ").map(Number);
+      return this.initializeChunk(x, z);
+    } else if (state.status === "removing") {
+      // Cancel removal and keep the chunk
+      state.status = "active";
+    }
+    // If chunk is active or pending, do nothing
+    return Promise.resolve();
+  }
+
+  private async initializeChunk(chunkX: number, chunkZ: number): Promise<void> {
+    const key = getChunkKey(chunkX, chunkZ);
+    // console.log(`Initializing chunk at ${key}`); // Debug log
+
+    // Create promise for the new chunk
+    const chunkPromise = this.createChunk(chunkX, chunkZ).catch((error) => {
+      console.error(`Failed to create chunk at ${key}:`, error);
+      return this.createPlaceholderChunk(
+        new THREE.Vector3(chunkX * this.effectiveGridSize * this.cubeSize, 0, chunkZ * this.effectiveGridSize * this.cubeSize)
+      );
+    });
+
+    // Store the pending state
+    this.chunkStates.set(key, {
+      status: "pending",
+      promise: chunkPromise,
+    });
+
+    try {
+      const chunk = await chunkPromise;
+      const currentState = this.chunkStates.get(key);
+
+      // Check if chunk was removed during generation
+      if (!currentState || currentState.status === "removing") {
+        this.cleanupChunk(chunk);
+        this.chunkStates.delete(key);
+        return;
+      }
+
+      // Add the chunk to the scene - IMPORTANT: This must happen before setting the state
+      if (chunk.mesh) {
+        // console.log(`Adding chunk mesh to scene at ${key}`, chunk.mesh.position); // Debug log
+        this.scene.add(chunk.mesh);
+        chunk.debugMesh = this.createGridVisualizer(chunk.position);
+        this.scene.add(chunk.debugMesh); // Actually add the grid visualizer to the scene
+      }
+
+      // Update the chunk state
+      this.chunkStates.set(key, {
+        status: "active",
+        chunk,
       });
     } catch (error) {
-      console.error("Error updating chunks:", error);
+      console.error(`Failed to initialize chunk at ${key}:`, error);
+      this.chunkStates.delete(key);
     }
   }
+
+  private async removeChunkByKey(key: string): Promise<void> {
+    console.log(`Removing chunk ${key}`);
+    const state = this.chunkStates.get(key);
+    if (!state) return;
+
+    // Mark the chunk as being removed
+    state.status = "removing";
+
+    if (state.chunk) {
+      // Remove and cleanup existing chunk
+      console.log(`Cleaning up active chunk ${key}`);
+      this.cleanupChunk(state.chunk);
+      this.chunkStates.delete(key);
+    } else if (state.promise) {
+      // Wait for pending chunk to complete before cleaning up
+      try {
+        console.log(`Waiting for pending chunk ${key} to complete before cleanup`);
+        const chunk = await state.promise;
+        this.cleanupChunk(chunk);
+      } catch (error) {
+        console.error(`Error while cleaning up pending chunk at ${key}:`, error);
+      }
+      this.chunkStates.delete(key);
+    }
+  }
+  private cleanupChunk(chunk: TerrainChunk): void {
+    if (!chunk?.mesh) return;
+
+    // Remove from scene
+    this.scene.remove(chunk.mesh);
+    if (chunk.debugMesh) {
+      this.scene.remove(chunk.debugMesh);
+      chunk.debugMesh.geometry.dispose();
+      if (Array.isArray(chunk.debugMesh.material)) {
+        chunk.debugMesh.material.forEach((m) => m.dispose());
+      } else {
+        chunk.debugMesh.material.dispose();
+      }
+    }
+
+    // Reset and reuse geometry
+    const geometry = chunk.mesh.geometry;
+    geometry.setIndex(null);
+    geometry.deleteAttribute("position");
+    geometry.deleteAttribute("normal");
+    geometry.deleteAttribute("color");
+
+    // Return to pools
+    if (this.geometryPool.length < CHUNK_POOL_SIZE) {
+      this.geometryPool.push(geometry);
+    }
+    if (this.meshPool.length < CHUNK_POOL_SIZE) {
+      this.meshPool.push(chunk.mesh);
+    }
+  }
+
   private async createChunk(chunkX: number, chunkZ: number): Promise<TerrainChunk> {
     const geometry = this.geometryPool.pop() || new THREE.BufferGeometry();
     const mesh = this.meshPool.pop() || new THREE.Mesh(geometry, this.material);
@@ -364,6 +482,7 @@ export class InfiniteLandscape {
 
       const chunk: TerrainChunk = {
         mesh,
+        debugMesh: this.createGridVisualizer(position),
         position,
         scalarField: field,
         temperatures,
@@ -375,24 +494,6 @@ export class InfiniteLandscape {
     } catch (error) {
       console.error("Failed to create chunk:", error);
       return this.createPlaceholderChunk(position);
-    }
-  }
-  private removeChunk(chunkX: number, chunkZ: number): void {
-    const key = getChunkKey(chunkX, chunkZ);
-    const chunk = this.chunks.get(key);
-    if (chunk) {
-      const children = this.scene.children.filter((child) => child.position.equals(chunk.mesh.position) && child instanceof THREE.LineSegments);
-      children.forEach((child) => {
-        this.scene.remove(child);
-        if (child instanceof THREE.LineSegments) {
-          child.geometry.dispose();
-          child.material.dispose();
-        }
-      });
-
-      this.scene.remove(chunk.mesh);
-      chunk.mesh.geometry.dispose();
-      this.chunks.delete(key);
     }
   }
 
@@ -431,7 +532,9 @@ export class InfiniteLandscape {
     const humidities = new Float32Array(length);
     humidities.fill(1);
 
-    return { mesh, position, scalarField: field, totalSize, temperatures, humidities };
+    const debugMesh = this.createGridVisualizer(position);
+
+    return { mesh, debugMesh, position, scalarField: field, totalSize, temperatures, humidities };
   }
 
   private async createScalarField(
@@ -444,9 +547,15 @@ export class InfiniteLandscape {
     totalSize: number;
   }> {
     try {
-      // Important: Pass gridSize-1 for proper chunk overlap
+      // console.log(`Generating terrain for chunk ${chunkX}, ${chunkZ}`); // Debug log
       const data = await this.requestTerrainGeneration(chunkX, chunkZ);
       const totalSize = this.gridSize + this.padding * 2;
+
+      // Verify data is valid
+      if (!data.field || data.field.length === 0) {
+        console.error("Received empty field data from worker");
+        return this.createFallbackScalarField();
+      }
 
       return {
         field: data.field,
@@ -467,7 +576,7 @@ export class InfiniteLandscape {
     humidities: Float32Array;
     totalSize: number;
   } {
-    console.log("Using fallback scalar field generation");
+    // console.log("Using fallback scalar field generation");
     const totalSize = this.gridSize + this.padding * 2;
     const length = totalSize * totalSize * totalSize;
     const field = new Float32Array(length);
@@ -498,17 +607,21 @@ export class InfiniteLandscape {
     totalSize: number,
     chunkPosition: THREE.Vector3
   ): void {
+    // Reset indices
     this.positionsIndex = 0;
     this.normalsIndex = 0;
     this.colorsIndex = 0;
     this.indicesIndex = 0;
 
+    // console.log(`Generating geometry for chunk at ${chunkPosition.x}, ${chunkPosition.z}`);
+    // console.log(`Scalar field size: ${scalarField.length}, totalSize: ${totalSize}`);
+
     this.ensureBufferCapacity(this.gridSize * this.gridSize * 6);
 
     // Iterate over the full chunk including padding
-    for (let x = 0; x < this.gridSize - 1; x++) {
-      for (let y = 0; y < this.gridSize - 1; y++) {
-        for (let z = 0; z < this.gridSize - 1; z++) {
+    for (let x = 0; x < totalSize - 1; x++) {
+      for (let y = 0; y < totalSize - 1; y++) {
+        for (let z = 0; z < totalSize - 1; z++) {
           const corners = this.getCubeCorners(x, y, z);
           const values = this.getCubeValues(scalarField, totalSize, x, y, z);
           const cubeIndex = this.getCubeIndex(values);
@@ -520,6 +633,7 @@ export class InfiniteLandscape {
 
           const chunk: TerrainChunk = {
             mesh: new THREE.Mesh(),
+            debugMesh: new THREE.LineSegments(),
             position: chunkPosition,
             scalarField,
             temperatures,
@@ -769,7 +883,9 @@ export class InfiniteLandscape {
     if (this.mouseDown) {
       const mouse = new THREE.Vector2((event.clientX / window.innerWidth) * 2 - 1, -(event.clientY / window.innerHeight) * 2 + 1);
 
-      const meshes = Array.from(this.chunks.values()).map((chunk) => chunk.mesh);
+      const meshes = Array.from(this.chunkStates.values())
+        .map((state) => state.chunk?.mesh)
+        .filter((mesh) => mesh) as THREE.Mesh[];
       this.raycaster.setFromCamera(mouse, this.camera);
       const intersects = this.raycaster.intersectObjects(meshes);
 
@@ -787,7 +903,7 @@ export class InfiniteLandscape {
     const chunkX = Math.floor(point.x / ((this.gridSize - 1) * this.cubeSize));
     const chunkZ = Math.floor(point.z / ((this.gridSize - 1) * this.cubeSize));
     const key = getChunkKey(chunkX, chunkZ);
-    const chunk = this.chunks.get(key);
+    const chunk = this.chunkStates.get(key)?.chunk;
 
     if (!chunk) return;
 
@@ -830,7 +946,8 @@ export class InfiniteLandscape {
   public animate(): void {
     requestAnimationFrame(this.animate.bind(this));
 
-    // Update frustum
+    // Update camera frustum
+    this.camera.updateMatrixWorld();
     this.frustumMatrix.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
     this.frustum.setFromProjectionMatrix(this.frustumMatrix);
 
@@ -839,26 +956,26 @@ export class InfiniteLandscape {
       const cameraPosition = this.camera.position;
       const newCenter = this.getChunkCoordinates(cameraPosition);
 
-      if (!this.currentChunk.equals(newCenter)) {
-        this.currentChunk.copy(newCenter);
-        this.updateChunks(newCenter.x, newCenter.y).catch((error) => {
-          console.error("Error in chunk update:", error);
-        });
-      }
+      this.updateChunks(newCenter.x, newCenter.y).catch((error) => {
+        console.error("Error in chunk update:", error);
+      });
+
       this.lastUpdateTime = now;
     }
 
-    // Rest of animate method...
     this.renderer.render(this.scene, this.camera);
     this.frameCount++;
   }
-
-  private isBoxInFrustum(box: THREE.Box3): boolean {
-    return this.frustum.intersectsBox(box);
-  }
-
   // Don't forget to clean up workers in a dispose method
   public dispose(): void {
+    // Clean up all chunks
+    for (const [_, state] of this.chunkStates) {
+      if (state.chunk) {
+        this.cleanupChunk(state.chunk);
+      }
+    }
+    this.chunkStates.clear();
+
     // Clear all queues
     this.workerQueue.length = 0;
     this.pendingChunks.clear();

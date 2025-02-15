@@ -243,8 +243,9 @@ ctx.addEventListener("message", (e: MessageEvent<TerrainGenerateMessage>) => {
     const totalSize = gridSize + padding * 2;
 
     // Use exact grid coordinates without any chunk size adjustments
-    const baseX = chunkX * gridSize;
-    const baseZ = chunkZ * gridSize;
+    const effectiveGridSize = gridSize - 2 * padding;
+    const baseX = chunkX * effectiveGridSize;
+    const baseZ = chunkZ * effectiveGridSize;
 
     // Generate terrain data
     const field = new Float32Array(totalSize * totalSize * totalSize);
@@ -265,10 +266,13 @@ ctx.addEventListener("message", (e: MessageEvent<TerrainGenerateMessage>) => {
     }
 
     // Generate climate using exact world coordinates
+
+    // Generate terrain data with correct world coordinates
     for (let x = 0; x < totalSize; x++) {
       for (let z = 0; z < totalSize; z++) {
         const worldX = baseX + (x - padding);
         const worldZ = baseZ + (z - padding);
+
         const { temperature, humidity } = generator.generateClimate(worldX, worldZ);
         const index = x * totalSize + z;
         temperatures[index] = temperature;
