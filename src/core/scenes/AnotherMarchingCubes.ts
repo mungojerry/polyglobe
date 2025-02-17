@@ -31,7 +31,7 @@ export class InfiniteLandscape {
   light: THREE.DirectionalLight;
   private material: THREE.MeshStandardMaterial;
   private gridSize = 32; // Increased for better resolution
-  private padding = 2; // Re-enable padding
+  private padding = 1; // Re-enable padding
   private cubeSize = 1;
   private isoLevel = 0.5; // Changed from 0.5 to get more visible terrain
 
@@ -74,7 +74,7 @@ export class InfiniteLandscape {
   private readonly tempVectors: THREE.Vector3[] = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
 
   // Add a class property to hold the fixed seed.
-  private readonly seed: number = 333233;
+  private readonly seed: number = 321232133;
 
   private effectiveGridSize: number; // Add this property
 

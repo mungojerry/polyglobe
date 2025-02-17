@@ -24,50 +24,62 @@ class TerrainGenerator {
     }
   }
 
-  private warpNoise(x: number, y: number, z: number, scale: number): { x: number; y: number; z: number } {
-    // Use separate noise functions for each dimension
-    const wx = sharedNoise!.noise3d(x * scale, y * scale, z * scale) * 8;
-    const wy = sharedNoise!.noise3d(x * scale + 100, y * scale + 100, z * scale + 100) * 4;
-    const wz = sharedNoise!.noise3d(x * scale + 200, y * scale + 200, z * scale + 200) * 8;
+  private warpNoise(x: number, y: number, z: number, scale: number, amplitude: number): { x: number; y: number; z: number } {
+    const noiseScale = scale * 0.5;
+
+    // Sample noise at different frequencies for each dimension
+    const nx1 = sharedNoise!.noise3d(x * noiseScale * 1.7, y * noiseScale * 1.3, z * noiseScale * 2.1);
+    const nx2 = sharedNoise!.noise3d(x * noiseScale * 2.3, y * noiseScale * 1.9, z * noiseScale * 1.5);
+    const nz1 = sharedNoise!.noise3d(x * noiseScale * 1.1, y * noiseScale * 2.3, z * noiseScale * 1.7);
+    const nz2 = sharedNoise!.noise3d(x * noiseScale * 2.1, y * noiseScale * 1.5, z * noiseScale * 2.3);
+
+    // Create independent displacements for each axis
+    const xDisplacement = (nx1 + nx2) * amplitude * 0.5;
+    const zDisplacement = (nz1 + nz2) * amplitude * 0.5;
+
+    // Add rotation to break up linear patterns
+    const rotation = sharedNoise!.noise3d(x * noiseScale * 1.3, y * noiseScale * 1.7, z * noiseScale * 1.1) * Math.PI;
 
     return {
-      x: x + wx,
-      y: y + wy,
-      z: z + wz,
+      x: x + xDisplacement * Math.cos(rotation),
+      y: y + sharedNoise!.noise3d(x * noiseScale * 1.9, y * noiseScale * 2.1, z * noiseScale * 1.3) * amplitude * 0.3,
+      z: z + zDisplacement * Math.sin(rotation),
     };
   }
 
   generateTerrainNoise(worldX: number, worldY: number, worldZ: number): number {
     const baseFreq = 0.02;
+    const coordScale = 1.0;
 
-    // Apply domain warping at different scales
-    const warpedLarge = this.warpNoise(worldX, worldY, worldZ, baseFreq * 0.5);
-    const warpedMedium = this.warpNoise(worldX, worldY, worldZ, baseFreq * 2);
+    const x = worldX * coordScale;
+    const y = worldY * coordScale;
+    const z = worldZ * coordScale;
 
-    // Generate continental features using large-scale warping
-    const continent = sharedNoise!.noise3d(warpedLarge.x * baseFreq, warpedLarge.y * baseFreq * 0.5, warpedLarge.z * baseFreq) * 0.6;
+    // Use prime number ratios for frequencies and amplitudes
+    const warpedLarge = this.warpNoise(x, y, z, baseFreq * 0.23, 8.0);
+    const warpedMedium = this.warpNoise(warpedLarge.x, warpedLarge.y, warpedLarge.z, baseFreq * 0.47, 4.0);
+    const warpedSmall = this.warpNoise(warpedMedium.x, warpedMedium.y, warpedMedium.z, baseFreq * 0.97, 2.0);
 
-    // Add medium-scale terrain features
-    const terrain = sharedNoise!.noise3d(warpedMedium.x * baseFreq * 2, warpedMedium.y * baseFreq * 1.5, warpedMedium.z * baseFreq * 2) * 0.3;
+    // Add more noise octaves with varying frequencies
+    const continent = sharedNoise!.noise3d(warpedLarge.x * baseFreq * 0.43, warpedLarge.y * baseFreq * 0.27, warpedLarge.z * baseFreq * 0.53);
+    const hills = sharedNoise!.noise3d(warpedMedium.x * baseFreq * 1.13, warpedMedium.y * baseFreq * 0.67, warpedMedium.z * baseFreq * 0.89);
+    const details = sharedNoise!.noise3d(warpedSmall.x * baseFreq * 2.21, warpedSmall.y * baseFreq * 1.79, warpedSmall.z * baseFreq * 1.97);
 
-    // Add small-scale details (less warping for fine details)
-    const details = sharedNoise!.noise3d(worldX * baseFreq * 4, worldY * baseFreq * 3, worldZ * baseFreq * 4) * 0.1;
+    // Blend layers with different weights
+    let height = continent * 0.5;
+    height += hills * 0.35 * (1.0 - Math.abs(height));
+    height += details * 0.15 * (1.0 - Math.abs(height));
 
-    // Combine all features
-    let height = continent + terrain + details;
-
-    // Apply vertical gradient with smoother falloff
-    const heightFalloff = Math.max(0, 1 - Math.pow(worldY / (this.gridSize * 0.8), 2));
+    const heightFalloff = Math.max(0, 1 - Math.pow(y / (this.gridSize * 0.7), 2));
     height *= heightFalloff;
 
-    // Normalize and bias
-    height = 0.45 + height * 0.45;
+    height = 0.48 + height * 0.35;
 
-    // Smooth out flat areas with cubic interpolation
     const flatThreshold = 0.45;
     if (height < flatThreshold) {
       const t = height / flatThreshold;
-      height = flatThreshold * (t * t * (3 - 2 * t));
+      const smoothstep = t * t * (3 - 2 * t);
+      height = flatThreshold * smoothstep;
     }
 
     return Math.max(0.001, Math.min(0.999, height));
