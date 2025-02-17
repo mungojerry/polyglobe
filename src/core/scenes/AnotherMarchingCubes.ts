@@ -100,6 +100,7 @@ export class InfiniteLandscape {
     this.renderer.setPixelRatio(1);
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap; // Add this line to enable soft shadows
     document.body.appendChild(this.renderer.domElement);
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
@@ -109,6 +110,15 @@ export class InfiniteLandscape {
     this.light = new THREE.DirectionalLight(0xffffff, 1);
     this.light.position.set(50, 100, 50);
     this.light.castShadow = true;
+    // Add these shadow camera settings
+    this.light.shadow.camera.near = 0.1;
+    this.light.shadow.camera.far = 500;
+    this.light.shadow.camera.left = -500;
+    this.light.shadow.camera.right = 500;
+    this.light.shadow.camera.top = 500;
+    this.light.shadow.camera.bottom = -500;
+    this.light.shadow.mapSize.width = 2048;
+    this.light.shadow.mapSize.height = 2048;
     this.scene.add(this.light);
 
     const ambientLight = new THREE.AmbientLight(0x404040, 0.3);
@@ -127,18 +137,24 @@ export class InfiniteLandscape {
 
     // Move ground plane lower to not obscure chunks
     const groundGeometry = new THREE.PlaneGeometry(1000, 1000);
-    const groundMaterial = new THREE.MeshBasicMaterial({
-      color: 0x404040,
+    const groundMaterial = new THREE.MeshPhongMaterial({
+      // blue water color
+      shininess: 100,
+      reflectivity: 1,
+      color: 0x0033ff,
+      specular: 0x33ccff,
       side: THREE.DoubleSide,
     });
     const ground = new THREE.Mesh(groundGeometry, groundMaterial);
-    ground.rotation.x = Math.PI / 2;
-    ground.position.y = -50; // Move ground lower
+    ground.rotation.x = -Math.PI / 2; // Fix rotation to be facing up
+    ground.position.y = 0; // Move slightly lower
+    ground.receiveShadow = true;
+    ground.castShadow = false; // Ground shouldn't cast shadows, only receive them
     this.scene.add(ground);
     this.setupEventListeners();
     this.initWorkerPool();
 
-    this.createStaticGrid(10, 10);
+    this.createStaticGrid(20, 20);
     this.animate();
   }
 
@@ -292,6 +308,9 @@ export class InfiniteLandscape {
       // Add the chunk to the scene - IMPORTANT: This must happen before setting the state
       if (chunk.mesh) {
         console.log(`Adding chunk mesh to scene at ${key}`, chunk.mesh.position); // Debug log
+        chunk.mesh.visible = true;
+        chunk.mesh.castShadow = true;
+        chunk.mesh.receiveShadow = true;
         this.scene.add(chunk.mesh);
         chunk.debugMesh = this.createGridVisualizer(chunk.position);
         if (this.showDebug) this.scene.add(chunk.debugMesh); // Actually add the grid visualizer to the scene
