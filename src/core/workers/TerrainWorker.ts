@@ -4,6 +4,37 @@ import { pseudoRandom, PseudoRandomNumberGenerator } from "../utils/PseudoRandom
 
 let sharedNoise: SimplexNoise | null = null;
 
+const TERRAIN_CONFIG = {
+  warpScale: 0.012, // Warp noise scale
+  // Base terrain settings
+  baseFrequency: 0.015,
+  verticalScale: 1.62, // Higher = taller terrain overall
+
+  // Mountain settings
+  mountainsScale: 0.7, // How much mountains contribute
+  mountainsFreq: 0.14, // Mountain size (lower = larger mountains)
+  mountainsOctaves: 6, // Mountain detail levels
+  mountainsSteepness: 1.8, // Higher = steeper mountains
+
+  // Hills settings
+  hillsScale: 0.25, // How much hills contribute
+  hillsFreq: 0.5, // Hill size (higher = more hills)
+  hillsOctaves: 4, // Hill detail levels
+
+  // Detail settings
+  detailScale: 0.05, // How much small details contribute
+  detailFreq: 1.0, // Detail size
+  detailOctaves: 3, // Detail levels
+
+  // Height adjustments
+  minHeight: 0.2, // Minimum terrain height
+  heightRange: 0.95, // Height variation range
+
+  // Feature settings
+  plateauHeight: 0.75, // Where plateaus start forming
+  valleyDepth: 0.75, // Valley depth threshold
+};
+
 class TerrainGenerator {
   private gridSize: number;
   private gridSize07: number;
@@ -20,16 +51,16 @@ class TerrainGenerator {
 
   private warpNoise(x: number, y: number, z: number, scale: number, amplitude: number): { x: number; y: number; z: number } {
     if (!sharedNoise) return { x, y, z };
-
+    const c = TERRAIN_CONFIG; // shorthand reference
     const noiseScale = scale * 0.5;
     const xScaled = x * noiseScale;
     const yScaled = y * noiseScale;
     const zScaled = z * noiseScale;
 
     // Precompute amplitude factors
-    const xAmp = amplitude * 0.5;
-    const yAmp = amplitude * 0.3;
-    const zAmp = amplitude * 0.5;
+    const xAmp = amplitude * 0.5 * c.warpScale;
+    const yAmp = amplitude * 0.3 * c.warpScale;
+    const zAmp = amplitude * 0.5 * c.warpScale;
 
     // Calculate displacements
     const nx1 = sharedNoise.noise3d(xScaled * 1.619, yScaled * 1.373, zScaled * 2.111);
@@ -59,38 +90,64 @@ class TerrainGenerator {
     };
   }
 
+  private ridgedNoise(x: number, y: number, z: number, frequency: number): number {
+    if (!sharedNoise) return 0;
+    const val = sharedNoise.noise3d(x * frequency, y * frequency, z * frequency);
+    return 1.0 - Math.abs(val);
+  }
+
+  private fbm(x: number, y: number, z: number, octaves: number, frequency: number, persistence: number): number {
+    let total = 0;
+    let amplitude = 1.0;
+    let maxValue = 0;
+
+    for (let i = 0; i < octaves; i++) {
+      total += this.ridgedNoise(x, y, z, frequency) * amplitude;
+      maxValue += amplitude;
+      frequency *= 2.0;
+      amplitude *= persistence;
+    }
+
+    return total / maxValue;
+  }
+
   generateTerrainNoise(worldX: number, worldY: number, worldZ: number): number {
     if (!sharedNoise) return 0;
 
-    // Warping layers
-    const warpedLarge = this.warpNoise(worldX, worldY, worldZ, 0.017 * 0.233, 12.0);
-    const warpedMedium = this.warpNoise(warpedLarge.x, warpedLarge.y, warpedLarge.z, 0.017 * 0.471, 6.0);
-    const warpedSmall = this.warpNoise(warpedMedium.x, warpedMedium.y, warpedMedium.z, 0.017 * 0.977, 3.0);
-    const warpedTiny = this.warpNoise(warpedSmall.x, warpedSmall.y, warpedSmall.z, 0.017 * 1.731, 1.5);
+    const warpedCoords = this.warpNoise(worldX, worldY, worldZ, 0.012, 25.0);
+    const c = TERRAIN_CONFIG; // shorthand reference
 
-    // Precompute frequency factors
-    const baseFreq = 0.017;
-    const [cX, cY, cZ] = [warpedLarge.x * baseFreq * 0.431, warpedLarge.y * baseFreq * 0.271, warpedLarge.z * baseFreq * 0.533];
-    const [mX, mY, mZ] = [warpedMedium.x * baseFreq * 0.877, warpedMedium.y * baseFreq * 0.673, warpedMedium.z * baseFreq * 0.789];
-    const [hX, hY, hZ] = [warpedSmall.x * baseFreq * 1.231, warpedSmall.y * baseFreq * 1.159, warpedSmall.z * baseFreq * 1.373];
-    const [dX, dY, dZ] = [warpedTiny.x * baseFreq * 2.213, warpedTiny.y * baseFreq * 1.879, warpedTiny.z * baseFreq * 1.971];
+    // Generate base terrain components
+    const mountains = this.fbm(warpedCoords.x, warpedCoords.y, warpedCoords.z, c.mountainsOctaves, c.baseFrequency * c.mountainsFreq, 0.6);
 
-    // Noise layers
-    let height = sharedNoise.noise3d(cX, cY, cZ) * 0.45;
-    height += sharedNoise.noise3d(mX, mY, mZ) * 0.3 * (1 - Math.abs(height));
-    height += sharedNoise.noise3d(hX, hY, hZ) * 0.15 * (1 - Math.abs(height));
-    height += sharedNoise.noise3d(dX, dY, dZ) * 0.1 * (1 - Math.abs(height));
+    const hills = this.fbm(warpedCoords.x, warpedCoords.y, warpedCoords.z, c.hillsOctaves, c.baseFrequency * c.hillsFreq, 0.45);
+
+    const details = this.fbm(warpedCoords.x, warpedCoords.y, warpedCoords.z, c.detailOctaves, c.baseFrequency * c.detailFreq, 0.3);
+
+    // Combine features
+    let height = mountains * c.mountainsScale + hills * c.hillsScale + details * c.detailScale;
+
+    // Apply steepness
+    height = Math.pow(height, c.mountainsSteepness);
 
     // Height falloff
-    const yNorm = worldY / this.gridSize07;
-    height *= Math.max(0, 1 - yNorm * yNorm);
-    height = 0.48 + height * 0.35;
+    const yNorm = worldY / (this.gridSize07 * c.verticalScale);
+    const falloff = 1.0 - Math.min(1.0, Math.pow(yNorm, 1.7));
+    height *= falloff;
 
-    // Flatten low areas
-    const flatThreshold = 0.45;
-    if (height < flatThreshold) {
-      const t = height / flatThreshold;
-      height = flatThreshold * (t * t * (3 - 2 * t));
+    // Apply height range
+    height = c.minHeight + height * c.heightRange;
+
+    // Plateaus
+    if (height > c.plateauHeight) {
+      const t = (height - c.plateauHeight) / (1 - c.plateauHeight);
+      height = c.plateauHeight + (1 - c.plateauHeight) * Math.pow(t, 1.5);
+    }
+
+    // Valleys
+    if (height < c.valleyDepth) {
+      const t = height / c.valleyDepth;
+      height = c.valleyDepth * Math.pow(t, 1.3);
     }
 
     return Math.min(Math.max(height, 0.001), 0.999);
