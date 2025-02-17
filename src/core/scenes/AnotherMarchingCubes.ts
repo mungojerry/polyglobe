@@ -4,6 +4,12 @@ import { TerrainChunk, WorkerMessage, WorkerQueueItem } from "../types/terrain";
 import { edgeTable, triTable } from "./MCDefs";
 import { BIOMES, CHUNK_POOL_SIZE, CUBE_CORNER_OFFSETS, DEGENERATE_EPSILON, EDGE_TO_VERTEX, INTERPOLATION_EPSILON } from "./constants";
 
+type Buffers = {
+  positions: Float32Array;
+  normals: Float32Array;
+  colors: Float32Array;
+  indices: Uint32Array;
+};
 // Cache chunk key strings
 const getChunkKey = (() => {
   const keyCache = new Map<string, string>();
@@ -15,7 +21,7 @@ const getChunkKey = (() => {
     return keyCache.get(key)!;
   };
 })();
-const WORKER_COUNT = 1; // Math.max(2, navigator.hardwareConcurrency || 4);
+const WORKER_COUNT = Math.max(2, navigator.hardwareConcurrency || 4);
 // Add new types for chunk states
 type ChunkState = {
   status: "active" | "pending" | "removing";
@@ -34,7 +40,7 @@ export class InfiniteLandscape {
   private padding = 1; // Re-enable padding
   private cubeSize = 1;
   private isoLevel = 0.5; // Changed from 0.5 to get more visible terrain
-
+  public showDebug = false;
   private raycaster = new THREE.Raycaster();
 
   private chunkStates: Map<string, ChunkState> = new Map();
@@ -43,16 +49,6 @@ export class InfiniteLandscape {
   private readonly geometryPool: THREE.BufferGeometry[] = [];
   private readonly meshPool: THREE.Mesh[] = [];
   private frameCount = 0;
-
-  private positionsBuffer: Float32Array;
-  private positionsIndex = 0;
-  private normalsBuffer: Float32Array;
-  private normalsIndex = 0;
-  private colorsBuffer: Float32Array;
-  private colorsIndex = 0;
-  private indicesBuffer: Uint32Array;
-  private indicesIndex = 0;
-  private initialBufferSize = 131072; // 2^17
 
   private frustum = new THREE.Frustum();
   private frustumMatrix = new THREE.Matrix4();
@@ -80,11 +76,6 @@ export class InfiniteLandscape {
 
   // Modify the constructor to include error handling for worker creation
   constructor() {
-    this.positionsBuffer = new Float32Array(this.initialBufferSize);
-    this.normalsBuffer = new Float32Array(this.initialBufferSize);
-    this.colorsBuffer = new Float32Array(this.initialBufferSize);
-    this.indicesBuffer = new Uint32Array(this.initialBufferSize);
-
     this.effectiveGridSize = this.gridSize - this.padding * 2 - 1;
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x87ceeb);
@@ -130,7 +121,7 @@ export class InfiniteLandscape {
       vertexColors: true,
       side: THREE.DoubleSide,
       flatShading: true,
-      wireframe: true,
+      wireframe: false,
       color: 0x00ff00, // Changed to bright green for visibility
     });
 
@@ -203,27 +194,6 @@ export class InfiniteLandscape {
         this.processNextQueueItem();
       }
     }
-  }
-
-  private ensureBufferCapacity(verticesNeeded: number) {
-    const requiredSize = this.positionsIndex + verticesNeeded * 3;
-    if (requiredSize > this.positionsBuffer.length) {
-      const newSize = Math.max(requiredSize, this.positionsBuffer.length * 2);
-      this.resizeBuffer(newSize);
-    }
-  }
-
-  private resizeBuffer(newSize: number) {
-    const resize = (old: Float32Array) => {
-      const newArr = new Float32Array(newSize);
-      newArr.set(old);
-      return newArr;
-    };
-
-    this.positionsBuffer = resize(this.positionsBuffer);
-    this.normalsBuffer = resize(this.normalsBuffer);
-    this.colorsBuffer = resize(this.colorsBuffer);
-    this.indicesBuffer = new Uint32Array(Math.max(newSize, this.indicesBuffer.length * 2));
   }
 
   private processNextQueueItem(): void {
@@ -324,7 +294,7 @@ export class InfiniteLandscape {
         console.log(`Adding chunk mesh to scene at ${key}`, chunk.mesh.position); // Debug log
         this.scene.add(chunk.mesh);
         chunk.debugMesh = this.createGridVisualizer(chunk.position);
-        this.scene.add(chunk.debugMesh); // Actually add the grid visualizer to the scene
+        if (this.showDebug) this.scene.add(chunk.debugMesh); // Actually add the grid visualizer to the scene
       }
 
       // Update the chunk state
@@ -522,18 +492,9 @@ export class InfiniteLandscape {
     totalSize: number,
     chunkPosition: THREE.Vector3
   ): void {
-    // Reset indices
-    this.positionsIndex = 0;
-    this.normalsIndex = 0;
-    this.colorsIndex = 0;
-    this.indicesIndex = 0;
+    // Pre-calculate marching cubes result to get exact buffer sizes
+    const triangles: THREE.Vector3[][] = [];
 
-    // console.log(`Generating geometry for chunk at ${chunkPosition.x}, ${chunkPosition.z}`);
-    // console.log(`Scalar field size: ${scalarField.length}, totalSize: ${totalSize}`);
-
-    this.ensureBufferCapacity(this.gridSize * this.gridSize * 6);
-
-    // Iterate over the full chunk including padding
     for (let x = 0; x < totalSize - 1; x++) {
       for (let y = 0; y < totalSize - 1; y++) {
         for (let z = 0; z < totalSize - 1; z++) {
@@ -543,26 +504,62 @@ export class InfiniteLandscape {
 
           if (edgeTable[cubeIndex] === 0) continue;
 
-          const triangles = triTable[cubeIndex];
-          if (!triangles || triangles.length === 0) continue;
+          const tableTris = triTable[cubeIndex];
+          if (!tableTris || tableTris.length === 0) continue;
 
-          const chunk: TerrainChunk = {
-            mesh: new THREE.Mesh(),
-            debugMesh: new THREE.LineSegments(),
-            position: chunkPosition,
-            scalarField,
-            temperatures,
-            humidities,
-            totalSize,
-          };
+          // Process triangles for this cube
+          for (let i = 0; i < tableTris.length - 1; i += 3) {
+            const vertices = [];
+            let allValid = true;
 
-          this.processTriangles(triangles, corners, values, chunk);
+            for (let j = 0; j < 3; j++) {
+              const edgeIndex = tableTris[i + j];
+              const [v1Index, v2Index] = EDGE_TO_VERTEX[edgeIndex];
+              const vertex = this.interpolateVertex(corners[v1Index], corners[v2Index], values[v1Index], values[v2Index]);
+
+              if (!Number.isFinite(vertex.x) || !Number.isFinite(vertex.y) || !Number.isFinite(vertex.z)) {
+                allValid = false;
+                break;
+              }
+              vertices.push(vertex);
+            }
+
+            if (allValid && this.isValidTriangle(vertices[0], vertices[1], vertices[2])) {
+              triangles.push(vertices);
+            }
+          }
         }
       }
     }
 
-    this.createGeometry(geometry);
+    // Create buffers with exact sizes
+    const vertexCount = triangles.length * 3;
+    const buffers = {
+      positions: new Float32Array(vertexCount * 3),
+      normals: new Float32Array(vertexCount * 3),
+      colors: new Float32Array(vertexCount * 3),
+      indices: new Uint32Array(vertexCount),
+    };
+
+    const chunk: TerrainChunk = {
+      mesh: new THREE.Mesh(),
+      debugMesh: new THREE.LineSegments(),
+      position: chunkPosition,
+      scalarField,
+      temperatures,
+      humidities,
+      totalSize,
+    };
+
+    // Fill buffers
+    let currentVertex = 0;
+    triangles.forEach((vertices) => {
+      currentVertex = this.addVertex(vertices[0], vertices[1], vertices[2], chunk, buffers, currentVertex);
+    });
+
+    this.createGeometry(geometry, buffers, currentVertex);
   }
+
   private getCubeIndex(values: number[]): number {
     let cubeIndex = 0;
     for (let i = 0; i < 8; i++) {
@@ -592,73 +589,45 @@ export class InfiniteLandscape {
     );
   }
 
-  private addVertex(v1: THREE.Vector3, v2: THREE.Vector3, v3: THREE.Vector3, chunk: TerrainChunk): void {
-    this.ensureBufferCapacity(3);
-
+  private addVertex(v1: THREE.Vector3, v2: THREE.Vector3, v3: THREE.Vector3, chunk: TerrainChunk, buffers: Buffers, vertexIndex: number): number {
     const edge1 = this.tempVectors[0].subVectors(v2, v1);
     const edge2 = this.tempVectors[1].subVectors(v3, v1);
     const normal = this.tempVectors[2].crossVectors(edge1, edge2).normalize();
 
     const color = this.getColor(v1, chunk);
-    const startIndex = this.positionsIndex / 3;
 
-    // Add vertices
-    [v1, v2, v3].forEach((v) => {
-      this.positionsBuffer[this.positionsIndex++] = v.x;
-      this.positionsBuffer[this.positionsIndex++] = v.y;
-      this.positionsBuffer[this.positionsIndex++] = v.z;
+    // Add vertices in a sequence
+    const vertices = [v1, v2, v3];
+    vertices.forEach((v, i) => {
+      const vIndex = (vertexIndex + i) * 3;
+      buffers.positions[vIndex] = v.x;
+      buffers.positions[vIndex + 1] = v.y;
+      buffers.positions[vIndex + 2] = v.z;
 
-      this.normalsBuffer[this.normalsIndex++] = normal.x;
-      this.normalsBuffer[this.normalsIndex++] = normal.y;
-      this.normalsBuffer[this.normalsIndex++] = normal.z;
+      buffers.normals[vIndex] = normal.x;
+      buffers.normals[vIndex + 1] = normal.y;
+      buffers.normals[vIndex + 2] = normal.z;
 
-      this.colorsBuffer[this.colorsIndex++] = color.r;
-      this.colorsBuffer[this.colorsIndex++] = color.g;
-      this.colorsBuffer[this.colorsIndex++] = color.b;
+      buffers.colors[vIndex] = color.r;
+      buffers.colors[vIndex + 1] = color.g;
+      buffers.colors[vIndex + 2] = color.b;
+
+      // Add indices
+      buffers.indices[vertexIndex + i] = vertexIndex + i;
     });
 
-    // Add indices in counter-clockwise order
-    this.indicesBuffer[this.indicesIndex++] = startIndex;
-    this.indicesBuffer[this.indicesIndex++] = startIndex + 1;
-    this.indicesBuffer[this.indicesIndex++] = startIndex + 2;
+    return vertexIndex + 3;
   }
 
-  private createGeometry(geometry: THREE.BufferGeometry): void {
-    const positions = this.positionsBuffer.subarray(0, this.positionsIndex);
-    const normals = this.normalsBuffer.subarray(0, this.normalsIndex);
-    const colors = this.colorsBuffer.subarray(0, this.colorsIndex);
-    const indices = this.indicesBuffer.subarray(0, this.indicesIndex);
+  private createGeometry(geometry: THREE.BufferGeometry, buffers: Buffers, vertexCount: number): void {
+    geometry.setIndex(new THREE.BufferAttribute(buffers.indices.subarray(0, vertexCount), 1));
+    geometry.setAttribute("position", new THREE.BufferAttribute(buffers.positions.subarray(0, vertexCount * 3), 3));
+    geometry.setAttribute("normal", new THREE.BufferAttribute(buffers.normals.subarray(0, vertexCount * 3), 3));
+    geometry.setAttribute("color", new THREE.BufferAttribute(buffers.colors.subarray(0, vertexCount * 3), 3));
 
-    geometry.setIndex(new THREE.BufferAttribute(indices, 1));
-    geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
-    geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-  }
-
-  private processTriangles(triangles: number[], corners: THREE.Vector3[], values: number[], chunk: TerrainChunk): void {
-    for (let i = 0; i < triangles.length - 1; i += 3) {
-      const vertices = [];
-      let allValid = true;
-
-      // Generate all vertices first and validate
-      for (let j = 0; j < 3; j++) {
-        const edgeIndex = triangles[i + j];
-        const [v1Index, v2Index] = EDGE_TO_VERTEX[edgeIndex];
-        const vertex = this.interpolateVertex(corners[v1Index], corners[v2Index], values[v1Index], values[v2Index]);
-
-        // Check if vertex is valid
-        if (!Number.isFinite(vertex.x) || !Number.isFinite(vertex.y) || !Number.isFinite(vertex.z)) {
-          allValid = false;
-          break;
-        }
-        vertices.push(vertex);
-      }
-
-      // Only add triangle if all vertices are valid and triangle is not degenerate
-      if (allValid && this.isValidTriangle(vertices[0], vertices[1], vertices[2])) {
-        this.addVertex(vertices[0], vertices[1], vertices[2], chunk);
-      }
-    }
+    // Force geometry update
+    geometry.computeBoundingSphere();
+    geometry.computeBoundingBox();
   }
 
   private getBiomeColor(temperature: number, humidity: number, height: number): THREE.Color {

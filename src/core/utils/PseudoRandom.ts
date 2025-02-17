@@ -53,17 +53,4 @@ export class PseudoRandomNumberGenerator {
     return this.seed;
   }
 }
-
-export const pseudoRandom = {
-  seed: function (seed: number) {
-    // Initialize seed
-    let s = seed;
-    this.random = () => {
-      s = Math.sin(s) * 10000;
-      return s - Math.floor(s);
-    };
-    // Warm up the generator
-    for (let i = 0; i < 10; i++) this.random();
-  },
-  random: () => Math.random(), // Default to Math.random until seeded
-};
+export const pseudoRandom = PseudoRandomNumberGenerator.getInstance();

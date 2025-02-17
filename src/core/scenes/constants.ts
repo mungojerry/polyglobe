@@ -51,7 +51,7 @@ export const BIOMES: Biome[] = [
   },
 ];
 
-export const CHUNK_POOL_SIZE = 100;
+export const CHUNK_POOL_SIZE = 200;
 
 export const EDGE_TO_VERTEX = [
   [0, 1], // edge 0: connects vertex 0 to vertex 1

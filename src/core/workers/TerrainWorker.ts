@@ -1,6 +1,6 @@
 import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise";
 import { TerrainGenerateMessage } from "../types/terrain";
-import { PseudoRandomNumberGenerator } from "../utils/PseudoRandom";
+import { pseudoRandom, PseudoRandomNumberGenerator } from "../utils/PseudoRandom";
 
 let sharedNoise: SimplexNoise | null = null;
 
@@ -11,6 +11,7 @@ class TerrainGenerator {
     this.gridSize = gridSize;
 
     if (!sharedNoise) {
+      pseudoRandom.setSeed(seed);
       sharedNoise = new SimplexNoise(new PseudoRandomNumberGenerator(seed));
     }
   }
