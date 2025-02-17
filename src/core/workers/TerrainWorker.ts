@@ -8,16 +8,16 @@ const TERRAIN_CONFIG = {
   warpScale: 0.012, // Warp noise scale
   // Base terrain settings
   baseFrequency: 0.015,
-  verticalScale: 1.62, // Higher = taller terrain overall
+  verticalScale: 2.0, // Higher = taller terrain overall
 
   // Mountain settings
-  mountainsScale: 0.7, // How much mountains contribute
+  mountainsScale: 0.8, // How much mountains contribute
   mountainsFreq: 0.14, // Mountain size (lower = larger mountains)
   mountainsOctaves: 6, // Mountain detail levels
   mountainsSteepness: 1.8, // Higher = steeper mountains
 
   // Hills settings
-  hillsScale: 0.25, // How much hills contribute
+  hillsScale: 0.3, // How much hills contribute
   hillsFreq: 0.5, // Hill size (higher = more hills)
   hillsOctaves: 4, // Hill detail levels
 
@@ -27,17 +27,24 @@ const TERRAIN_CONFIG = {
   detailOctaves: 3, // Detail levels
 
   // Height adjustments
-  minHeight: 0.2, // Minimum terrain height
-  heightRange: 0.95, // Height variation range
+  minHeight: 0.0, // Minimum terrain height
+  heightRange: 1.0, // Height variation range
 
   // Feature settings
   plateauHeight: 0.75, // Where plateaus start forming
   valleyDepth: 0.75, // Valley depth threshold
+
+  // Island settings
+  islandCount: 2, // Number of island centers
+  islandSize: 5.4, // Size of the island (0-1)
+  islandFalloff: 2.5, // How sharp the transition from island to ocean is
+  oceanLevel: 0.1, // Height below which is ocean
 };
 
 class TerrainGenerator {
   private gridSize: number;
   private gridSize07: number;
+  private islandCenters: Array<{ x: number; z: number }>;
 
   constructor(seed: number, gridSize: number) {
     this.gridSize = gridSize;
@@ -46,6 +53,16 @@ class TerrainGenerator {
     if (!sharedNoise) {
       pseudoRandom.setSeed(seed);
       sharedNoise = new SimplexNoise(new PseudoRandomNumberGenerator(seed));
+    }
+
+    // Generate island centers
+    this.islandCenters = [];
+    const prng = new PseudoRandomNumberGenerator(seed);
+    for (let i = 0; i < TERRAIN_CONFIG.islandCount; i++) {
+      this.islandCenters.push({
+        x: prng.random() * gridSize - gridSize / 2,
+        z: prng.random() * gridSize - gridSize / 2,
+      });
     }
   }
 
@@ -111,6 +128,22 @@ class TerrainGenerator {
     return total / maxValue;
   }
 
+  private getIslandMask(worldX: number, worldZ: number): number {
+    const c = TERRAIN_CONFIG;
+    let maxInfluence = 0;
+
+    // Find the closest island center
+    for (const center of this.islandCenters) {
+      const dx = (worldX - center.x) / (this.gridSize * c.islandSize);
+      const dz = (worldZ - center.z) / (this.gridSize * c.islandSize);
+      const distance = Math.sqrt(dx * dx + dz * dz);
+      const influence = Math.max(0, 1 - Math.pow(distance, c.islandFalloff));
+      maxInfluence = Math.max(maxInfluence, influence);
+    }
+
+    return maxInfluence;
+  }
+
   generateTerrainNoise(worldX: number, worldY: number, worldZ: number): number {
     if (!sharedNoise) return 0;
 
@@ -148,6 +181,15 @@ class TerrainGenerator {
     if (height < c.valleyDepth) {
       const t = height / c.valleyDepth;
       height = c.valleyDepth * Math.pow(t, 1.3);
+    }
+
+    // Apply island mask
+    const islandMask = this.getIslandMask(worldX, worldZ);
+    height *= islandMask;
+
+    // Apply ocean level
+    if (height < c.oceanLevel) {
+      height = c.oceanLevel * 0.8; // Flat ocean floor with slight variation
     }
 
     return Math.min(Math.max(height, 0.001), 0.999);

@@ -152,7 +152,7 @@ export class InfiniteLandscape {
     this.setupEventListeners();
     this.initWorkerPool();
 
-    this.createStaticGrid(10, 10);
+    this.createStaticGrid(20, 20);
     this.animate();
   }
 
