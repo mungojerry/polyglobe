@@ -32,20 +32,17 @@ export class InfiniteLandscape {
   private material: THREE.MeshStandardMaterial;
   private gridSize = 32; // Increased for better resolution
   private cubeSize = 1;
-  private isoLevel = 0.5; // Slightly adjusted for better surface generation
+  private isoLevel = 0.7; // Changed from 0.5 to get more visible terrain
 
   private padding = 0; // New: explicit padding for field values
   private raycaster = new THREE.Raycaster();
 
   private chunkStates: Map<string, ChunkState> = new Map();
-  private viewDistance = 4; // Number of chunks visible in each direction
-  private currentCenterChunk: THREE.Vector2 = new THREE.Vector2();
 
   // Add new properties for optimization
   private readonly geometryPool: THREE.BufferGeometry[] = [];
   private readonly meshPool: THREE.Mesh[] = [];
   private frameCount = 0;
-  private currentChunk = new THREE.Vector2();
 
   private positionsBuffer: Float32Array;
   private positionsIndex = 0;
@@ -92,9 +89,16 @@ export class InfiniteLandscape {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x87ceeb);
 
+    // Adjust camera position to better view the 10x10 grid
     this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    this.camera.position.set(0, 32, 64);
+    this.camera.position.set(100, 200, 300); // Move camera higher and further back for better view
     this.camera.lookAt(0, 0, 0);
+
+    // Add these lines after camera setup
+    this.camera.updateMatrix();
+    this.camera.updateMatrixWorld();
+    this.frustumMatrix.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
+    this.frustum.setFromProjectionMatrix(this.frustumMatrix);
 
     // Optimize renderer settings
     this.renderer = new THREE.WebGLRenderer({
@@ -127,22 +131,23 @@ export class InfiniteLandscape {
       side: THREE.DoubleSide,
       flatShading: true,
       wireframe: true,
-      color: 0xffffff,
+      color: 0x00ff00, // Changed to bright green for visibility
     });
 
+    // Move ground plane lower to not obscure chunks
     const groundGeometry = new THREE.PlaneGeometry(1000, 1000);
     const groundMaterial = new THREE.MeshBasicMaterial({
-      color: 0xff00ff,
+      color: 0x404040,
       side: THREE.DoubleSide,
     });
     const ground = new THREE.Mesh(groundGeometry, groundMaterial);
     ground.rotation.x = Math.PI / 2;
-    ground.position.y = -10;
+    ground.position.y = -50; // Move ground lower
     this.scene.add(ground);
     this.setupEventListeners();
     this.initWorkerPool();
-    this.currentCenterChunk = this.getChunkCoordinates(this.camera.position);
-    this.updateChunks(this.currentCenterChunk.x, this.currentCenterChunk.y);
+
+    this.createStaticGrid(10, 10);
     this.animate();
   }
 
@@ -264,93 +269,25 @@ export class InfiniteLandscape {
     });
   }
 
-  private getChunkCoordinates(position: THREE.Vector3): THREE.Vector2 {
-    // Use effectiveGridSize for chunk coordinates
-    const effectiveSize = this.effectiveGridSize * this.cubeSize;
-    const chunkX = Math.floor(position.x / effectiveSize);
-    const chunkZ = Math.floor(position.z / effectiveSize);
-    // console.log(`Camera at ${position.x}, ${position.z} -> chunk coords: ${chunkX}, ${chunkZ}`); // Debug log
-    return new THREE.Vector2(chunkX, chunkZ);
-  }
+  private async createStaticGrid(width: number, height: number): Promise<void> {
+    const promises: Promise<void>[] = [];
 
-  private async updateChunks(cameraChunkX: number, cameraChunkZ: number): Promise<void> {
-    const direction = new THREE.Vector3();
-    this.camera.getWorldDirection(direction);
-    const requiredChunkKeys = new Set<string>();
+    // Center the grid around origin
+    const offsetX = -(width * this.gridSize) / 2;
+    const offsetZ = -(height * this.gridSize) / 2;
 
-    const fovRadians = (this.camera.fov * Math.PI) / 180;
-    const forward = new THREE.Vector3(direction.x, 0, direction.z).normalize();
+    console.log(`Creating ${width}x${height} grid with offsets ${offsetX}, ${offsetZ}`);
 
-    // Use effective grid size for consistency
-    const chunkSize = this.effectiveGridSize * this.cubeSize;
-    const checkDistance = this.viewDistance + 2;
-
-    for (let x = cameraChunkX - checkDistance; x <= cameraChunkX + checkDistance; x++) {
-      for (let z = cameraChunkZ - checkDistance; z <= cameraChunkZ + checkDistance; z++) {
-        // Calculate chunk center in world coordinates
-        const chunkCenterX = x * chunkSize + chunkSize / 2;
-        const chunkCenterZ = z * chunkSize + chunkSize / 2;
-        const toChunk = new THREE.Vector3(chunkCenterX - this.camera.position.x, 0, chunkCenterZ - this.camera.position.z);
-        const distanceToChunk = toChunk.length();
-
-        // Always include nearby chunks
-        const isNearby = distanceToChunk <= chunkSize * 3;
-        if (isNearby) {
-          requiredChunkKeys.add(getChunkKey(x, z));
-          continue;
-        }
-
-        if (distanceToChunk <= chunkSize * this.viewDistance) {
-          toChunk.normalize();
-          const angle = Math.acos(forward.dot(toChunk));
-          if (angle <= fovRadians * 0.75) {
-            const box = new THREE.Box3(
-              new THREE.Vector3(x * chunkSize, -1000, z * chunkSize),
-              new THREE.Vector3((x + 1) * chunkSize, 1000, (z + 1) * chunkSize)
-            );
-            if (this.frustum.intersectsBox(box)) {
-              requiredChunkKeys.add(getChunkKey(x, z));
-            }
-          }
-        }
+    for (let x = 0; x < width; x++) {
+      for (let z = 0; z < height; z++) {
+        const chunkX = x + offsetX / this.gridSize;
+        const chunkZ = z + offsetZ / this.gridSize;
+        console.log(`Initializing chunk at ${chunkX}, ${chunkZ}`);
+        promises.push(this.initializeChunk(chunkX, chunkZ));
       }
     }
 
-    // (The rest of updateChunks remains unchanged)
-    console.log(`Camera direction: ${forward.x.toFixed(2)}, ${forward.z.toFixed(2)}`);
-    console.log(`Required chunks: ${requiredChunkKeys.size}`);
-
-    const removalPromises: Promise<void>[] = [];
-    for (const [key, state] of this.chunkStates.entries()) {
-      if (!requiredChunkKeys.has(key) && state.status !== "removing") {
-        removalPromises.push(this.removeChunkByKey(key));
-      }
-    }
-    await Promise.all(removalPromises);
-
-    const chunkPromises: Promise<void>[] = [];
-    for (const key of requiredChunkKeys) {
-      const chunkPromise = this.ensureChunkExists(key);
-      if (chunkPromise) {
-        chunkPromises.push(chunkPromise);
-      }
-    }
-    await Promise.all(chunkPromises);
-  }
-
-  private async ensureChunkExists(key: string): Promise<void> {
-    const state = this.chunkStates.get(key);
-
-    if (!state) {
-      // New chunk needed
-      const [x, z] = key.split(", ").map(Number);
-      return this.initializeChunk(x, z);
-    } else if (state.status === "removing") {
-      // Cancel removal and keep the chunk
-      state.status = "active";
-    }
-    // If chunk is active or pending, do nothing
-    return Promise.resolve();
+    await Promise.all(promises);
   }
 
   private async initializeChunk(chunkX: number, chunkZ: number): Promise<void> {
@@ -384,7 +321,7 @@ export class InfiniteLandscape {
 
       // Add the chunk to the scene - IMPORTANT: This must happen before setting the state
       if (chunk.mesh) {
-        // console.log(`Adding chunk mesh to scene at ${key}`, chunk.mesh.position); // Debug log
+        console.log(`Adding chunk mesh to scene at ${key}`, chunk.mesh.position); // Debug log
         this.scene.add(chunk.mesh);
         chunk.debugMesh = this.createGridVisualizer(chunk.position);
         this.scene.add(chunk.debugMesh); // Actually add the grid visualizer to the scene
@@ -401,31 +338,6 @@ export class InfiniteLandscape {
     }
   }
 
-  private async removeChunkByKey(key: string): Promise<void> {
-    console.log(`Removing chunk ${key}`);
-    const state = this.chunkStates.get(key);
-    if (!state) return;
-
-    // Mark the chunk as being removed
-    state.status = "removing";
-
-    if (state.chunk) {
-      // Remove and cleanup existing chunk
-      console.log(`Cleaning up active chunk ${key}`);
-      this.cleanupChunk(state.chunk);
-      this.chunkStates.delete(key);
-    } else if (state.promise) {
-      // Wait for pending chunk to complete before cleaning up
-      try {
-        console.log(`Waiting for pending chunk ${key} to complete before cleanup`);
-        const chunk = await state.promise;
-        this.cleanupChunk(chunk);
-      } catch (error) {
-        console.error(`Error while cleaning up pending chunk at ${key}:`, error);
-      }
-      this.chunkStates.delete(key);
-    }
-  }
   private cleanupChunk(chunk: TerrainChunk): void {
     if (!chunk?.mesh) return;
 
@@ -470,15 +382,18 @@ export class InfiniteLandscape {
 
       this.generateChunkGeometry(geometry, field, temperatures, humidities, totalSize, position);
 
-      if (geometry.attributes.position.count === 0) {
+      console.log(`Chunk ${chunkX},${chunkZ} vertex count: ${geometry.attributes.position?.count || 0}`);
+
+      if (geometry.attributes.position?.count === 0) {
         console.warn(`Empty geometry generated at chunk ${chunkX},${chunkZ}`);
         return this.createPlaceholderChunk(position);
       }
+      mesh.geometry = geometry;
 
       mesh.position.copy(position);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
-      mesh.frustumCulled = true;
+      mesh.frustumCulled = false;
 
       const chunk: TerrainChunk = {
         mesh,
@@ -940,29 +855,12 @@ export class InfiniteLandscape {
     chunk.mesh.geometry = newGeometry;
   }
 
-  private lastUpdateTime = 0;
-  private readonly UPDATE_INTERVAL = 100; // ms
-
   public animate(): void {
     requestAnimationFrame(this.animate.bind(this));
-
-    // Update camera frustum
+    this.controls.update();
     this.camera.updateMatrixWorld();
     this.frustumMatrix.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
     this.frustum.setFromProjectionMatrix(this.frustumMatrix);
-
-    const now = performance.now();
-    if (now - this.lastUpdateTime > this.UPDATE_INTERVAL) {
-      const cameraPosition = this.camera.position;
-      const newCenter = this.getChunkCoordinates(cameraPosition);
-
-      this.updateChunks(newCenter.x, newCenter.y).catch((error) => {
-        console.error("Error in chunk update:", error);
-      });
-
-      this.lastUpdateTime = now;
-    }
-
     this.renderer.render(this.scene, this.camera);
     this.frameCount++;
   }

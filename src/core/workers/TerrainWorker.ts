@@ -2,237 +2,55 @@ import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise";
 import { TerrainGenerateMessage } from "../types/terrain";
 import { PseudoRandomNumberGenerator } from "../utils/PseudoRandom";
 
-// Types for better code organization
-type NoiseGenerators = {
-  simplex: SimplexNoise;
-  height: SimplexNoise;
-  variation: SimplexNoise;
-};
-
-type TerrainConfig = {
-  ground: {
-    threshold: number;
-    value: number;
-  };
-  air: {
-    threshold: number;
-    value: number;
-  };
-  valueBounds: {
-    min: number;
-    max: number;
-  };
-  variation: {
-    scale: number;
-    strength: number;
-  };
-  noise: {
-    octaves: number;
-    persistence: number;
-    baseScale: number;
-    ridgeOffset: number;
-    initial: {
-      amplitude: number;
-      frequency: number;
-    };
-    frequencyMultiplier: number;
-  };
-  cache: {
-    size: number;
-    resetThreshold: number;
-  };
-};
-
-// Configuration with descriptive names
-const TERRAIN_CONFIG: TerrainConfig = {
-  ground: {
-    threshold: 2,
-    value: 0.9,
-  },
-  air: {
-    threshold: 0.95,
-    value: 0.1,
-  },
-  valueBounds: {
-    min: 0.001,
-    max: 0.999,
-  },
-  variation: {
-    scale: 0.3,
-    strength: 0.2,
-  },
-  noise: {
-    octaves: 4,
-    persistence: 0.5,
-    baseScale: 0.03,
-    ridgeOffset: 1.0,
-    initial: {
-      amplitude: 0.5,
-      frequency: 0.4,
-    },
-    frequencyMultiplier: 2.0,
-  },
-  cache: {
-    size: 4096,
-    resetThreshold: 0.9,
-  },
-};
-
-// Cache manager for noise calculations
-class NoiseCache {
-  private octaveScales: Float32Array;
-  private octaveAmplitudes: Float32Array;
-  private noiseValues: Float32Array;
-  private cacheKeys: Int32Array;
-
-  constructor(config: TerrainConfig) {
-    this.octaveScales = new Float32Array(config.noise.octaves);
-    this.octaveAmplitudes = new Float32Array(config.noise.octaves);
-    this.noiseValues = new Float32Array(config.cache.size);
-    this.cacheKeys = new Int32Array(config.cache.size * 3);
-
-    this.initializeOctaves(config);
-  }
-
-  private initializeOctaves(config: TerrainConfig): void {
-    let amplitude = config.noise.initial.amplitude;
-    let frequency = config.noise.initial.frequency;
-    let maxValue = 0;
-
-    for (let i = 0; i < config.noise.octaves; i++) {
-      this.octaveScales[i] = config.noise.baseScale * frequency;
-      this.octaveAmplitudes[i] = amplitude;
-      maxValue += amplitude;
-      amplitude *= config.noise.persistence;
-      frequency *= config.noise.frequencyMultiplier;
-    }
-
-    // Normalize amplitudes
-    const invMaxValue = 1 / maxValue;
-    for (let i = 0; i < config.noise.octaves; i++) {
-      this.octaveAmplitudes[i] *= invMaxValue;
-    }
-  }
-
-  getCacheKey(x: number, y: number, z: number): number {
-    return ((x * 73856093) ^ (y * 19349663) ^ (z * 83492791)) % TERRAIN_CONFIG.cache.size;
-  }
-
-  getValue(key: number): number {
-    return this.noiseValues[key];
-  }
-
-  setValue(key: number, x: number, y: number, z: number, value: number): void {
-    const keyIndex = key * 3;
-    this.cacheKeys[keyIndex] = x;
-    this.cacheKeys[keyIndex + 1] = y;
-    this.cacheKeys[keyIndex + 2] = z;
-    this.noiseValues[key] = value;
-  }
-
-  isValidCacheEntry(key: number, x: number, y: number, z: number): boolean {
-    const keyIndex = key * 3;
-    return this.cacheKeys[keyIndex] === x && this.cacheKeys[keyIndex + 1] === y && this.cacheKeys[keyIndex + 2] === z;
-  }
-
-  getOctaveData(index: number): { scale: number; amplitude: number } {
-    return {
-      scale: this.octaveScales[index],
-      amplitude: this.octaveAmplitudes[index],
-    };
-  }
-}
-
-// Main terrain generator class
 class TerrainGenerator {
-  private readonly seeds: {
-    simplex: number;
-    height: number;
-    variation: number;
-  };
-  private noiseGenerators: NoiseGenerators;
-  private cache: NoiseCache;
+  private readonly noise: SimplexNoise;
+  private readonly seed: number;
 
   constructor(seed: number) {
-    // Generate deterministic seeds for each noise generator
-    this.seeds = {
-      simplex: seed,
-      height: seed + 166,
-      variation: seed + 6662,
-    };
-
-    this.noiseGenerators = {
-      simplex: new SimplexNoise(new PseudoRandomNumberGenerator(this.seeds.simplex)),
-      height: new SimplexNoise(new PseudoRandomNumberGenerator(this.seeds.height)),
-      variation: new SimplexNoise(new PseudoRandomNumberGenerator(this.seeds.variation)),
-    };
-    this.cache = new NoiseCache(TERRAIN_CONFIG);
+    this.seed = seed;
+    this.noise = new SimplexNoise(new PseudoRandomNumberGenerator(seed));
   }
 
-  private clamp(value: number): number {
-    const { min, max } = TERRAIN_CONFIG.valueBounds;
-    return value < min ? min : value > max ? max : value;
-  }
+  generateTerrainNoise(worldX: number, worldY: number, worldZ: number): number {
+    // Add debug logging to verify coordinates
+    console.log(`Generating for world coords: ${worldX}, ${worldY}, ${worldZ}`);
 
-  private generateRidgedNoise(x: number, y: number, z: number): number {
-    const key = this.cache.getCacheKey(x, y, z);
+    // Ensure we're not losing precision or getting incorrect scaling
+    const x = worldX; // Remove any initial scaling
+    const y = worldY;
+    const z = worldZ;
 
-    if (this.cache.isValidCacheEntry(key, x, y, z)) {
-      return this.cache.getValue(key);
-    }
+    // Use the seed to create truly varying offsets per coordinate
+    const seedOffsetX = (this.seed * 16807) % 2147483647;
+    const seedOffsetY = (this.seed * 48271) % 2147483647;
+    const seedOffsetZ = (this.seed * 69621) % 2147483647;
 
-    let noiseValue = 0;
-    const { simplex } = this.noiseGenerators;
+    // Apply large prime offsets to break any potential patterns
+    const primeX = x + seedOffsetX * 0.001;
+    const primeY = y + seedOffsetY * 0.001;
+    const primeZ = z + seedOffsetZ * 0.001;
 
-    for (let i = 0; i < TERRAIN_CONFIG.noise.octaves; i++) {
-      const { scale, amplitude } = this.cache.getOctaveData(i);
-      const scaledX = x * scale;
-      const scaledY = y * scale;
-      const scaledZ = z * scale;
+    // Multiple layers of noise at different scales
+    let height = 0;
 
-      const baseNoise = Math.abs(simplex.noise3d(scaledX, scaledY, scaledZ));
-      const ridge = TERRAIN_CONFIG.noise.ridgeOffset - baseNoise;
-      noiseValue += ridge * ridge * amplitude;
-    }
+    // Large scale features
+    height += this.noise.noise3d(primeX * 0.01, primeY * 0.01, primeZ * 0.01) * 1.0;
+    height += this.noise.noise3d(primeX * 0.02 + 500, primeY * 0.02, primeZ * 0.02) * 0.5;
+    height += this.noise.noise3d(primeX * 0.04 + 1000, primeY * 0.04, primeZ * 0.04) * 0.25;
 
-    this.cache.setValue(key, x, y, z, noiseValue);
-    return noiseValue;
-  }
+    // Medium scale details
+    height += this.noise.noise3d(primeX * 0.08 + 1500, primeY * 0.08, primeZ * 0.08) * 0.125;
+    height += this.noise.noise3d(primeX * 0.16 + 2000, primeY * 0.16, primeZ * 0.16) * 0.0625;
 
-  generateTerrainNoise(x: number, y: number, z: number): number {
-    if (y < TERRAIN_CONFIG.ground.threshold) return TERRAIN_CONFIG.ground.value;
+    // Small scale details
+    height += this.noise.noise3d(primeX * 0.32 + 2500, primeY * 0.32, primeZ * 0.32) * 0.03125;
 
-    const normalizedY = y * 0.03125; // 1/32 multiplication
-    if (normalizedY > TERRAIN_CONFIG.air.threshold) return TERRAIN_CONFIG.air.value;
-
-    const heightFalloff = 1.0 - normalizedY * normalizedY * Math.sqrt(normalizedY);
-    if (heightFalloff <= 0) return TERRAIN_CONFIG.air.value;
-
-    const { height: heightNoise, variation: variationNoise } = this.noiseGenerators;
-
-    const baseNoise = this.generateRidgedNoise(x, y, z);
-    const xzScale = 0.002;
-    const heightVar = heightNoise.noise3d(x * xzScale, 0, z * xzScale) * 0.2 + 0.9;
-
-    const varScale = TERRAIN_CONFIG.noise.baseScale * TERRAIN_CONFIG.variation.scale;
-    const variation = variationNoise.noise3d(x * varScale, y * varScale, z * varScale) * TERRAIN_CONFIG.variation.strength;
-
-    return this.clamp((baseNoise + variation) * heightFalloff * heightVar);
-  }
-
-  generateClimate(x: number, z: number): { temperature: number; humidity: number } {
-    const { height, variation } = this.noiseGenerators;
-    const temperatureScale = 0.02;
-    const humidityScale = 0.015;
-
-    return {
-      temperature: (height.noise3d(x * temperatureScale, 0, z * temperatureScale) + 1) * 0.5,
-      humidity: (variation.noise3d(x * humidityScale, 0, z * humidityScale) + 1) * 0.5,
-    };
+    return Math.max(0.001, Math.min(0.999, 0.5 + height * 0.5));
   }
 }
 
-// Worker setup
+// In your worker message handler:
+
 const ctx: Worker = self as any;
 
 ctx.addEventListener("message", (e: MessageEvent<TerrainGenerateMessage>) => {
@@ -242,41 +60,27 @@ ctx.addEventListener("message", (e: MessageEvent<TerrainGenerateMessage>) => {
 
     const totalSize = gridSize + padding * 2;
 
-    // Use exact grid coordinates without any chunk size adjustments
-    const effectiveGridSize = gridSize - 2 * padding;
-    const baseX = chunkX * effectiveGridSize;
-    const baseZ = chunkZ * effectiveGridSize;
+    // Use large numbers to ensure we're getting unique coordinates per chunk
+    const chunkScale = gridSize;
+    const worldX = chunkX * chunkScale;
+    const worldZ = chunkZ * chunkScale;
 
-    // Generate terrain data
+    console.log(`Generating chunk at ${chunkX}, ${chunkZ}`);
+    console.log(`World coordinates start at ${worldX}, ${worldZ}`);
+
     const field = new Float32Array(totalSize * totalSize * totalSize);
-    const temperatures = new Float32Array(totalSize * totalSize);
-    const humidities = new Float32Array(totalSize * totalSize);
 
-    // Generate terrain using exact world coordinates
     for (let x = 0; x < totalSize; x++) {
       for (let y = 0; y < totalSize; y++) {
         for (let z = 0; z < totalSize; z++) {
-          const worldX = baseX + (x - padding);
-          const worldY = y - padding;
-          const worldZ = baseZ + (z - padding);
+          // Ensure global coordinates are truly unique per position
+          const globalX = worldX + (x - padding);
+          const globalY = y - padding;
+          const globalZ = worldZ + (z - padding);
+
           const index = (x * totalSize + y) * totalSize + z;
-          field[index] = generator.generateTerrainNoise(worldX, worldY, worldZ);
+          field[index] = generator.generateTerrainNoise(globalX, globalY, globalZ);
         }
-      }
-    }
-
-    // Generate climate using exact world coordinates
-
-    // Generate terrain data with correct world coordinates
-    for (let x = 0; x < totalSize; x++) {
-      for (let z = 0; z < totalSize; z++) {
-        const worldX = baseX + (x - padding);
-        const worldZ = baseZ + (z - padding);
-
-        const { temperature, humidity } = generator.generateClimate(worldX, worldZ);
-        const index = x * totalSize + z;
-        temperatures[index] = temperature;
-        humidities[index] = humidity;
       }
     }
 
@@ -286,10 +90,10 @@ ctx.addEventListener("message", (e: MessageEvent<TerrainGenerateMessage>) => {
         chunkX,
         chunkZ,
         field,
-        temperatures,
-        humidities,
+        temperatures: new Float32Array(totalSize * totalSize),
+        humidities: new Float32Array(totalSize * totalSize),
       },
-      [field.buffer, temperatures.buffer, humidities.buffer]
+      [field.buffer]
     );
   }
 });
