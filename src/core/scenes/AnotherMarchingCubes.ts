@@ -94,8 +94,6 @@ export class InfiniteLandscape {
     // Optimize renderer settings
     this.renderer = new THREE.WebGLRenderer({
       antialias: false,
-      powerPreference: "high-performance",
-      precision: "mediump",
     });
     this.renderer.setPixelRatio(1);
     this.renderer.setSize(window.innerWidth, window.innerHeight);
@@ -590,15 +588,24 @@ export class InfiniteLandscape {
   }
 
   private getCubeValues(field: Float32Array, totalSize: number, x: number, y: number, z: number): number[] {
+    // Ensure we're using the same precision for boundary calculations
+    const getIndex = (x: number, y: number, z: number) => {
+      // Clamp values to prevent out-of-bounds access
+      x = Math.min(Math.max(x, 0), totalSize - 1);
+      y = Math.min(Math.max(y, 0), totalSize - 1);
+      z = Math.min(Math.max(z, 0), totalSize - 1);
+      return (x * totalSize + y) * totalSize + z;
+    };
+
     return [
-      field[(x * totalSize + y) * totalSize + z],
-      field[((x + 1) * totalSize + y) * totalSize + z],
-      field[(x * totalSize + y) * totalSize + (z + 1)],
-      field[((x + 1) * totalSize + y) * totalSize + (z + 1)],
-      field[(x * totalSize + (y + 1)) * totalSize + z],
-      field[((x + 1) * totalSize + (y + 1)) * totalSize + z],
-      field[(x * totalSize + (y + 1)) * totalSize + (z + 1)],
-      field[((x + 1) * totalSize + (y + 1)) * totalSize + (z + 1)],
+      field[getIndex(x, y, z)],
+      field[getIndex(x + 1, y, z)],
+      field[getIndex(x, y, z + 1)],
+      field[getIndex(x + 1, y, z + 1)],
+      field[getIndex(x, y + 1, z)],
+      field[getIndex(x + 1, y + 1, z)],
+      field[getIndex(x, y + 1, z + 1)],
+      field[getIndex(x + 1, y + 1, z + 1)],
     ];
   }
 
@@ -703,21 +710,43 @@ export class InfiniteLandscape {
     const d1 = val1 - this.isoLevel;
     const d2 = val2 - this.isoLevel;
 
-    // If values are on opposite sides of the surface, use midpoint
+    // Snap vertices that are very close to grid points to the exact grid position
+    const snapToGrid = (v: number) => {
+      const gridSize = this.cubeSize;
+      const snapThreshold = 1e-4;
+      const remainder = v % gridSize;
+      if (Math.abs(remainder) < snapThreshold) {
+        return Math.round(v / gridSize) * gridSize;
+      }
+      if (Math.abs(remainder - gridSize) < snapThreshold) {
+        return Math.ceil(v / gridSize) * gridSize;
+      }
+      return v;
+    };
+
+    // If values are on opposite sides of the surface
     if (d1 * d2 < 0) {
-      // Calculate precise interpolation
       const t = d1 / (d1 - d2);
-      return new THREE.Vector3(v1.x + (v2.x - v1.x) * t, v1.y + (v2.y - v1.y) * t, v1.z + (v2.z - v1.z) * t);
+      const x = snapToGrid(v1.x + (v2.x - v1.x) * t);
+      const y = snapToGrid(v1.y + (v2.y - v1.y) * t);
+      const z = snapToGrid(v1.z + (v2.z - v1.z) * t);
+      return new THREE.Vector3(x, y, z);
     }
 
     // If both points are very close to surface
     if (Math.abs(d1) < INTERPOLATION_EPSILON || Math.abs(d2) < INTERPOLATION_EPSILON) {
-      return new THREE.Vector3().addVectors(v1, v2).multiplyScalar(0.5);
+      const midX = snapToGrid((v1.x + v2.x) * 0.5);
+      const midY = snapToGrid((v1.y + v2.y) * 0.5);
+      const midZ = snapToGrid((v1.z + v2.z) * 0.5);
+      return new THREE.Vector3(midX, midY, midZ);
     }
 
-    // Default to linear interpolation
+    // Default to linear interpolation with snapping
     const t = Math.max(0, Math.min(1, (this.isoLevel - val1) / (val2 - val1 + BIAS)));
-    return new THREE.Vector3(v1.x + (v2.x - v1.x) * t, v1.y + (v2.y - v1.y) * t, v1.z + (v2.z - v1.z) * t);
+    const x = snapToGrid(v1.x + (v2.x - v1.x) * t);
+    const y = snapToGrid(v1.y + (v2.y - v1.y) * t);
+    const z = snapToGrid(v1.z + (v2.z - v1.z) * t);
+    return new THREE.Vector3(x, y, z);
   }
 
   // More sophisticated triangle validation
