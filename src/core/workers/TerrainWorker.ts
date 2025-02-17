@@ -1,51 +1,66 @@
 import { SimplexNoise } from "three/examples/jsm/math/SimplexNoise";
 import { TerrainGenerateMessage } from "../types/terrain";
-import { PseudoRandomNumberGenerator } from "../utils/PseudoRandom";
+import { pseudoRandom } from "../utils/PseudoRandom";
+
+// Create a single shared noise instance for the worker
+let sharedNoise: SimplexNoise | null = null;
 
 class TerrainGenerator {
-  private readonly noise: SimplexNoise;
-  private readonly seed: number;
-
-  constructor(seed: number) {
-    this.seed = seed;
-    this.noise = new SimplexNoise(new PseudoRandomNumberGenerator(seed));
+  private gridSize: number;
+  constructor(seed: number, gridSize: number = 16) {
+    // Seed the pseudoRandom function
+    pseudoRandom.seed(seed);
+    this.gridSize = gridSize;
+    // Create shared noise instance if it doesn't exist
+    if (!sharedNoise) {
+      sharedNoise = new SimplexNoise(pseudoRandom);
+    }
   }
 
   generateTerrainNoise(worldX: number, worldY: number, worldZ: number): number {
-    // Add debug logging to verify coordinates
-    console.log(`Generating for world coords: ${worldX}, ${worldY}, ${worldZ}`);
-
-    // Ensure we're not losing precision or getting incorrect scaling
-    const x = worldX; // Remove any initial scaling
+    const x = worldX;
     const y = worldY;
     const z = worldZ;
 
-    // Use the seed to create truly varying offsets per coordinate
-    const seedOffsetX = (this.seed * 16807) % 2147483647;
-    const seedOffsetY = (this.seed * 48271) % 2147483647;
-    const seedOffsetZ = (this.seed * 69621) % 2147483647;
+    // Use smaller vertical scale for more natural-looking terrain
+    const verticalScale = 0.2;
+    const scaledY = y * verticalScale;
 
-    // Apply large prime offsets to break any potential patterns
-    const primeX = x + seedOffsetX * 0.001;
-    const primeY = y + seedOffsetY * 0.001;
-    const primeZ = z + seedOffsetZ * 0.001;
+    // Offset bases based on pseudoRandom but keep them smaller
+    const seedOffsetX = pseudoRandom.random() * 0.1;
+    const seedOffsetY = pseudoRandom.random() * 0.1;
+    const seedOffsetZ = pseudoRandom.random() * 0.1;
 
-    // Multiple layers of noise at different scales
-    let height = 0;
+    const primeX = x + seedOffsetX;
+    const primeY = scaledY + seedOffsetY;
+    const primeZ = z + seedOffsetZ;
 
-    // Large scale features
-    height += this.noise.noise3d(primeX * 0.01, primeY * 0.01, primeZ * 0.01) * 1.0;
-    height += this.noise.noise3d(primeX * 0.02 + 500, primeY * 0.02, primeZ * 0.02) * 0.5;
-    height += this.noise.noise3d(primeX * 0.04 + 1000, primeY * 0.04, primeZ * 0.04) * 0.25;
+    // Base continental features (large, gentle slopes)
+    let continent = sharedNoise!.noise3d(primeX * 0.02, 0, primeZ * 0.02) * 0.5;
 
-    // Medium scale details
-    height += this.noise.noise3d(primeX * 0.08 + 1500, primeY * 0.08, primeZ * 0.08) * 0.125;
-    height += this.noise.noise3d(primeX * 0.16 + 2000, primeY * 0.16, primeZ * 0.16) * 0.0625;
+    // Hills and valleys (medium features)
+    let hills = sharedNoise!.noise3d(primeX * 0.05, primeY * 0.05, primeZ * 0.05) * 0.25;
 
-    // Small scale details
-    height += this.noise.noise3d(primeX * 0.32 + 2500, primeY * 0.32, primeZ * 0.32) * 0.03125;
+    // Small details
+    let details = sharedNoise!.noise3d(primeX * 0.1, primeY * 0.1, primeZ * 0.1) * 0.125;
 
-    return Math.max(0.001, Math.min(0.999, 0.5 + height * 0.5));
+    // Combine all features
+    let height = continent + hills + details;
+
+    // Apply vertical gradient to fade out terrain at higher altitudes
+    const heightFalloff = Math.max(0, 1 - y / (this.gridSize * 0.75));
+    height *= heightFalloff;
+
+    // Normalize and bias the result to keep most terrain below the mid-point
+    height = 0.45 + height * 0.4;
+
+    // Add a height-based threshold to create flat areas at the bottom
+    const flatThreshold = 0.45;
+    if (height < flatThreshold) {
+      height = flatThreshold - (flatThreshold - height) * 0.1;
+    }
+
+    return Math.max(0.001, Math.min(0.999, height));
   }
 }
 
@@ -55,10 +70,10 @@ const ctx: Worker = self as any;
 
 ctx.addEventListener("message", (e: MessageEvent<TerrainGenerateMessage>) => {
   if (e.data.type === "generateTerrain") {
-    const { chunkX, chunkZ, gridSize, padding, seed } = e.data;
-    const generator = new TerrainGenerator(seed);
+    const { chunkX, chunkZ, gridSize, seed } = e.data;
+    const generator = new TerrainGenerator(seed, gridSize);
 
-    const totalSize = gridSize + padding * 2;
+    const totalSize = gridSize;
 
     // Use large numbers to ensure we're getting unique coordinates per chunk
     const chunkScale = gridSize;
@@ -74,9 +89,9 @@ ctx.addEventListener("message", (e: MessageEvent<TerrainGenerateMessage>) => {
       for (let y = 0; y < totalSize; y++) {
         for (let z = 0; z < totalSize; z++) {
           // Ensure global coordinates are truly unique per position
-          const globalX = worldX + (x - padding);
-          const globalY = y - padding;
-          const globalZ = worldZ + (z - padding);
+          const globalX = worldX + x;
+          const globalY = y;
+          const globalZ = worldZ + z;
 
           const index = (x * totalSize + y) * totalSize + z;
           field[index] = generator.generateTerrainNoise(globalX, globalY, globalZ);

@@ -32,7 +32,7 @@ export class InfiniteLandscape {
   private material: THREE.MeshStandardMaterial;
   private gridSize = 32; // Increased for better resolution
   private cubeSize = 1;
-  private isoLevel = 0.7; // Changed from 0.5 to get more visible terrain
+  private isoLevel = 0.5; // Changed from 0.5 to get more visible terrain
 
   private padding = 0; // New: explicit padding for field values
   private raycaster = new THREE.Raycaster();
@@ -159,7 +159,7 @@ export class InfiniteLandscape {
     }
 
     // Initialize worker pool with error handling
-    const workerCount = Math.max(2, navigator.hardwareConcurrency || 4);
+    const workerCount = 1; // Math.max(2, navigator.hardwareConcurrency || 4);
     for (let i = 0; i < workerCount; i++) {
       try {
         const worker = new Worker(new URL("../workers/TerrainWorker.ts", import.meta.url), { type: "module" });
