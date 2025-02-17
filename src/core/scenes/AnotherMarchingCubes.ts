@@ -15,7 +15,7 @@ const getChunkKey = (() => {
     return keyCache.get(key)!;
   };
 })();
-
+const WORKER_COUNT = 1; // Math.max(2, navigator.hardwareConcurrency || 4);
 // Add new types for chunk states
 type ChunkState = {
   status: "active" | "pending" | "removing";
@@ -159,8 +159,8 @@ export class InfiniteLandscape {
     }
 
     // Initialize worker pool with error handling
-    const workerCount = 1; //Math.max(2, navigator.hardwareConcurrency || 4);
-    for (let i = 0; i < workerCount; i++) {
+
+    for (let i = 0; i < WORKER_COUNT; i++) {
       try {
         const worker = new Worker(new URL("../workers/TerrainWorker.ts", import.meta.url), { type: "module" });
 

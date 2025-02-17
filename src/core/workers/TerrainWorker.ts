@@ -6,21 +6,12 @@ let sharedNoise: SimplexNoise | null = null;
 
 class TerrainGenerator {
   private gridSize: number;
-  private seed: number;
-  private padding: number;
 
-  constructor(seed: number, gridSize: number, padding: number) {
-    this.seed = seed;
+  constructor(seed: number, gridSize: number) {
     this.gridSize = gridSize;
-    this.padding = padding;
 
     if (!sharedNoise) {
-      const deterministicRandom = {
-        random: () => {
-          return PseudoRandomNumberGenerator.createWithPosition(this.seed, 0, 0, 0);
-        },
-      };
-      sharedNoise = new SimplexNoise(deterministicRandom);
+      sharedNoise = new SimplexNoise(new PseudoRandomNumberGenerator(seed));
     }
   }
 
@@ -99,7 +90,7 @@ const ctx: Worker = self as any;
 ctx.addEventListener("message", (e: MessageEvent<TerrainGenerateMessage>) => {
   if (e.data.type === "generateTerrain") {
     const { chunkX, chunkZ, gridSize, padding, seed } = e.data;
-    const generator = new TerrainGenerator(seed, gridSize, padding);
+    const generator = new TerrainGenerator(seed, gridSize);
 
     const totalSize = gridSize + padding * 2;
     const chunkScale = gridSize - padding * 2;
