@@ -11,9 +11,9 @@ export class PseudoRandomNumberGenerator {
 
   public static createWithPosition(baseSeed: number, x: number, y: number, z: number): number {
     // Convert floating point coordinates to integers to avoid precision issues
-    const ix = Math.floor(x);
-    const iy = Math.floor(y);
-    const iz = Math.floor(z);
+    const ix = Math.floor(x * 1000);
+    const iy = Math.floor(y * 1000);
+    const iz = Math.floor(z * 1000);
 
     // Use prime multipliers to give good distribution
     let hash = baseSeed;

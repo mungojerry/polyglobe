@@ -31,10 +31,10 @@ export class InfiniteLandscape {
   light: THREE.DirectionalLight;
   private material: THREE.MeshStandardMaterial;
   private gridSize = 32; // Increased for better resolution
+  private padding = 2; // Re-enable padding
   private cubeSize = 1;
   private isoLevel = 0.5; // Changed from 0.5 to get more visible terrain
 
-  private padding = 0; // New: explicit padding for field values
   private raycaster = new THREE.Raycaster();
 
   private chunkStates: Map<string, ChunkState> = new Map();
@@ -74,7 +74,7 @@ export class InfiniteLandscape {
   private readonly tempVectors: THREE.Vector3[] = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
 
   // Add a class property to hold the fixed seed.
-  private readonly seed: number = 3333;
+  private readonly seed: number = 333233;
 
   private effectiveGridSize: number; // Add this property
 
@@ -159,7 +159,7 @@ export class InfiniteLandscape {
     }
 
     // Initialize worker pool with error handling
-    const workerCount = 1; // Math.max(2, navigator.hardwareConcurrency || 4);
+    const workerCount = 1; //Math.max(2, navigator.hardwareConcurrency || 4);
     for (let i = 0; i < workerCount; i++) {
       try {
         const worker = new Worker(new URL("../workers/TerrainWorker.ts", import.meta.url), { type: "module" });
@@ -238,7 +238,7 @@ export class InfiniteLandscape {
       chunkX: item.chunkX,
       chunkZ: item.chunkZ,
       gridSize: this.gridSize,
-      padding: this.padding,
+      padding: this.padding, // Include padding in message
       seed: this.seed, // use the fixed seed property
     });
 
@@ -373,8 +373,8 @@ export class InfiniteLandscape {
     const geometry = this.geometryPool.pop() || new THREE.BufferGeometry();
     const mesh = this.meshPool.pop() || new THREE.Mesh(geometry, this.material);
 
-    // Position using effectiveGridSize
-    const effectiveSize = this.effectiveGridSize * this.cubeSize;
+    // Position using effectiveGridSize (account for padding)
+    const effectiveSize = (this.gridSize - this.padding * 2) * this.cubeSize;
     const position = new THREE.Vector3(chunkX * effectiveSize, 0, chunkZ * effectiveSize);
 
     try {
@@ -414,7 +414,7 @@ export class InfiniteLandscape {
 
   private createGridVisualizer(position: THREE.Vector3): THREE.LineSegments {
     // Update grid visualizer to use effectiveGridSize
-    const size = this.effectiveGridSize * this.cubeSize;
+    const size = (this.gridSize - this.padding * 2) * this.cubeSize;
     const geometry = new THREE.BoxGeometry(size, size, size);
     const edges = new THREE.EdgesGeometry(geometry);
     const material = new THREE.LineBasicMaterial({
