@@ -37,7 +37,7 @@ const TERRAIN_CONFIG = {
   // Island settings
   islandCount: 2, // Number of island centers
   islandSize: 5.4, // Size of the island (0-1)
-  islandFalloff: 2.5, // How sharp the transition from island to ocean is
+  islandFalloff: 4.5, // How sharp the transition from island to ocean is
   oceanLevel: 0.1, // Height below which is ocean
 };
 

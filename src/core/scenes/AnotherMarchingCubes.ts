@@ -306,7 +306,7 @@ export class InfiniteLandscape {
       // Add the chunk to the scene - IMPORTANT: This must happen before setting the state
       if (chunk.mesh) {
         // console.log(`Adding chunk mesh to scene at ${key}`, chunk.mesh.position); // Debug log
-        chunk.mesh.visible = true;
+
         chunk.mesh.castShadow = true;
         chunk.mesh.receiveShadow = true;
         this.scene.add(chunk.mesh);
@@ -654,6 +654,7 @@ export class InfiniteLandscape {
     // Force geometry update
     geometry.computeBoundingSphere();
     geometry.computeBoundingBox();
+    geometry.computeVertexNormals();
   }
 
   private getBiomeColor(temperature: number, humidity: number, height: number): THREE.Color {
