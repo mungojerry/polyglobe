@@ -36,7 +36,7 @@ export class InfiniteLandscape {
   controls: OrbitControls;
   light: THREE.DirectionalLight;
   private material: THREE.MeshStandardMaterial;
-  private gridSize = 32; // Increased for better resolution
+  private gridSize = 60; // Increased for better resolution
   private padding = 1; // Re-enable padding
   private cubeSize = 1;
   private isoLevel = 0.5; // Changed from 0.5 to get more visible terrain
@@ -262,13 +262,13 @@ export class InfiniteLandscape {
     const offsetX = -(width * this.gridSize) / 2;
     const offsetZ = -(height * this.gridSize) / 2;
 
-    console.log(`Creating ${width}x${height} grid with offsets ${offsetX}, ${offsetZ}`);
+    // console.log(`Creating ${width}x${height} grid with offsets ${offsetX}, ${offsetZ}`);
 
     for (let x = 0; x < width; x++) {
       for (let z = 0; z < height; z++) {
         const chunkX = x + offsetX / this.gridSize;
         const chunkZ = z + offsetZ / this.gridSize;
-        console.log(`Initializing chunk at ${chunkX}, ${chunkZ}`);
+        // console.log(`Initializing chunk at ${chunkX}, ${chunkZ}`);
         promises.push(this.initializeChunk(chunkX, chunkZ));
       }
     }
@@ -307,7 +307,7 @@ export class InfiniteLandscape {
 
       // Add the chunk to the scene - IMPORTANT: This must happen before setting the state
       if (chunk.mesh) {
-        console.log(`Adding chunk mesh to scene at ${key}`, chunk.mesh.position); // Debug log
+        // console.log(`Adding chunk mesh to scene at ${key}`, chunk.mesh.position); // Debug log
         chunk.mesh.visible = true;
         chunk.mesh.castShadow = true;
         chunk.mesh.receiveShadow = true;
@@ -371,7 +371,7 @@ export class InfiniteLandscape {
 
       this.generateChunkGeometry(geometry, field, temperatures, humidities, totalSize, position);
 
-      console.log(`Chunk ${chunkX},${chunkZ} vertex count: ${geometry.attributes.position?.count || 0}`);
+      // console.log(`Chunk ${chunkX},${chunkZ} vertex count: ${geometry.attributes.position?.count || 0}`);
 
       if (geometry.attributes.position?.count === 0) {
         console.warn(`Empty geometry generated at chunk ${chunkX},${chunkZ}`);
