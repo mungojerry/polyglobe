@@ -1,14 +1,8 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
-import { TerrainChunk, WorkerMessage, WorkerQueueItem } from "../types/terrain";
+import { Buffers, ChunkState, TerrainChunk, WorkerMessage, WorkerQueueItem } from "../types/terrain";
 import { CHUNK_POOL_SIZE } from "./constants";
 
-type Buffers = {
-  positions: Float32Array;
-  normals: Float32Array;
-  colors: Float32Array;
-  indices: Uint32Array;
-};
 // Cache chunk key strings
 const getChunkKey = (() => {
   const keyCache = new Map<string, string>();
@@ -21,12 +15,6 @@ const getChunkKey = (() => {
   };
 })();
 const WORKER_COUNT = Math.max(2, navigator.hardwareConcurrency || 4);
-// Add new types for chunk states
-type ChunkState = {
-  status: "active" | "pending" | "removing";
-  chunk?: TerrainChunk;
-  promise?: Promise<TerrainChunk>;
-};
 
 export class InfiniteLandscape {
   scene: THREE.Scene;
@@ -68,7 +56,7 @@ export class InfiniteLandscape {
   private readonly busyWorkers = new Set<Worker>();
 
   // Add a class property to hold the fixed seed.
-  private readonly seed: number = 321232133;
+  private readonly seed: number = 432453435;
 
   private effectiveGridSize: number; // Add this property
 

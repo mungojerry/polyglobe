@@ -49,3 +49,16 @@ export type TerrainGenerateMessage = {
   padding: number;
   seed: number;
 };
+
+export type ChunkState = {
+  status: "active" | "pending" | "removing";
+  chunk?: TerrainChunk;
+  promise?: Promise<TerrainChunk>;
+};
+
+export type Buffers = {
+  positions: Float32Array;
+  normals: Float32Array;
+  colors: Float32Array;
+  indices: Uint32Array;
+};
