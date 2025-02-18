@@ -131,7 +131,7 @@ export class InfiniteLandscape {
     this.material = new THREE.MeshStandardMaterial({
       vertexColors: true,
       side: THREE.DoubleSide,
-      flatShading: true,
+      flatShading: false,
       wireframe: false,
     });
 

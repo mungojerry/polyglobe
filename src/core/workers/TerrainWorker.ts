@@ -39,6 +39,11 @@ const TERRAIN_CONFIG = {
   islandSize: 5.4, // Size of the island (0-1)
   islandFalloff: 4.5, // How sharp the transition from island to ocean is
   oceanLevel: 0.1, // Height below which is ocean
+
+  // Thermal erosion settings
+  tallusAngle: 0.8, // Maximum stable slope angle (higher = steeper slopes allowed)
+  erosionRate: 0.3, // How much material moves per iteration
+  erosionPasses: 3, // Number of erosion passes
 };
 
 class TerrainGenerator {
@@ -194,6 +199,43 @@ class TerrainGenerator {
 
     return Math.min(Math.max(height, 0.001), 0.999);
   }
+
+  public thermalErode(heightmap: Float32Array, size: number): void {
+    const talus = TERRAIN_CONFIG.tallusAngle;
+    const rate = TERRAIN_CONFIG.erosionRate;
+
+    for (let pass = 0; pass < TERRAIN_CONFIG.erosionPasses; pass++) {
+      // Create a copy for reading while we modify the original
+      const tempMap = new Float32Array(heightmap);
+
+      for (let x = 1; x < size - 1; x++) {
+        for (let z = 1; z < size - 1; z++) {
+          const idx = x + z * size;
+          const height = tempMap[idx];
+
+          // Check all 4 neighbors
+          const neighbors = [
+            { dx: -1, dz: 0, height: tempMap[idx - 1] },
+            { dx: 1, dz: 0, height: tempMap[idx + 1] },
+            { dx: 0, dz: -1, height: tempMap[idx - size] },
+            { dx: 0, dz: 1, height: tempMap[idx + size] },
+          ];
+
+          // Calculate material movement
+          let totalDiff = 0;
+          for (const n of neighbors) {
+            const diff = height - n.height;
+            if (diff > talus) {
+              const amount = (diff - talus) * rate;
+              heightmap[idx] -= amount * 0.25;
+              heightmap[idx + n.dx + n.dz * size] += amount * 0.25;
+              totalDiff += amount;
+            }
+          }
+        }
+      }
+    }
+  }
 }
 
 // Worker context setup
@@ -227,6 +269,35 @@ ctx.addEventListener("message", (e: MessageEvent<TerrainGenerateMessage>) => {
       for (let y = 0; y < totalSize; y++) {
         for (let z = 0; z < totalSize; z++) {
           currentField![index++] = generator.generateTerrainNoise(globalX, y, worldZ + z);
+        }
+      }
+    }
+
+    // Convert 3D field to 2D heightmap
+    const heightmap = new Float32Array(totalSize * totalSize);
+    for (let x = 0; x < totalSize; x++) {
+      for (let z = 0; z < totalSize; z++) {
+        let maxHeight = 0;
+        for (let y = 0; y < totalSize; y++) {
+          const value = currentField![x + y * totalSize + z * totalSize * totalSize];
+          if (value > maxHeight) maxHeight = value;
+        }
+        heightmap[x + z * totalSize] = maxHeight;
+      }
+    }
+
+    // Apply thermal erosion
+    generator.thermalErode(heightmap, totalSize);
+
+    // Apply eroded heightmap back to 3D field
+    for (let x = 0; x < totalSize; x++) {
+      for (let z = 0; z < totalSize; z++) {
+        const erodedHeight = heightmap[x + z * totalSize];
+        for (let y = 0; y < totalSize; y++) {
+          const index = x + y * totalSize + z * totalSize * totalSize;
+          if (currentField![index] > 0) {
+            currentField![index] = Math.min(currentField![index], erodedHeight);
+          }
         }
       }
     }
