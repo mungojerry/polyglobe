@@ -42,8 +42,8 @@ const TERRAIN_CONFIG = {
 
   // Thermal erosion settings
   tallusAngle: 0.8, // Maximum stable slope angle (higher = steeper slopes allowed)
-  erosionRate: 0.3, // How much material moves per iteration
-  erosionPasses: 3, // Number of erosion passes
+  erosionRate: 0.5, // How much material moves per iteration
+  erosionPasses: 13, // Number of erosion passes
 };
 
 class TerrainGenerator {

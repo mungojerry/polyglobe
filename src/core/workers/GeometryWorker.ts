@@ -176,11 +176,6 @@ function generateChunkGeometry(data: GeometryWorkerInput): GeometryBuffers {
     const baseIndex = i * 9;
     const indexBase = i * 3;
 
-    // Calculate normal
-    const edge1 = tempVectors[0].subVectors(vertices[1], vertices[0]);
-    const edge2 = tempVectors[1].subVectors(vertices[2], vertices[0]);
-    const normal = tempVectors[2].crossVectors(edge1, edge2).normalize();
-
     vertices.forEach((vertex, j) => {
       const vIndex = baseIndex + j * 3;
 
@@ -188,12 +183,6 @@ function generateChunkGeometry(data: GeometryWorkerInput): GeometryBuffers {
       buffers.positions[vIndex] = vertex.x;
       buffers.positions[vIndex + 1] = vertex.y;
       buffers.positions[vIndex + 2] = vertex.z;
-
-      // Normal
-      buffers.normals[vIndex] = normal.x;
-      buffers.normals[vIndex + 1] = normal.y;
-      buffers.normals[vIndex + 2] = normal.z;
-
       // Color
       const color = getBiomeColor(0.5, 0.5, vertex.y, gridSize);
       buffers.colors[vIndex] = color.r;

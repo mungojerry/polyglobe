@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
 import { TerrainChunk, WorkerMessage, WorkerQueueItem } from "../types/terrain";
-import { CHUNK_POOL_SIZE, DEGENERATE_EPSILON, INTERPOLATION_EPSILON } from "./constants";
+import { CHUNK_POOL_SIZE } from "./constants";
 
 type Buffers = {
   positions: Float32Array;
@@ -66,7 +66,6 @@ export class InfiniteLandscape {
   // Add these new properties
   private readonly workerQueue: WorkerQueueItem[] = [];
   private readonly busyWorkers = new Set<Worker>();
-  private readonly tempVectors: THREE.Vector3[] = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
 
   // Add a class property to hold the fixed seed.
   private readonly seed: number = 321232133;
@@ -167,7 +166,6 @@ export class InfiniteLandscape {
     }
 
     // Initialize worker pool with error handling
-
     for (let i = 0; i < WORKER_COUNT; i++) {
       try {
         const worker = new Worker(new URL("../workers/TerrainWorker.ts", import.meta.url), { type: "module" });
@@ -383,7 +381,7 @@ export class InfiniteLandscape {
     try {
       const { field, temperatures, humidities, totalSize } = await this.createScalarField(chunkX, chunkZ);
 
-      await this.generateChunkGeometry(geometry, field, temperatures, humidities, totalSize, position);
+      await this.generateChunkGeometry(geometry, field, temperatures, humidities, totalSize);
 
       // console.log(`Chunk ${chunkX},${chunkZ} vertex count: ${geometry.attributes.position?.count || 0}`);
 
@@ -506,24 +504,12 @@ export class InfiniteLandscape {
     return { field, temperatures, humidities, totalSize };
   }
 
-  // Compute per-vertex colors
-  getColor(vertex: THREE.Vector3, chunk: TerrainChunk): THREE.Color {
-    const localX = Math.floor(vertex.x / this.cubeSize) + this.padding;
-    const localZ = Math.floor(vertex.z / this.cubeSize) + this.padding;
-    const index = localX * chunk.totalSize + localZ;
-
-    const temperature = chunk.temperatures[index];
-    const humidity = chunk.humidities[index];
-    return this.getBiomeColor(temperature, humidity, vertex.y);
-  }
-
   private async generateChunkGeometry(
     geometry: THREE.BufferGeometry,
     scalarField: Float32Array,
     temperatures: Float32Array,
     humidities: Float32Array,
-    totalSize: number,
-    chunkPosition: THREE.Vector3
+    totalSize: number
   ): Promise<void> {
     const worker = this.geometryWorkerPool.pop();
     if (!worker) {
@@ -531,7 +517,7 @@ export class InfiniteLandscape {
     }
 
     try {
-      const buffers = await new Promise<Buffers>((resolve, reject) => {
+      const buffers = await new Promise<Buffers>((resolve) => {
         const handleMessage = (e: MessageEvent<WorkerMessage>) => {
           if (e.data.type === "geometryGenerated") {
             worker.removeEventListener("message", handleMessage);
@@ -558,149 +544,15 @@ export class InfiniteLandscape {
 
       geometry.setIndex(new THREE.BufferAttribute(buffers.indices, 1));
       geometry.setAttribute("position", new THREE.BufferAttribute(buffers.positions, 3));
-      geometry.setAttribute("normal", new THREE.BufferAttribute(buffers.normals, 3));
+      // geometry.setAttribute("normal", new THREE.BufferAttribute(buffers.normals, 3));
       geometry.setAttribute("color", new THREE.BufferAttribute(buffers.colors, 3));
 
       geometry.computeBoundingSphere();
       geometry.computeBoundingBox();
+      geometry.computeVertexNormals();
     } finally {
       this.geometryWorkerPool.push(worker);
     }
-  }
-
-  private getBiomeColor(temperature: number, humidity: number, height: number): THREE.Color {
-    // Base color selection based on height first
-    let baseColor = new THREE.Color();
-
-    // Refined height-based coloring with better beach transitions
-    const heightNorm = Math.min(1, Math.max(0, height / this.gridSize));
-
-    if (heightNorm > 0.8) {
-      // Snow caps
-      baseColor = new THREE.Color(0xffffff);
-    } else if (heightNorm > 0.6) {
-      baseColor = new THREE.Color(0x666666);
-    } else if (heightNorm > 0.2) {
-      // Raised main terrain threshold to make room for beaches
-      // Main terrain coloring based on temperature and humidity
-      if (temperature > 0.6) {
-        if (humidity > 0.6) {
-          // Tropical forest
-          baseColor = new THREE.Color(0x2d5a27);
-        } else {
-          // Savanna
-          baseColor = new THREE.Color(0x90814d);
-        }
-      } else if (temperature > 0.3) {
-        if (humidity > 0.6) {
-          // Temperate forest
-          baseColor = new THREE.Color(0x1f4b1f);
-        } else {
-          // Grassland
-          baseColor = new THREE.Color(0x567d46);
-        }
-      } else {
-        if (humidity > 0.5) {
-          // Taiga
-          baseColor = new THREE.Color(0x2f4f2f);
-        } else {
-          // Tundra
-          baseColor = new THREE.Color(0x49594e);
-        }
-      }
-      baseColor = new THREE.Color(0x567d46);
-    } else {
-      // Smooth transition from beach to terrain
-      baseColor = new THREE.Color(0xe2c484);
-
-      // Add wet sand effect near water
-      if (heightNorm < 0.02) {
-        const wetSandColor = new THREE.Color(0xc2b280);
-        baseColor.lerp(wetSandColor, 1 - heightNorm / 0.02);
-      }
-    }
-
-    return baseColor;
-  }
-
-  private interpolateVertex(v1: THREE.Vector3, v2: THREE.Vector3, val1: number, val2: number): THREE.Vector3 {
-    const BIAS = 1e-10;
-    const d1 = val1 - this.isoLevel;
-    const d2 = val2 - this.isoLevel;
-
-    // Snap vertices that are very close to grid points to the exact grid position
-    const snapToGrid = (v: number) => {
-      const gridSize = this.cubeSize;
-      const snapThreshold = 1e-4;
-      const remainder = v % gridSize;
-      if (Math.abs(remainder) < snapThreshold) {
-        return Math.round(v / gridSize) * gridSize;
-      }
-      if (Math.abs(remainder - gridSize) < snapThreshold) {
-        return Math.ceil(v / gridSize) * gridSize;
-      }
-      return v;
-    };
-
-    // If values are on opposite sides of the surface
-    if (d1 * d2 < 0) {
-      const t = d1 / (d1 - d2);
-      const x = snapToGrid(v1.x + (v2.x - v1.x) * t);
-      const y = snapToGrid(v1.y + (v2.y - v1.y) * t);
-      const z = snapToGrid(v1.z + (v2.z - v1.z) * t);
-      return new THREE.Vector3(x, y, z);
-    }
-
-    // If both points are very close to surface
-    if (Math.abs(d1) < INTERPOLATION_EPSILON || Math.abs(d2) < INTERPOLATION_EPSILON) {
-      const midX = snapToGrid((v1.x + v2.x) * 0.5);
-      const midY = snapToGrid((v1.y + v2.y) * 0.5);
-      const midZ = snapToGrid((v1.z + v2.z) * 0.5);
-      return new THREE.Vector3(midX, midY, midZ);
-    }
-
-    // Default to linear interpolation with snapping
-    const t = Math.max(0, Math.min(1, (this.isoLevel - val1) / (val2 - val1 + BIAS)));
-    const x = snapToGrid(v1.x + (v2.x - v1.x) * t);
-    const y = snapToGrid(v1.y + (v2.y - v1.y) * t);
-    const z = snapToGrid(v1.z + (v2.z - v1.z) * t);
-    return new THREE.Vector3(x, y, z);
-  }
-
-  // More sophisticated triangle validation
-  private isValidTriangle(v1: THREE.Vector3, v2: THREE.Vector3, v3: THREE.Vector3): boolean {
-    // First check for NaN or infinite values
-    if ([v1, v2, v3].some((v) => !Number.isFinite(v.x) || !Number.isFinite(v.y) || !Number.isFinite(v.z))) {
-      return false;
-    }
-
-    // Calculate edges
-    const edge1 = new THREE.Vector3().subVectors(v2, v1);
-    const edge2 = new THREE.Vector3().subVectors(v3, v1);
-    const edge3 = new THREE.Vector3().subVectors(v3, v2);
-
-    // Check edge lengths (reject if any edge is too short)
-    if (edge1.lengthSq() < DEGENERATE_EPSILON || edge2.lengthSq() < DEGENERATE_EPSILON || edge3.lengthSq() < DEGENERATE_EPSILON) {
-      return false;
-    }
-
-    // Calculate triangle normal and area
-    const normal = new THREE.Vector3().crossVectors(edge1, edge2);
-    const areaSquared = normal.lengthSq() * 0.25;
-
-    // Check for degenerate triangle (too small area)
-    if (areaSquared < DEGENERATE_EPSILON) {
-      return false;
-    }
-
-    // Check for triangle that's too thin (compare area to perimeter)
-    const perimeter = edge1.length() + edge2.length() + edge3.length();
-    const perimeterSq = perimeter * perimeter;
-    if (areaSquared / perimeterSq < DEGENERATE_EPSILON) {
-      return false;
-    }
-
-    return true;
   }
 
   private setupEventListeners(): void {
@@ -785,7 +637,7 @@ export class InfiniteLandscape {
     }
 
     const newGeometry = new THREE.BufferGeometry();
-    this.generateChunkGeometry(newGeometry, chunk.scalarField, chunk.temperatures, chunk.humidities, chunk.totalSize, chunk.position);
+    this.generateChunkGeometry(newGeometry, chunk.scalarField, chunk.temperatures, chunk.humidities, chunk.totalSize);
     chunk.mesh.geometry.dispose();
     chunk.mesh.geometry = newGeometry;
   }
