@@ -280,7 +280,6 @@ export class InfiniteLandscape {
       for (let z = 0; z < height; z++) {
         const chunkX = x + offsetX / this.gridSize;
         const chunkZ = z + offsetZ / this.gridSize;
-        // console.log(`Initializing chunk at ${chunkX}, ${chunkZ}`);
         promises.push(this.initializeChunk(chunkX, chunkZ));
       }
     }
@@ -290,7 +289,6 @@ export class InfiniteLandscape {
 
   private async initializeChunk(chunkX: number, chunkZ: number): Promise<void> {
     const key = getChunkKey(chunkX, chunkZ);
-    // console.log(`Initializing chunk at ${key}`); // Debug log
 
     // Create promise for the new chunk
     const chunkPromise = this.createChunk(chunkX, chunkZ).catch((error) => {
