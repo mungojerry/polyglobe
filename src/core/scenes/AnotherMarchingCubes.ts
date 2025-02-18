@@ -1,8 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
 import { TerrainChunk, WorkerMessage, WorkerQueueItem } from "../types/terrain";
-import { edgeTable, triTable } from "./MCDefs";
-import { CHUNK_POOL_SIZE, CUBE_CORNER_OFFSETS, DEGENERATE_EPSILON, EDGE_TO_VERTEX, INTERPOLATION_EPSILON } from "./constants";
+import { CHUNK_POOL_SIZE, DEGENERATE_EPSILON, INTERPOLATION_EPSILON } from "./constants";
 
 type Buffers = {
   positions: Float32Array;
@@ -73,6 +72,10 @@ export class InfiniteLandscape {
   private readonly seed: number = 321232133;
 
   private effectiveGridSize: number; // Add this property
+
+  // Add new worker pool property
+  private readonly geometryWorkers: Worker[] = [];
+  private readonly geometryWorkerPool: Worker[] = [];
 
   // Modify the constructor to include error handling for worker creation
   constructor() {
@@ -150,6 +153,7 @@ export class InfiniteLandscape {
     this.scene.add(ground);
     this.setupEventListeners();
     this.initWorkerPool();
+    this.initGeometryWorkers();
 
     this.createStaticGrid(20, 20);
     this.animate();
@@ -186,6 +190,19 @@ export class InfiniteLandscape {
     // Ensure at least one worker was created
     if (this.workers.length === 0) {
       throw new Error("Failed to create any workers");
+    }
+  }
+
+  private initGeometryWorkers() {
+    for (let i = 0; i < WORKER_COUNT; i++) {
+      try {
+        const worker = new Worker(new URL("../workers/GeometryWorker.ts", import.meta.url), { type: "module" });
+        worker.onerror = (error) => console.error("Geometry worker error:", error);
+        this.geometryWorkers.push(worker);
+        this.geometryWorkerPool.push(worker);
+      } catch (error) {
+        console.error("Failed to create geometry worker:", error);
+      }
     }
   }
 
@@ -366,12 +383,12 @@ export class InfiniteLandscape {
     try {
       const { field, temperatures, humidities, totalSize } = await this.createScalarField(chunkX, chunkZ);
 
-      this.generateChunkGeometry(geometry, field, temperatures, humidities, totalSize, position);
+      await this.generateChunkGeometry(geometry, field, temperatures, humidities, totalSize, position);
 
       // console.log(`Chunk ${chunkX},${chunkZ} vertex count: ${geometry.attributes.position?.count || 0}`);
 
       if (geometry.attributes.position?.count === 0) {
-        console.warn(`Empty geometry generated at chunk ${chunkX},${chunkZ}`);
+        // console.warn(`Empty geometry generated at chunk ${chunkX},${chunkZ}`);
         return this.createPlaceholderChunk(position);
       }
       mesh.geometry = geometry;
@@ -500,161 +517,57 @@ export class InfiniteLandscape {
     return this.getBiomeColor(temperature, humidity, vertex.y);
   }
 
-  private generateChunkGeometry(
+  private async generateChunkGeometry(
     geometry: THREE.BufferGeometry,
     scalarField: Float32Array,
     temperatures: Float32Array,
     humidities: Float32Array,
     totalSize: number,
     chunkPosition: THREE.Vector3
-  ): void {
-    // Pre-calculate marching cubes result to get exact buffer sizes
-    const triangles: THREE.Vector3[][] = [];
+  ): Promise<void> {
+    const worker = this.geometryWorkerPool.pop();
+    if (!worker) {
+      throw new Error("No available geometry workers");
+    }
 
-    for (let x = 0; x < totalSize - 1; x++) {
-      for (let y = 0; y < totalSize - 1; y++) {
-        for (let z = 0; z < totalSize - 1; z++) {
-          const corners = this.getCubeCorners(x, y, z);
-          const values = this.getCubeValues(scalarField, totalSize, x, y, z);
-          const cubeIndex = this.getCubeIndex(values);
-
-          if (edgeTable[cubeIndex] === 0) continue;
-
-          const tableTris = triTable[cubeIndex];
-          if (!tableTris || tableTris.length === 0) continue;
-
-          // Process triangles for this cube
-          for (let i = 0; i < tableTris.length - 1; i += 3) {
-            const vertices = [];
-            let allValid = true;
-
-            for (let j = 0; j < 3; j++) {
-              const edgeIndex = tableTris[i + j];
-              const [v1Index, v2Index] = EDGE_TO_VERTEX[edgeIndex];
-              const vertex = this.interpolateVertex(corners[v1Index], corners[v2Index], values[v1Index], values[v2Index]);
-
-              if (!Number.isFinite(vertex.x) || !Number.isFinite(vertex.y) || !Number.isFinite(vertex.z)) {
-                allValid = false;
-                break;
-              }
-              vertices.push(vertex);
-            }
-
-            if (allValid && this.isValidTriangle(vertices[0], vertices[1], vertices[2])) {
-              triangles.push(vertices);
-            }
+    try {
+      const buffers = await new Promise<Buffers>((resolve, reject) => {
+        const handleMessage = (e: MessageEvent<WorkerMessage>) => {
+          if (e.data.type === "geometryGenerated") {
+            worker.removeEventListener("message", handleMessage);
+            resolve(e.data.buffers);
           }
-        }
-      }
+        };
+
+        worker.addEventListener("message", handleMessage);
+        worker.postMessage(
+          {
+            type: "generateGeometry",
+            scalarField,
+            temperatures,
+            humidities,
+            totalSize,
+            gridSize: this.gridSize,
+            cubeSize: this.cubeSize,
+            isoLevel: this.isoLevel,
+            padding: this.padding,
+          },
+          [scalarField.buffer, temperatures.buffer, humidities.buffer]
+        );
+      });
+
+      geometry.setIndex(new THREE.BufferAttribute(buffers.indices, 1));
+      geometry.setAttribute("position", new THREE.BufferAttribute(buffers.positions, 3));
+      geometry.setAttribute("normal", new THREE.BufferAttribute(buffers.normals, 3));
+      geometry.setAttribute("color", new THREE.BufferAttribute(buffers.colors, 3));
+
+      geometry.computeBoundingSphere();
+      geometry.computeBoundingBox();
+    } finally {
+      this.geometryWorkerPool.push(worker);
     }
-
-    // Create buffers with exact sizes
-    const vertexCount = triangles.length * 3;
-    const buffers = {
-      positions: new Float32Array(vertexCount * 3),
-      normals: new Float32Array(vertexCount * 3),
-      colors: new Float32Array(vertexCount * 3),
-      indices: new Uint32Array(vertexCount),
-    };
-
-    const chunk: TerrainChunk = {
-      mesh: new THREE.Mesh(),
-      debugMesh: new THREE.LineSegments(),
-      position: chunkPosition,
-      scalarField,
-      temperatures,
-      humidities,
-      totalSize,
-    };
-
-    // Fill buffers
-    let currentVertex = 0;
-    triangles.forEach((vertices) => {
-      currentVertex = this.addVertex(vertices[0], vertices[1], vertices[2], chunk, buffers, currentVertex);
-    });
-
-    this.createGeometry(geometry, buffers, currentVertex);
   }
 
-  private getCubeIndex(values: number[]): number {
-    let cubeIndex = 0;
-    for (let i = 0; i < 8; i++) {
-      if (values[i] < this.isoLevel) {
-        cubeIndex |= 1 << i;
-      }
-    }
-    return cubeIndex;
-  }
-
-  private getCubeValues(field: Float32Array, totalSize: number, x: number, y: number, z: number): number[] {
-    // Ensure we're using the same precision for boundary calculations
-    const getIndex = (x: number, y: number, z: number) => {
-      // Clamp values to prevent out-of-bounds access
-      x = Math.min(Math.max(x, 0), totalSize - 1);
-      y = Math.min(Math.max(y, 0), totalSize - 1);
-      z = Math.min(Math.max(z, 0), totalSize - 1);
-      return (x * totalSize + y) * totalSize + z;
-    };
-
-    return [
-      field[getIndex(x, y, z)],
-      field[getIndex(x + 1, y, z)],
-      field[getIndex(x, y, z + 1)],
-      field[getIndex(x + 1, y, z + 1)],
-      field[getIndex(x, y + 1, z)],
-      field[getIndex(x + 1, y + 1, z)],
-      field[getIndex(x, y + 1, z + 1)],
-      field[getIndex(x + 1, y + 1, z + 1)],
-    ];
-  }
-
-  private getCubeCorners(x: number, y: number, z: number): THREE.Vector3[] {
-    return CUBE_CORNER_OFFSETS.map(
-      (offset) => new THREE.Vector3((x + offset.x) * this.cubeSize, (y + offset.y) * this.cubeSize, (z + offset.z) * this.cubeSize)
-    );
-  }
-
-  private addVertex(v1: THREE.Vector3, v2: THREE.Vector3, v3: THREE.Vector3, chunk: TerrainChunk, buffers: Buffers, vertexIndex: number): number {
-    const edge1 = this.tempVectors[0].subVectors(v2, v1);
-    const edge2 = this.tempVectors[1].subVectors(v3, v1);
-    const normal = this.tempVectors[2].crossVectors(edge1, edge2).normalize();
-
-    const color = this.getColor(v1, chunk);
-
-    // Add vertices in a sequence
-    const vertices = [v1, v2, v3];
-    vertices.forEach((v, i) => {
-      const vIndex = (vertexIndex + i) * 3;
-      buffers.positions[vIndex] = v.x;
-      buffers.positions[vIndex + 1] = v.y;
-      buffers.positions[vIndex + 2] = v.z;
-
-      buffers.normals[vIndex] = normal.x;
-      buffers.normals[vIndex + 1] = normal.y;
-      buffers.normals[vIndex + 2] = normal.z;
-
-      buffers.colors[vIndex] = color.r;
-      buffers.colors[vIndex + 1] = color.g;
-      buffers.colors[vIndex + 2] = color.b;
-
-      // Add indices
-      buffers.indices[vertexIndex + i] = vertexIndex + i;
-    });
-
-    return vertexIndex + 3;
-  }
-
-  private createGeometry(geometry: THREE.BufferGeometry, buffers: Buffers, vertexCount: number): void {
-    geometry.setIndex(new THREE.BufferAttribute(buffers.indices.subarray(0, vertexCount), 1));
-    geometry.setAttribute("position", new THREE.BufferAttribute(buffers.positions.subarray(0, vertexCount * 3), 3));
-    geometry.setAttribute("normal", new THREE.BufferAttribute(buffers.normals.subarray(0, vertexCount * 3), 3));
-    geometry.setAttribute("color", new THREE.BufferAttribute(buffers.colors.subarray(0, vertexCount * 3), 3));
-
-    // Force geometry update
-    geometry.computeBoundingSphere();
-    geometry.computeBoundingBox();
-    geometry.computeVertexNormals();
-  }
   private getBiomeColor(temperature: number, humidity: number, height: number): THREE.Color {
     // Base color selection based on height first
     let baseColor = new THREE.Color();
@@ -910,5 +823,12 @@ export class InfiniteLandscape {
     this.workers.length = 0;
     this.workerPool.length = 0;
     this.busyWorkers.clear();
+
+    // Terminate geometry workers
+    this.geometryWorkers.forEach((worker) => {
+      worker.terminate();
+    });
+    this.geometryWorkers.length = 0;
+    this.geometryWorkerPool.length = 0;
   }
 }
