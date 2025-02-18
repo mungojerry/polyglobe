@@ -665,6 +665,8 @@ export class InfiniteLandscape {
     if (heightNorm > 0.8) {
       // Snow caps
       baseColor = new THREE.Color(0xffffff);
+    } else if (heightNorm > 0.6) {
+      baseColor = new THREE.Color(0x666666);
     } else if (heightNorm > 0.2) {
       // Raised main terrain threshold to make room for beaches
       // Main terrain coloring based on temperature and humidity
@@ -695,18 +697,8 @@ export class InfiniteLandscape {
       }
       baseColor = new THREE.Color(0x567d46);
     } else {
-      // Beach zone - gradual transition from sand to terrain
-      const beachTransition = heightNorm / 0.05; // 0 to 1 within beach zone
-      const sandColor = new THREE.Color(0xe2c484); // Beach sand color
-
-      // Get the terrain color that we'll transition to
-      // const terrainColor =
-      //   temperature > 0.6
-      //     ? new THREE.Color(0x90814d) // Hot climate terrain
-      //     : new THREE.Color(0x567d46); // Moderate climate terrain
-
       // Smooth transition from beach to terrain
-      baseColor = sandColor; //sandColor.lerp(terrainColor, beachTransition);
+      baseColor = new THREE.Color(0xe2c484);
 
       // Add wet sand effect near water
       if (heightNorm < 0.02) {
@@ -714,35 +706,6 @@ export class InfiniteLandscape {
         baseColor.lerp(wetSandColor, 1 - heightNorm / 0.02);
       }
     }
-
-    // Add subtle variations based on exact height
-    // const variationFactor = Math.sin(height * 5) * 0.05 + 1;
-    // baseColor.multiplyScalar(variationFactor);
-
-    // // Reduced valley darkening to maintain beach visibility
-    // const valleyDarkening = Math.min(1, Math.max(0.7, 0.8 + 0.2 * heightNorm));
-    // baseColor.multiplyScalar(valleyDarkening);
-
-    // // Temperature and humidity influences
-    // if (heightNorm > 0.05) {
-    //   // Only apply to non-beach areas
-    //   if (temperature > 0.7) {
-    //     baseColor.lerp(new THREE.Color(0x8b4513), 0.1);
-    //   } else if (temperature < 0.3) {
-    //     baseColor.lerp(new THREE.Color(0x4f666a), 0.1);
-    //   }
-
-    //   if (humidity > 0.7) {
-    //     baseColor.multiplyScalar(0.85);
-    //   } else if (humidity < 0.3) {
-    //     baseColor.lerp(new THREE.Color(0xc2b280), 0.2);
-    //   }
-    // }
-
-    // Ensure color components stay in valid range
-    // baseColor.r = Math.min(1, Math.max(0.01, baseColor.r));
-    // baseColor.g = Math.min(1, Math.max(0.01, baseColor.g));
-    // baseColor.b = Math.min(1, Math.max(0.01, baseColor.b));
 
     return baseColor;
   }
