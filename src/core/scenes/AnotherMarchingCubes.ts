@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
 import { TerrainChunk, WorkerMessage, WorkerQueueItem } from "../types/terrain";
 import { edgeTable, triTable } from "./MCDefs";
-import { BIOMES, CHUNK_POOL_SIZE, CUBE_CORNER_OFFSETS, DEGENERATE_EPSILON, EDGE_TO_VERTEX, INTERPOLATION_EPSILON } from "./constants";
+import { CHUNK_POOL_SIZE, CUBE_CORNER_OFFSETS, DEGENERATE_EPSILON, EDGE_TO_VERTEX, INTERPOLATION_EPSILON } from "./constants";
 
 type Buffers = {
   positions: Float32Array;
@@ -38,7 +38,7 @@ export class InfiniteLandscape {
   private material: THREE.MeshStandardMaterial;
   private gridSize = 60; // Increased for better resolution
   private padding = 1; // Re-enable padding
-  private cubeSize = 1;
+  private cubeSize = 2;
   private isoLevel = 0.5; // Changed from 0.5 to get more visible terrain
   public showDebug = false;
   private raycaster = new THREE.Raycaster();
@@ -130,7 +130,6 @@ export class InfiniteLandscape {
       side: THREE.DoubleSide,
       flatShading: true,
       wireframe: false,
-      color: 0x00ff00, // Changed to bright green for visibility
     });
 
     // Move ground plane lower to not obscure chunks
@@ -656,54 +655,96 @@ export class InfiniteLandscape {
     geometry.computeBoundingBox();
     geometry.computeVertexNormals();
   }
-
   private getBiomeColor(temperature: number, humidity: number, height: number): THREE.Color {
-    // Calculate biome influence factors for smoother transitions
-    let totalWeight = 0;
-    const biomeWeights = BIOMES.map((b) => {
-      const tCenter = (b.temperatureRange[0] + b.temperatureRange[1]) / 2;
-      const hCenter = (b.humidityRange[0] + b.humidityRange[1]) / 2;
+    // Base color selection based on height first
+    let baseColor = new THREE.Color();
 
-      // Calculate distance from current point to biome center
-      const tDist = 1 - Math.min(1, Math.abs(temperature - tCenter) / 0.3);
-      const hDist = 1 - Math.min(1, Math.abs(humidity - hCenter) / 0.3);
+    // Refined height-based coloring with better beach transitions
+    const heightNorm = Math.min(1, Math.max(0, height / this.gridSize));
 
-      // Combined weight with smooth falloff
-      const weight = Math.max(0.0001, Math.pow(tDist * hDist, 2)); // Ensure weight is never zero
-      totalWeight += weight;
-      return { biome: b, weight };
-    });
+    if (heightNorm > 0.8) {
+      // Snow caps
+      baseColor = new THREE.Color(0xffffff);
+    } else if (heightNorm > 0.2) {
+      // Raised main terrain threshold to make room for beaches
+      // Main terrain coloring based on temperature and humidity
+      if (temperature > 0.6) {
+        if (humidity > 0.6) {
+          // Tropical forest
+          baseColor = new THREE.Color(0x2d5a27);
+        } else {
+          // Savanna
+          baseColor = new THREE.Color(0x90814d);
+        }
+      } else if (temperature > 0.3) {
+        if (humidity > 0.6) {
+          // Temperate forest
+          baseColor = new THREE.Color(0x1f4b1f);
+        } else {
+          // Grassland
+          baseColor = new THREE.Color(0x567d46);
+        }
+      } else {
+        if (humidity > 0.5) {
+          // Taiga
+          baseColor = new THREE.Color(0x2f4f2f);
+        } else {
+          // Tundra
+          baseColor = new THREE.Color(0x49594e);
+        }
+      }
+      baseColor = new THREE.Color(0x567d46);
+    } else {
+      // Beach zone - gradual transition from sand to terrain
+      const beachTransition = heightNorm / 0.05; // 0 to 1 within beach zone
+      const sandColor = new THREE.Color(0xe2c484); // Beach sand color
 
-    // Blend colors based on weights
-    const blendedColor = new THREE.Color(0, 0, 0);
-    biomeWeights.forEach(({ biome: b, weight }) => {
-      const normalizedWeight = weight / totalWeight;
-      const biomeColor = b.color.clone();
-      blendedColor.add(biomeColor.multiplyScalar(normalizedWeight));
-    });
+      // Get the terrain color that we'll transition to
+      // const terrainColor =
+      //   temperature > 0.6
+      //     ? new THREE.Color(0x90814d) // Hot climate terrain
+      //     : new THREE.Color(0x567d46); // Moderate climate terrain
 
-    // Apply height-based shading and variations
-    const heightFactor = Math.min(1, Math.max(0, height / 32)); // Clamp height factor between 0 and 1
+      // Smooth transition from beach to terrain
+      baseColor = sandColor; //sandColor.lerp(terrainColor, beachTransition);
 
-    // Add slight color variations based on height
-    if (heightFactor > 0.7) {
-      // Mountain peaks
-      blendedColor.lerp(new THREE.Color(0xc0c0c0), Math.min(1, (heightFactor - 0.7) / 0.3));
-    } else if (heightFactor < 0.2) {
-      // Lower areas
-      blendedColor.lerp(new THREE.Color(0x385321), Math.min(1, 0.3 * (1 - heightFactor / 0.2)));
+      // Add wet sand effect near water
+      if (heightNorm < 0.02) {
+        const wetSandColor = new THREE.Color(0xc2b280);
+        baseColor.lerp(wetSandColor, 1 - heightNorm / 0.02);
+      }
     }
 
-    // Apply ambient occlusion effect for valleys with clamping
-    const valleyDarkening = Math.min(1, Math.max(0.3, 0.7 + 0.3 * heightFactor));
-    blendedColor.multiplyScalar(valleyDarkening);
+    // Add subtle variations based on exact height
+    // const variationFactor = Math.sin(height * 5) * 0.05 + 1;
+    // baseColor.multiplyScalar(variationFactor);
+
+    // // Reduced valley darkening to maintain beach visibility
+    // const valleyDarkening = Math.min(1, Math.max(0.7, 0.8 + 0.2 * heightNorm));
+    // baseColor.multiplyScalar(valleyDarkening);
+
+    // // Temperature and humidity influences
+    // if (heightNorm > 0.05) {
+    //   // Only apply to non-beach areas
+    //   if (temperature > 0.7) {
+    //     baseColor.lerp(new THREE.Color(0x8b4513), 0.1);
+    //   } else if (temperature < 0.3) {
+    //     baseColor.lerp(new THREE.Color(0x4f666a), 0.1);
+    //   }
+
+    //   if (humidity > 0.7) {
+    //     baseColor.multiplyScalar(0.85);
+    //   } else if (humidity < 0.3) {
+    //     baseColor.lerp(new THREE.Color(0xc2b280), 0.2);
+    //   }
+    // }
 
     // Ensure color components stay in valid range
-    blendedColor.r = Math.min(1, Math.max(0.01, blendedColor.r));
-    blendedColor.g = Math.min(1, Math.max(0.01, blendedColor.g));
-    blendedColor.b = Math.min(1, Math.max(0.01, blendedColor.b));
+    // baseColor.r = Math.min(1, Math.max(0.01, baseColor.r));
+    // baseColor.g = Math.min(1, Math.max(0.01, baseColor.g));
+    // baseColor.b = Math.min(1, Math.max(0.01, baseColor.b));
 
-    return blendedColor;
+    return baseColor;
   }
 
   private interpolateVertex(v1: THREE.Vector3, v2: THREE.Vector3, val1: number, val2: number): THREE.Vector3 {

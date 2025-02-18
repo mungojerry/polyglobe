@@ -4,7 +4,8 @@ import "./style.css";
 console.log("starting...");
 // Create a test scene
 // new FBXViewerScene();
-// new HelicopterScene();
+// new ZarchGameSpherical();
+// new ProceduralTerrainGPU();
 // new GameScene();
 // new LowPolyPlanet();
 // new CartoonPlanetGenerator();
@@ -16,4 +17,5 @@ console.log("starting...");
 // new ProceduralTerrain();
 new InfiniteLandscape();
 // new ProceduralTerrainRedux();
+// new ZarchGame();
 console.log("should be running");
